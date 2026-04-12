@@ -62,6 +62,37 @@ struct CompanionConnectionTests {
 
     // MARK: - Round-trip via frame injection
 
+    @Test("Encrypted E_OPACK frames authenticate the on-wire ciphertext-length header")
+    func encryptedFrameUsesCiphertextLengthHeaderAsAAD() throws {
+        let key = Data(repeating: 0x11, count: 32)
+        let plaintext = Data([0x01, 0x02, 0x03])
+
+        let sender = ChaCha20Cipher(encryptKey: key, decryptKey: key)
+        let frame = try CompanionConnection.encodeFrame(
+            type: .eOPACK,
+            payload: plaintext,
+            cipher: sender
+        )
+
+        let header = Data(frame.prefix(4))
+        let encryptedPayload = Data(frame.dropFirst(4))
+
+        // 3 plaintext bytes + 16-byte Poly1305 tag = 19 bytes on the wire.
+        #expect(header == Data([CompanionFrameType.eOPACK.rawValue, 0x00, 0x00, 0x13]))
+        #expect(encryptedPayload.count == plaintext.count + 16)
+
+        let stalePlaintextLengthHeader = Data([
+            CompanionFrameType.eOPACK.rawValue, 0x00, 0x00, UInt8(plaintext.count),
+        ])
+        let staleAADReceiver = ChaCha20Cipher(encryptKey: key, decryptKey: key)
+        #expect(throws: ATVError.self) {
+            _ = try staleAADReceiver.decrypt(encryptedPayload, aad: stalePlaintextLengthHeader)
+        }
+
+        let receiver = ChaCha20Cipher(encryptKey: key, decryptKey: key)
+        #expect(try receiver.decrypt(encryptedPayload, aad: header) == plaintext)
+    }
+
     /// Build a well-formed Companion frame header + payload buffer.
     /// Wire format: `[type:1][len24-hi][len24-mid][len24-lo][payload...]`.
     private func encodeFrame(type: CompanionFrameType, payload: Data) -> Data {

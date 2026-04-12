@@ -92,6 +92,47 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertTrue(decoded.deviceInfoMessage.supportsSystemPairing)
     }
 
+    func testSetVolumeNormalizesPercentToProtocolRange() {
+        let message = MRPMessages.setVolume(55, deviceID: "speaker-1")
+
+        XCTAssertEqual(message.type, .setVolumeMessage)
+        XCTAssertEqual(message.setVolumeMessage.outputDeviceUid, "speaker-1")
+        XCTAssertEqual(message.setVolumeMessage.volume, 0.55, accuracy: 0.0001)
+    }
+
+    func testSetVolumeClampsPercentRange() {
+        XCTAssertEqual(MRPMessages.setVolume(-10, deviceID: nil).setVolumeMessage.volume, 0)
+        XCTAssertEqual(MRPMessages.setVolume(125, deviceID: nil).setVolumeMessage.volume, 1)
+    }
+
+    func testValidateCommandResultThrowsOnSendError() {
+        var result = SendCommandResultMessage()
+        result.sendError = .notSupported
+
+        XCTAssertThrowsError(
+            try MRPProtocolHandler.validateCommandResult(result, command: .play)
+        ) { error in
+            guard case ATVError.protocolError = error else {
+                XCTFail("Expected protocolError, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testValidateCommandResultThrowsOnHandlerFailure() {
+        var result = SendCommandResultMessage()
+        result.handlerReturnStatus = .commandFailed
+
+        XCTAssertThrowsError(
+            try MRPProtocolHandler.validateCommandResult(result, command: .pause)
+        ) { error in
+            guard case ATVError.protocolError = error else {
+                XCTFail("Expected protocolError, got \(error)")
+                return
+            }
+        }
+    }
+
     func testSetStateUpdatesPlayingMetadataAndSupportedCommands() async {
         let state = MRPPlayerState()
 

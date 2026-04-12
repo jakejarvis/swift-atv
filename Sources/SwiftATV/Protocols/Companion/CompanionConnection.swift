@@ -78,6 +78,7 @@ private final class PendingFrameWaiter: @unchecked Sendable {
 /// and must synchronize with async callers.
 public final class CompanionConnection: @unchecked Sendable {
     private static let headerLength = 4
+    private static let authTagLength = 16
 
     private let host: String
     private let port: Int
@@ -206,24 +207,11 @@ public final class CompanionConnection: @unchecked Sendable {
             currentCipher = cph
         }
 
-        var header = Data(count: Self.headerLength)
-        header[0] = type.rawValue
-        let length = UInt32(payload.count)
-        header[1] = UInt8((length >> 16) & 0xFF)
-        header[2] = UInt8((length >> 8) & 0xFF)
-        header[3] = UInt8(length & 0xFF)
-
-        var frameData: Data
-        if let currentCipher, !payload.isEmpty {
-            let encrypted = try currentCipher.encrypt(payload, aad: header)
-            let encLen = UInt32(encrypted.count)
-            header[1] = UInt8((encLen >> 16) & 0xFF)
-            header[2] = UInt8((encLen >> 8) & 0xFF)
-            header[3] = UInt8(encLen & 0xFF)
-            frameData = header + encrypted
-        } else {
-            frameData = header + payload
-        }
+        let frameData = try Self.encodeFrame(
+            type: type,
+            payload: payload,
+            cipher: currentCipher
+        )
 
         var buffer = channel.allocator.buffer(capacity: frameData.count)
         buffer.writeBytes(frameData)
@@ -242,6 +230,39 @@ public final class CompanionConnection: @unchecked Sendable {
             }
             throw ATVError.wrap(error)
         }
+    }
+
+    /// Encode a Companion frame using the `[type][24-bit length][payload]`
+    /// wire format.
+    ///
+    /// When encryption is enabled, the frame header must contain the
+    /// ciphertext length (`plaintext + 16-byte Poly1305 tag`) before it is
+    /// passed as ChaCha20-Poly1305 AAD. The receiver authenticates the
+    /// on-wire header, so authenticating a plaintext-length header and then
+    /// sending a ciphertext-length header makes every encrypted frame fail.
+    internal static func encodeFrame(
+        type: CompanionFrameType,
+        payload: Data,
+        cipher: ChaCha20Cipher?
+    ) throws(ATVError) -> Data {
+        let wireLength = payload.count + ((cipher != nil && !payload.isEmpty) ? authTagLength : 0)
+        guard wireLength <= 0xFF_FF_FF else {
+            throw ATVError.invalidData("Companion frame payload exceeds 24-bit length field")
+        }
+
+        var header = Data(count: headerLength)
+        header[0] = type.rawValue
+        header[1] = UInt8((wireLength >> 16) & 0xFF)
+        header[2] = UInt8((wireLength >> 8) & 0xFF)
+        header[3] = UInt8(wireLength & 0xFF)
+
+        let wirePayload: Data
+        if let cipher, !payload.isEmpty {
+            wirePayload = try cipher.encrypt(payload, aad: header)
+        } else {
+            wirePayload = payload
+        }
+        return header + wirePayload
     }
 
     /// Send a frame and wait for the expected response frame.
@@ -585,8 +606,8 @@ public final class CompanionConnection: @unchecked Sendable {
                 do {
                     payload = try currentCipher.decrypt(payload, aad: header)
                 } catch {
-                    lock.lock()
-                    continue
+                    handleConnectionClosed(error: error)
+                    return
                 }
                 lock.lock()
             }

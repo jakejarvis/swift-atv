@@ -228,10 +228,14 @@ public actor CompanionProtocolHandler {
         _ identifier: String,
         content: OPACK.Value = .dict([])
     ) async throws(ATVError) {
+        xid += 1
+        let currentXID = xid
+
         let message = OPACK.Value.dict([
             (.string("_i"), .string(identifier)),
             (.string("_t"), .uint(UInt64(CompanionMessageType.event.rawValue))),
             (.string("_c"), content),
+            (.string("_x"), .uint(UInt64(currentXID))),
         ])
 
         let data = OPACK.encode(message)
@@ -288,7 +292,7 @@ public actor CompanionProtocolHandler {
         let content = OPACK.Value.dictionary([
             ("_regEvents", .array(events.map { .string($0) }))
         ])
-        _ = try await sendRequest("_interest", content: content)
+        try await sendEvent("_interest", content: content)
     }
 
     /// Initialize touchpad.
@@ -306,7 +310,7 @@ public actor CompanionProtocolHandler {
         let content = OPACK.Value.dictionary([
             ("_i", .uint(1))
         ])
-        try await sendEvent("_touchStop", content: content)
+        _ = try await sendRequest("_touchStop", content: content)
     }
 
     // MARK: - Frame Handling

@@ -15,6 +15,32 @@ Initial pre-release. API is unstable and will change before 1.0.
 
 ### Fixed during the 0.1.0 development cycle (pre-tag)
 
+- **Companion encrypted E_OPACK frames now authenticate the correct
+  header.** The 3-byte frame length in the ChaCha20-Poly1305 AAD must
+  be the on-wire ciphertext length (`plaintext + 16-byte tag`), not the
+  plaintext length. The old ordering meant every encrypted request after
+  pair-verify was authenticated against a different header than the one
+  sent to the Apple TV.
+- **Companion control messages now match pyatv's request/event split.**
+  `_hidC` button presses and `_touchStop` are sent as request/response
+  messages with XIDs, `_interest` subscriptions are sent as events, and
+  all OPACK events now include an XID. Touch clicks now emit the select
+  down/up requests plus the `_hidT` click event used by pyatv.
+- **Companion discovery now parses the `rpfl` / `rpFl` pairing flags.**
+  The scanner uses pyatv's Companion masks (`0x04` disabled,
+  `0x4000` PIN pairing supported) instead of looking for a non-existent
+  generic `flags` field.
+- **MRP command failures are no longer swallowed.** Direct-MRP remote
+  commands now inspect `SendCommandResultMessage.sendError`,
+  `handlerReturnStatus`, and nested command-result errors, surfacing a
+  `.protocolError` instead of returning success for rejected commands.
+- **MRP HID holds now release the button.** Hold actions send a down
+  event, wait one second, and then send the matching up event, matching
+  pyatv's `_send_hid_key` behavior.
+- **Audio volume uses percent at the public API boundary.** Companion
+  and MRP now translate `0...100` API values to each protocol's native
+  normalized `0...1` wire value, and MRP incoming volume updates are
+  exposed as percentages.
 - **Pair-verify is now actually functional.** Three bugs in
   `CompanionPairVerifyHandler.verify()` together meant it had never
   worked against a real Apple TV:
@@ -187,9 +213,11 @@ Supporting changes that landed with the fixes above:
 - DocC catalog (`Sources/SwiftATV/SwiftATV.docc/`) with a landing page and
   Getting Started article.
 - `.spi.yml` for Swift Package Index hosting.
-- Test suite: 217 XCTest cases ported from pyatv (codecs, crypto,
+- Test suite: 223 XCTest cases covering pyatv ports and SwiftATV-specific
+  integration logic (codecs, crypto,
   configuration, relayer, settings, interfaces, device info, Companion
-  feature availability, MRP framing/message/player-state behavior) plus 43
+  feature availability, MRP framing/message/player-state behavior, scanner
+  pairing flags, MRP volume/command-result behavior) plus 44
   Swift Testing cases covering SRP-6a, HAP pair-setup,
   `Playing.description`, Companion auth envelopes, and Companion connection
   race handling.

@@ -125,7 +125,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         let companion = CompanionService(
             host: configuration.address,
             port: service.port,
-            credentials: credentials
+            credentials: credentials,
+            settings: _settings
         )
         try await companion.setup()
         lock.withLock {

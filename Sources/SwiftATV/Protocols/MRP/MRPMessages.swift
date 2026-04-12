@@ -153,7 +153,7 @@ enum MRPMessages {
 
     static func setVolume(_ volume: Float, deviceID: String?) -> ProtocolMessageMessage {
         var inner = SetVolumeMessage()
-        inner.volume = volume
+        inner.volume = max(0, min(volume, 100)) / 100
         if let deviceID {
             inner.outputDeviceUid = deviceID
         }

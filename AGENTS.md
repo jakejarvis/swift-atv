@@ -112,7 +112,8 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `ChaCha20Tests` <- `tests/support/test_chacha20.py`
 - `DeviceInfoTests` <- `tests/support/test_device_info.py`
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
-- `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus SwiftATV MRP framing/message coverage
+- `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing
+- `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus SwiftATV MRP framing/message, volume, and command-result coverage
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:
@@ -123,4 +124,8 @@ frameworks coexist in the same target. Current Swift Testing suites:
   TLV handling + ordering checks). Uses the internal `init(clientIdentifier:,
   srpPrivateKey:)` test seam for determinism.
 - `PlayingDescriptionTests.swift` -- `Playing.description` edge cases.
+- `CompanionAuthEnvelopeTests.swift` -- Companion pair-setup/pair-verify
+  OPACK envelope shape and auth error surfacing.
+- `CompanionConnectionTests.swift` -- Companion auth frame routing,
+  encrypted-frame AAD, close/drain races, and pending-request drain behavior.
 - `TestHelpers.swift` -- shared `Data(hex:)` / `.hex` helpers.

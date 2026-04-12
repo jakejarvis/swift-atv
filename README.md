@@ -222,8 +222,8 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 217 XCTest cases ported from pyatv plus 43 Swift Testing
-cases for SwiftATV-specific logic:
+The test suite runs 223 XCTest cases covering pyatv ports and SwiftATV-specific
+integration logic, plus 44 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
 every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
@@ -231,13 +231,15 @@ every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
 device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
-metadata, and `MessageDispatcher` actor behavior.
+metadata, MRP volume/command-result handling, Bonjour pairing flag parsing,
+and `MessageDispatcher` actor behavior.
 
 **SwiftATV additions** (Swift Testing) — SRP-6a client verified against a
 canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,
 and matches A/M1/K byte-for-byte), HAP pair-setup state machine (M1 encoding,
 M3 output against canned M2, error-TLV surfacing, state ordering),
-`Playing.description` edge cases, and Companion connection race handling.
+`Playing.description` edge cases, Companion auth envelopes, Companion encrypted
+frame AAD, and Companion connection race handling.
 
 CI runs the full suite on `macos-15` (Swift 6.0, 6.1) and
 `swift:6.0-jammy` / `swift:6.1-jammy` on `ubuntu-latest`, plus a

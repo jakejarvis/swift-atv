@@ -168,7 +168,7 @@
                 port: service.port,
                 identifier: identifier,
                 properties: service.txtRecord,
-                pairingRequirement: parsePairingRequirement(service.txtRecord)
+                pairingRequirement: Self.pairingRequirement(from: service.txtRecord, for: proto)
             )
 
             devices[address]?.addService(serviceInfo)
@@ -182,14 +182,60 @@
             }
         }
 
-        private func parsePairingRequirement(_ properties: [String: String]) -> PairingRequirement {
-            if let flags = properties["flags"], let val = Int(flags) {
-                // Companion link typically requires pairing
-                if val & 0x200 != 0 {
+        internal static func pairingRequirement(
+            from properties: [String: String],
+            for `protocol`: ATVProtocol
+        ) -> PairingRequirement {
+            switch `protocol` {
+            case .companion:
+                guard let flags = intProperty(properties, keys: ["rpfl", "rpFl"]) else {
+                    return .unsupported
+                }
+                if flags & 0x04 != 0 {
+                    return .disabled
+                }
+                if flags & 0x4000 != 0 {
                     return .mandatory
                 }
+                return .unsupported
+
+            case .mrp:
+                let allowPairing = property(properties, keys: ["allowpairing", "AllowPairing"])
+                return allowPairing?.lowercased() == "yes" ? .optional : .disabled
+
+            case .airPlay, .raop:
+                let passwordRequired = property(properties, keys: ["pw"])?.lowercased() == "true"
+                return passwordRequired ? .mandatory : .notNeeded
+
+            case .dmap:
+                return .unsupported
             }
-            return .unsupported
+        }
+
+        private static func property(_ properties: [String: String], keys: [String]) -> String? {
+            for key in keys {
+                if let value = properties[key] {
+                    return value
+                }
+            }
+
+            for (propertyKey, value) in properties {
+                if keys.contains(where: { $0.caseInsensitiveCompare(propertyKey) == .orderedSame }) {
+                    return value
+                }
+            }
+            return nil
+        }
+
+        private static func intProperty(_ properties: [String: String], keys: [String]) -> Int? {
+            guard let rawValue = property(properties, keys: keys) else {
+                return nil
+            }
+            let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.lowercased().hasPrefix("0x") {
+                return Int(trimmed.dropFirst(2), radix: 16)
+            }
+            return Int(trimmed) ?? Int(trimmed, radix: 16)
         }
 
         /// Mutable state shared across @Sendable NWBrowser callbacks.

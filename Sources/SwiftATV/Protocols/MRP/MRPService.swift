@@ -92,12 +92,13 @@ final class MRPStateStore: @unchecked Sendable {
     }
 
     private func setVolume(_ volume: Float) {
+        let percent = volume * 100
         let continuations = lock.withLock {
-            _volume = volume
+            _volume = percent
             return Array(volumeContinuations.values)
         }
         for continuation in continuations {
-            continuation.yield(volume)
+            continuation.yield(percent)
         }
     }
 
@@ -109,7 +110,7 @@ final class MRPStateStore: @unchecked Sendable {
             return OutputDevice(
                 identifier: descriptor.uniqueIdentifier,
                 name: descriptor.hasName ? descriptor.name : nil,
-                volume: descriptor.hasVolume ? descriptor.volume : 0
+                volume: descriptor.hasVolume ? descriptor.volume * 100 : 0
             )
         }
         let continuations = lock.withLock {
@@ -278,10 +279,11 @@ actor MRPProtocolHandler: MRPConnectionDelegate {
 
     func sendCommand(_ command: Command, options: CommandOptions? = nil) async throws(ATVError) {
         let path = await playerState.activePlayerPath
-        _ = try await connection.sendAndReceive(
+        let response = try await connection.sendAndReceive(
             MRPMessages.command(command, options: options, playerPath: path),
             responseType: .sendCommandResultMessage
         )
+        try Self.validateCommandResult(response.sendCommandResultMessage, command: command)
     }
 
     func sendHID(usagePage: UInt16, usage: UInt16, action: InputAction) async throws(ATVError) {
@@ -294,6 +296,30 @@ actor MRPProtocolHandler: MRPConnectionDelegate {
             try await sendHID(usagePage: usagePage, usage: usage, action: .singleTap)
         case .hold:
             try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: true))
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: false))
+        }
+    }
+
+    internal static func validateCommandResult(
+        _ result: SendCommandResultMessage,
+        command: Command? = nil
+    ) throws(ATVError) {
+        let commandDescription = command.map { " \($0)" } ?? ""
+        guard result.sendError == .noError else {
+            throw ATVError.protocolError(
+                "MRP command\(commandDescription) failed with sendError=\(result.sendError)"
+            )
+        }
+        guard result.handlerReturnStatus == .success else {
+            throw ATVError.protocolError(
+                "MRP command\(commandDescription) failed with handlerReturnStatus=\(result.handlerReturnStatus)"
+            )
+        }
+        if result.hasCommandResult, result.commandResult.sendError != .noError {
+            throw ATVError.protocolError(
+                "MRP command\(commandDescription) failed with commandResult.sendError=\(result.commandResult.sendError)"
+            )
         }
     }
 

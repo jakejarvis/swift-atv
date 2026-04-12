@@ -30,25 +30,30 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
     // MARK: - HID Commands
 
     private func sendHIDCommand(_ command: HIDCommand, action: InputAction) async throws(ATVError) {
+        let tapCount = action == .doubleTap ? 2 : 1
+        for tapIndex in 0..<tapCount {
+            try await sendHIDButton(command, down: true)
+
+            if action == .hold {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            } else {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+
+            try await sendHIDButton(command, down: false)
+
+            if tapIndex + 1 < tapCount {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+        }
+    }
+
+    private func sendHIDButton(_ command: HIDCommand, down: Bool) async throws(ATVError) {
         let downContent = OPACK.Value.dictionary([
-            ("_hBtS", .uint(1)),
+            ("_hBtS", .uint(down ? 1 : 2)),
             ("_hidC", .uint(UInt64(command.rawValue))),
         ])
-        try await handler.sendEvent("_hidC", content: downContent)
-
-        if action == .hold {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-
-        let upContent = OPACK.Value.dictionary([
-            ("_hBtS", .uint(2)),
-            ("_hidC", .uint(UInt64(command.rawValue))),
-        ])
-        try await handler.sendEvent("_hidC", content: upContent)
-
-        if action == .doubleTap {
-            try await sendHIDCommand(command, action: .singleTap)
-        }
+        _ = try await handler.sendRequest("_hidC", content: downContent)
     }
 
     public func up(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.up, action: action) }
@@ -122,7 +127,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
     public func channelDown() async throws(ATVError) { try await sendHIDCommand(.channelDecrement, action: .singleTap) }
     public func screensaver() async throws(ATVError) { try await sendHIDCommand(.screensaver, action: .singleTap) }
     public func guide() async throws(ATVError) { try await sendHIDCommand(.guide, action: .singleTap) }
-    public func controlCenter() async throws(ATVError) { try await sendHIDCommand(.home, action: .hold) }
+    public func controlCenter() async throws(ATVError) { try await sendHIDCommand(.pageDown, action: .singleTap) }
 }
 
 // MARK: - Apps
@@ -196,37 +201,26 @@ public actor CompanionPower: PowerController {
     public var powerState: PowerState { _powerState }
 
     public func turnOn(awaitNewState: Bool) async throws(ATVError) {
-        try await handler.sendEvent(
-            "_hidC",
-            content: OPACK.Value.dictionary([
-                ("_hBtS", .uint(1)),
-                ("_hidC", .uint(UInt64(HIDCommand.wake.rawValue))),
-            ]))
-        try await handler.sendEvent(
-            "_hidC",
-            content: OPACK.Value.dictionary([
-                ("_hBtS", .uint(2)),
-                ("_hidC", .uint(UInt64(HIDCommand.wake.rawValue))),
-            ]))
+        try await sendHIDCommand(.wake)
         _powerState = .on
         continuation.yield(.on)
     }
 
     public func turnOff(awaitNewState: Bool) async throws(ATVError) {
-        try await handler.sendEvent(
-            "_hidC",
-            content: OPACK.Value.dictionary([
-                ("_hBtS", .uint(1)),
-                ("_hidC", .uint(UInt64(HIDCommand.sleep.rawValue))),
-            ]))
-        try await handler.sendEvent(
-            "_hidC",
-            content: OPACK.Value.dictionary([
-                ("_hBtS", .uint(2)),
-                ("_hidC", .uint(UInt64(HIDCommand.sleep.rawValue))),
-            ]))
+        try await sendHIDCommand(.sleep)
         _powerState = .off
         continuation.yield(.off)
+    }
+
+    private func sendHIDCommand(_ command: HIDCommand) async throws(ATVError) {
+        for state in [UInt64(1), UInt64(2)] {
+            _ = try await handler.sendRequest(
+                "_hidC",
+                content: OPACK.Value.dictionary([
+                    ("_hBtS", .uint(state)),
+                    ("_hidC", .uint(UInt64(command.rawValue))),
+                ]))
+        }
     }
 }
 
@@ -257,13 +251,14 @@ public actor CompanionAudio: AudioController {
     public var outputDevices: [OutputDevice] { _outputDevices }
 
     public func setVolume(_ level: Float, device: OutputDevice?) async throws(ATVError) {
+        let clamped = max(0, min(level, 100))
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.setVolume.rawValue))),
-            ("_vol", .double(Double(level))),
+            ("_vol", .double(Double(clamped / 100))),
         ])
         _ = try await handler.sendRequest("_mcc", content: content)
-        _volume = level
-        volumeContinuation.yield(level)
+        _volume = clamped
+        volumeContinuation.yield(clamped)
     }
 
     public func volumeUp() async throws(ATVError) {
@@ -363,18 +358,43 @@ public struct CompanionTouch: TouchController, Sendable {
     }
 
     public func click(action: InputAction) async throws(ATVError) {
-        try await sendTouchEvent(x: 500, y: 500, phase: .click)
+        switch action {
+        case .singleTap, .doubleTap:
+            let count = action == .doubleTap ? 2 : 1
+            for _ in 0..<count {
+                try await sendSelectButton(down: true)
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                try await sendSelectButton(down: false)
+                try await sendTouchEvent(x: 1000, y: 1000, phase: .click)
+            }
+        case .hold:
+            try await sendSelectButton(down: true)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try await sendSelectButton(down: false)
+            try await sendTouchEvent(x: 1000, y: 1000, phase: .click)
+        }
     }
 
     private func sendTouchEvent(x: Int, y: Int, phase: TouchAction) async throws(ATVError) {
+        let clampedX = min(max(x, 0), 1000)
+        let clampedY = min(max(y, 0), 1000)
         let content = OPACK.Value.dictionary([
             ("_ns", .uint(currentTimestamp)),
             ("_tFg", .uint(1)),
-            ("_cx", .uint(UInt64(x))),
-            ("_cy", .uint(UInt64(y))),
+            ("_cx", .uint(UInt64(clampedX))),
+            ("_cy", .uint(UInt64(clampedY))),
             ("_tPh", .uint(UInt64(phase.rawValue))),
         ])
         try await handler.sendEvent("_hidT", content: content)
+    }
+
+    private func sendSelectButton(down: Bool) async throws(ATVError) {
+        _ = try await handler.sendRequest(
+            "_hidC",
+            content: OPACK.Value.dictionary([
+                ("_hBtS", .uint(down ? 1 : 2)),
+                ("_hidC", .uint(UInt64(HIDCommand.select.rawValue))),
+            ]))
     }
 }
 

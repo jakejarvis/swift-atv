@@ -291,6 +291,10 @@ extension PowerController {
 // MARK: - Audio Protocol
 
 /// Interface for controlling audio volume and output devices.
+///
+/// Volume values exposed by this interface are percentages in the closed
+/// range `0...100`. Protocol implementations translate to their native
+/// normalized wire ranges where needed.
 public protocol AudioController: Sendable {
     var volume: Float { get async }
     var volumeStream: AsyncStream<Float> { get }

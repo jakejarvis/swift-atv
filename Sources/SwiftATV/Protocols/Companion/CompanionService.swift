@@ -16,6 +16,7 @@ public final class CompanionService: @unchecked Sendable {
     private let connection: CompanionConnection
     private let protocolHandler: CompanionProtocolHandler
     private let lock = NSLock()
+    private let settings: ATVSettings
     private var credentials: HAPCredentials?
 
     private var _remoteControl: CompanionRemoteControl?
@@ -68,11 +69,17 @@ public final class CompanionService: @unchecked Sendable {
         return _features
     }
 
-    public init(host: String, port: Int, credentials: HAPCredentials? = nil) {
+    public init(
+        host: String,
+        port: Int,
+        credentials: HAPCredentials? = nil,
+        settings: ATVSettings = ATVSettings()
+    ) {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         self.connection = CompanionConnection(host: host, port: port, group: group)
         self.protocolHandler = CompanionProtocolHandler(connection: connection)
         self.credentials = credentials
+        self.settings = settings
     }
 
     /// Connect and set up the Companion protocol.
@@ -88,7 +95,12 @@ public final class CompanionService: @unchecked Sendable {
             try await verifier.verify()
         }
 
-        try await protocolHandler.sendSystemInfo()
+        try await protocolHandler.sendSystemInfo(
+            name: settings.info.name ?? "SwiftATV",
+            remotePairingID: settings.info.remotePairingID,
+            clientID: credentials.map(\.clientIdentifier).flatMap(Self.utf8String),
+            deviceID: settings.info.deviceID ?? settings.info.macAddress
+        )
         try await protocolHandler.startTouch()
         try await protocolHandler.startSession()
         try await protocolHandler.subscribeEvents(["_iMC"])
@@ -109,5 +121,10 @@ public final class CompanionService: @unchecked Sendable {
     public func close() async {
         await protocolHandler.stop()
         await connection.close()
+    }
+
+    private static func utf8String(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
