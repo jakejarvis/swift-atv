@@ -100,6 +100,9 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.turnOff).state, .available)
         XCTAssertEqual(features.featureInfo(.powerState).state, .available)
 
+        // Audio
+        XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
+
         // Apps
         XCTAssertEqual(features.featureInfo(.appList).state, .available)
         XCTAssertEqual(features.featureInfo(.launchApp).state, .available)

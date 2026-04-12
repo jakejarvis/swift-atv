@@ -181,4 +181,147 @@ final class RelayerTests: XCTestCase {
         // Companion has higher priority in this custom order
         XCTAssertEqual(relayer.main, "companion-impl")
     }
+
+    // MARK: - Facade command routing
+
+    func testRelayingRemoteControlFallsBackAfterNotSupported() async throws {
+        let relayer = Relayer<RemoteControl>()
+        let mrp = StubRemoteControl(channelUpResult: .unsupported)
+        let companion = StubRemoteControl(channelUpResult: .success)
+        relayer.register(mrp, for: .mrp)
+        relayer.register(companion, for: .companion)
+
+        try await RelayingRemoteControl(relayer: relayer).channelUp()
+
+        XCTAssertEqual(mrp.channelUpCalls, 1)
+        XCTAssertEqual(companion.channelUpCalls, 1)
+    }
+
+    func testRelayingRemoteControlDoesNotFallbackAfterProtocolError() async {
+        let relayer = Relayer<RemoteControl>()
+        let mrp = StubRemoteControl(channelUpResult: .protocolError)
+        let companion = StubRemoteControl(channelUpResult: .success)
+        relayer.register(mrp, for: .mrp)
+        relayer.register(companion, for: .companion)
+
+        do {
+            try await RelayingRemoteControl(relayer: relayer).channelUp()
+            XCTFail("Expected channelUp to throw")
+        } catch let error {
+            guard case ATVError.protocolError = error else {
+                XCTFail("Expected protocolError, got \(error)")
+                return
+            }
+        }
+
+        XCTAssertEqual(mrp.channelUpCalls, 1)
+        XCTAssertEqual(companion.channelUpCalls, 0)
+    }
+
+    func testRelayingFeaturesUseLowerPriorityWhenHigherPriorityIsUnsupported() {
+        let relayer = Relayer<FeatureProvider>()
+        relayer.register(StubFeatures([.channelUp: .unsupported]), for: .mrp)
+        relayer.register(StubFeatures([.channelUp: .available]), for: .companion)
+
+        let features = RelayingFeatures(relayer: relayer)
+
+        XCTAssertEqual(features.featureInfo(.channelUp).state, .available)
+        XCTAssertTrue(features.isAvailable(.channelUp))
+    }
+
+    func testRelayingFeaturesKeepHigherPriorityUnavailableState() {
+        let relayer = Relayer<FeatureProvider>()
+        relayer.register(StubFeatures([.play: .unavailable]), for: .mrp)
+        relayer.register(StubFeatures([.play: .available]), for: .companion)
+
+        let features = RelayingFeatures(relayer: relayer)
+
+        XCTAssertEqual(features.featureInfo(.play).state, .unavailable)
+    }
+}
+
+private final class StubRemoteControl: @unchecked Sendable, RemoteControl {
+    enum Result {
+        case success
+        case unsupported
+        case protocolError
+    }
+
+    private let lock = NSLock()
+    private let channelUpResult: Result
+    private var _channelUpCalls = 0
+
+    init(channelUpResult: Result) {
+        self.channelUpResult = channelUpResult
+    }
+
+    var channelUpCalls: Int { lock.withLock { _channelUpCalls } }
+
+    func channelUp() async throws(ATVError) {
+        lock.withLock { _channelUpCalls += 1 }
+        switch channelUpResult {
+        case .success:
+            return
+        case .unsupported:
+            throw ATVError.notSupported("unsupported")
+        case .protocolError:
+            throw ATVError.protocolError("failed")
+        }
+    }
+
+    func up(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func down(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func left(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func right(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func play() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func playPause() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func pause() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func stop() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func next() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func previous() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func select(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func menu(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func volumeUp() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func volumeDown() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func home(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func homeHold() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func topMenu() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func suspend() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func wakeUp() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func skipForward(interval: TimeInterval) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func skipBackward(interval: TimeInterval) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func setPosition(_ position: Int) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func setShuffle(_ state: ShuffleState) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func setRepeat(_ state: RepeatState) async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func channelDown() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func screensaver() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func guide() async throws(ATVError) { throw ATVError.notSupported("unused") }
+    func controlCenter() async throws(ATVError) { throw ATVError.notSupported("unused") }
+}
+
+private struct StubFeatures: FeatureProvider {
+    let states: [FeatureName: FeatureState]
+
+    init(_ states: [FeatureName: FeatureState]) {
+        self.states = states
+    }
+
+    func featureInfo(_ feature: FeatureName) -> FeatureInfo {
+        FeatureInfo(state: states[feature] ?? .unsupported)
+    }
+
+    func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {
+        Dictionary(
+            uniqueKeysWithValues: FeatureName.allCases.compactMap { feature in
+                let info = featureInfo(feature)
+                if !includeUnsupported, info.state == .unsupported {
+                    return nil
+                }
+                return (feature, info)
+            })
+    }
+
+    func inState(_ states: [FeatureState], features: FeatureName...) -> Bool {
+        features.allSatisfy { states.contains(featureInfo($0).state) }
+    }
 }

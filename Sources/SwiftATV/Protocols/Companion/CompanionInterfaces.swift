@@ -415,6 +415,7 @@ public struct CompanionFeatures: FeatureProvider, Sendable {
         .skipForward, .skipBackward,
         .channelUp, .channelDown,
         .screensaver, .guide, .controlCenter,
+        .setVolume,
         .appList, .launchApp,
         .accountList, .switchAccount,
         .turnOn, .turnOff, .powerState,

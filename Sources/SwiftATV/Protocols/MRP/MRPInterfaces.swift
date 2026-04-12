@@ -287,7 +287,8 @@ public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
     private static let alwaysAvailable: Set<FeatureName> = [
         .up, .down, .left, .right, .select, .menu, .home, .homeHold, .topMenu,
         .volumeUp, .volumeDown, .suspend, .wakeUp, .powerState, .turnOn, .turnOff,
-        .pushUpdates, .outputDevices, .addOutputDevices, .removeOutputDevices, .setOutputDevices,
+        .pushUpdates, .volume, .setVolume, .outputDevices, .addOutputDevices,
+        .removeOutputDevices, .setOutputDevices,
     ]
 
     private static let metadataFeatures: Set<FeatureName> = [

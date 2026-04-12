@@ -44,7 +44,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     public var deviceInfo: DeviceInfo { configuration.deviceInfo }
 
     public var remoteControl: RemoteControl {
-        remoteControlRelayer.main ?? UnsupportedRemoteControl()
+        RelayingRemoteControl(relayer: remoteControlRelayer)
     }
 
     public var metadata: ATVMetadata {
@@ -64,7 +64,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public var features: FeatureProvider {
-        featureRelayer.main ?? UnsupportedFeatures()
+        RelayingFeatures(relayer: featureRelayer)
     }
 
     public var apps: AppsController {
@@ -110,8 +110,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         case .mrp:
             try await setupMRP(service)
         case .dmap, .airPlay, .raop:
-            // These protocols will be added in future phases
-            break
+            throw ATVError.notSupported("Connection not yet implemented for \(service.protocol)")
         }
     }
 
@@ -221,62 +220,89 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 }
 
-// MARK: - Unsupported Fallbacks
+// MARK: - Relayed and Unsupported Fallbacks
 
-/// Fallback implementations that throw `.notSupported` for all methods.
+/// Facade-level wrappers and fallback implementations for unavailable interfaces.
 
-private struct UnsupportedRemoteControl: RemoteControl {
-    func up(action: InputAction) async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func down(action: InputAction) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
+struct RelayingRemoteControl: RemoteControl {
+    let relayer: Relayer<RemoteControl>
+
+    private func call(_ action: (RemoteControl) async throws -> Void) async throws(ATVError) {
+        var lastUnsupported: ATVError?
+        for implementation in relayer.all {
+            do {
+                try await action(implementation)
+                return
+            } catch let error as ATVError {
+                if case .notSupported = error {
+                    lastUnsupported = error
+                    continue
+                }
+                throw error
+            } catch {
+                throw ATVError.wrap(error)
+            }
+        }
+        throw lastUnsupported ?? ATVError.notSupported("Remote control not available")
     }
-    func left(action: InputAction) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
-    }
-    func right(action: InputAction) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
-    }
-    func play() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func playPause() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func pause() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func stop() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func next() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func previous() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func select(action: InputAction) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
-    }
-    func menu(action: InputAction) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
-    }
-    func volumeUp() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func volumeDown() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func home(action: InputAction) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
-    }
-    func homeHold() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func topMenu() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func suspend() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func wakeUp() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
+
+    func up(action: InputAction) async throws(ATVError) { try await call { try await $0.up(action: action) } }
+    func down(action: InputAction) async throws(ATVError) { try await call { try await $0.down(action: action) } }
+    func left(action: InputAction) async throws(ATVError) { try await call { try await $0.left(action: action) } }
+    func right(action: InputAction) async throws(ATVError) { try await call { try await $0.right(action: action) } }
+    func play() async throws(ATVError) { try await call { try await $0.play() } }
+    func playPause() async throws(ATVError) { try await call { try await $0.playPause() } }
+    func pause() async throws(ATVError) { try await call { try await $0.pause() } }
+    func stop() async throws(ATVError) { try await call { try await $0.stop() } }
+    func next() async throws(ATVError) { try await call { try await $0.next() } }
+    func previous() async throws(ATVError) { try await call { try await $0.previous() } }
+    func select(action: InputAction) async throws(ATVError) { try await call { try await $0.select(action: action) } }
+    func menu(action: InputAction) async throws(ATVError) { try await call { try await $0.menu(action: action) } }
+    func volumeUp() async throws(ATVError) { try await call { try await $0.volumeUp() } }
+    func volumeDown() async throws(ATVError) { try await call { try await $0.volumeDown() } }
+    func home(action: InputAction) async throws(ATVError) { try await call { try await $0.home(action: action) } }
+    func homeHold() async throws(ATVError) { try await call { try await $0.homeHold() } }
+    func topMenu() async throws(ATVError) { try await call { try await $0.topMenu() } }
+    func suspend() async throws(ATVError) { try await call { try await $0.suspend() } }
+    func wakeUp() async throws(ATVError) { try await call { try await $0.wakeUp() } }
     func skipForward(interval: TimeInterval) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
+        try await call { try await $0.skipForward(interval: interval) }
     }
     func skipBackward(interval: TimeInterval) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
+        try await call { try await $0.skipBackward(interval: interval) }
     }
-    func setPosition(_ position: Int) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
+    func setPosition(_ position: Int) async throws(ATVError) { try await call { try await $0.setPosition(position) } }
+    func setShuffle(_ state: ShuffleState) async throws(ATVError) { try await call { try await $0.setShuffle(state) } }
+    func setRepeat(_ state: RepeatState) async throws(ATVError) { try await call { try await $0.setRepeat(state) } }
+    func channelUp() async throws(ATVError) { try await call { try await $0.channelUp() } }
+    func channelDown() async throws(ATVError) { try await call { try await $0.channelDown() } }
+    func screensaver() async throws(ATVError) { try await call { try await $0.screensaver() } }
+    func guide() async throws(ATVError) { try await call { try await $0.guide() } }
+    func controlCenter() async throws(ATVError) { try await call { try await $0.controlCenter() } }
+}
+
+struct RelayingFeatures: FeatureProvider {
+    let relayer: Relayer<FeatureProvider>
+
+    func featureInfo(_ feature: FeatureName) -> FeatureInfo {
+        let infos = relayer.all.map { $0.featureInfo(feature) }
+        return infos.first { $0.state != .unsupported } ?? infos.first ?? FeatureInfo(state: .unsupported)
     }
-    func setShuffle(_ state: ShuffleState) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
+
+    func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {
+        var result: [FeatureName: FeatureInfo] = [:]
+        for feature in FeatureName.allCases {
+            let info = featureInfo(feature)
+            if includeUnsupported || info.state != .unsupported {
+                result[feature] = info
+            }
+        }
+        return result
     }
-    func setRepeat(_ state: RepeatState) async throws(ATVError) {
-        throw ATVError.notSupported("Remote control not available")
+
+    func inState(_ states: [FeatureState], features: FeatureName...) -> Bool {
+        features.allSatisfy { states.contains(featureInfo($0).state) }
     }
-    func channelUp() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func channelDown() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func screensaver() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func guide() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
-    func controlCenter() async throws(ATVError) { throw ATVError.notSupported("Remote control not available") }
 }
 
 private struct UnsupportedMetadata: ATVMetadata {
@@ -311,12 +337,6 @@ private struct UnsupportedPower: PowerController {
     func turnOff(awaitNewState: Bool) async throws(ATVError) {
         throw ATVError.notSupported("Power control not available")
     }
-}
-
-private struct UnsupportedFeatures: FeatureProvider {
-    func featureInfo(_ feature: FeatureName) -> FeatureInfo { FeatureInfo(state: .unsupported) }
-    func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] { [:] }
-    func inState(_ states: [FeatureState], features: FeatureName...) -> Bool { false }
 }
 
 private struct UnsupportedApps: AppsController {

@@ -48,6 +48,21 @@ final class SwiftATVConnectTests: XCTestCase {
         }
     }
 
+    func testFacadeSetupUnsupportedProtocolThrowsNotSupported() async {
+        let config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        let facade = FacadeAppleTV(configuration: config, settings: ATVSettings())
+
+        do {
+            try await facade.setupProtocol(ServiceInfo(protocol: .airPlay, port: 7000))
+            XCTFail("Expected setupProtocol to throw")
+        } catch let error {
+            guard case ATVError.notSupported = error else {
+                XCTFail("Expected notSupported, got \(error)")
+                return
+            }
+        }
+    }
+
     func testConnectCompanionWithMalformedCredentialsThrowsInvalidCredentials() async {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
         config.addService(ServiceInfo(protocol: .companion, port: 49153))

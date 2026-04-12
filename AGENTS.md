@@ -42,7 +42,7 @@ The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLa
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
-  - `Protocols/Companion/` -- Full Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify)
+  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume; text entry and output-device mutation are not implemented yet)
   - `Protocols/MRP/` -- Direct MRP implementation (SwiftProtobuf-generated pyatv messages, TCP framing, pair-setup/pair-verify, interfaces, player-state actor)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
@@ -51,7 +51,7 @@ The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Complete | Connection, pair-setup (SRP-6a), pair-verify, all interfaces |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus, touch. Text entry and output-device mutation are not implemented yet |
 | MRP | Implemented | Direct TCP/protobuf connection, pair-setup, pair-verify, remote, metadata, push, power, audio. AirPlay tunnel/streaming not included |
 | DMAP | Not started | Legacy protocol |
 | AirPlay | Not started | Streaming |

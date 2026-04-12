@@ -11,9 +11,9 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
 - **Power Control** -- Turn devices on/off and monitor power state
-- **Audio Control** -- Adjust volume, manage output devices
+- **Audio Control** -- Adjust volume and manage output devices over direct MRP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures
-- **Virtual Keyboard** -- Text input via the virtual keyboard
+- **Virtual Keyboard Hooks** -- Expose keyboard focus state; text entry is planned
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion and MRP pair-verified links
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
 - **Multi-Protocol** -- Unified facade across MRP and Companion, with DMAP, AirPlay, and RAOP planned
@@ -168,7 +168,7 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
 | **MRP** | Media Remote Protocol: protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
-| **Companion** | Modern control, apps, keyboard, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented |
+| **Companion** | Modern control, apps, keyboard focus, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except text entry and output-device mutation |
 | **DMAP** | Legacy Digital Media Access Protocol | Planned |
 | **AirPlay** | Audio/video streaming | Planned |
 | **RAOP** | Remote Audio Output Protocol | Planned |

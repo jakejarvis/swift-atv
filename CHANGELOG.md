@@ -62,6 +62,13 @@ Initial pre-release. API is unstable and will change before 1.0.
   dropped, causing spurious timeouts. Installation is synchronous under
   lock/actor isolation so the waiter is guaranteed to exist before any
   bytes hit the wire.
+- **Facade routing now falls through only on explicit unsupported methods.**
+  Remote-control calls try lower-priority protocol implementations when a
+  higher-priority implementation throws `.notSupported`, so direct MRP no
+  longer hides Companion-only commands such as channel, guide, and control
+  center. Feature reporting now merges lower-priority providers for features
+  the higher-priority provider marks unsupported, and public setup of DMAP,
+  AirPlay, or RAOP now fails fast instead of silently doing nothing.
 - **Double-waiter guard on `CompanionConnection.waitForFrame`.**
   Attempts to register a second concurrent waiter for the same frame
   type now throw `.invalidState` instead of silently clobbering the

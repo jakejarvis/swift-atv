@@ -323,6 +323,13 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(received.values, [7, 10])
     }
 
+    func testMRPFeaturesAdvertiseAudioControls() {
+        let features = MRPFeatures(stateStore: MRPStateStore())
+
+        XCTAssertEqual(features.featureInfo(.volume).state, .available)
+        XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
+    }
+
     private static func setStateMessage(
         title: String,
         artist: String,
