@@ -5,13 +5,17 @@ import Foundation
 ///
 /// Uses the `Relayer` pattern to route method calls to the highest-priority
 /// protocol that supports each feature.
+///
+/// Thread safety: Mutable service/event state protected by `NSLock`.
+/// Relayers have their own internal locking.
 public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     private let configuration: AppleTVConfiguration
     private let _settings: ATVSettings
+    private let lock = NSLock()
     private var companionService: CompanionService?
 
-    // Relayers for each interface
+    // Relayers for each interface (internally thread-safe)
     private let remoteControlRelayer = Relayer<RemoteControl>()
     private let appsRelayer = Relayer<AppsController>()
     private let userAccountsRelayer = Relayer<UserAccountsController>()
@@ -81,9 +85,13 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public var deviceEvents: AsyncStream<DeviceEvent> {
+        lock.lock()
+        defer { lock.unlock() }
         if let existing = _deviceEvents { return existing }
-        let stream = AsyncStream<DeviceEvent> { continuation in
-            self.eventContinuation = continuation
+        let stream = AsyncStream<DeviceEvent> { [weak self] continuation in
+            self?.lock.lock()
+            self?.eventContinuation = continuation
+            self?.lock.unlock()
         }
         _deviceEvents = stream
         return stream
@@ -115,7 +123,9 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             credentials: credentials
         )
         try await companion.setup()
+        lock.lock()
         self.companionService = companion
+        lock.unlock()
 
         // Register Companion implementations with relayers
         if let rc = companion.remoteControl {
@@ -151,8 +161,12 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public func close() async {
-        await companionService?.close()
-        eventContinuation?.finish()
+        lock.lock()
+        let service = companionService
+        let cont = eventContinuation
+        lock.unlock()
+        await service?.close()
+        cont?.finish()
     }
 }
 

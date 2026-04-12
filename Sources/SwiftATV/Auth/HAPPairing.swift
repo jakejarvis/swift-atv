@@ -20,8 +20,12 @@ public protocol PairSetupProcedure: Sendable {
 ///
 /// Implements the pair-verify flow using existing credentials to
 /// establish session encryption keys.
+///
+/// Thread safety: Steps must be called sequentially. Mutable state
+/// is protected by `NSLock` for safety.
 public final class HAPPairVerifyHandler: @unchecked Sendable {
     private let credentials: HAPCredentials
+    private let lock = NSLock()
     private var verifyPrivateKey: Curve25519.KeyAgreement.PrivateKey?
     private var sharedSecret: Data?
     private var peerPublicKey: Data?

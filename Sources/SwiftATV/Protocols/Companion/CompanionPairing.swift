@@ -53,16 +53,19 @@ public final class CompanionPairVerifyHandler: @unchecked Sendable {
 /// Handles Companion protocol pairing (pair-setup + pair-verify).
 ///
 /// Implements the `PairingHandler` protocol for use with `SwiftATV.pair()`.
+///
+/// Thread safety: Mutable pairing state protected by NSLock.
 public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler {
     private let config: AppleTVConfiguration
     private let _service: ServiceInfo
     private let connection: CompanionConnection
-    private var pin: String?
+    private let lock = NSLock()
+    private var _pin: String?
     private var _hasPaired = false
 
     public var service: ServiceInfo { _service }
     public var deviceProvidesPin: Bool { true }
-    public var hasPaired: Bool { _hasPaired }
+    public var hasPaired: Bool { lock.lock(); defer { lock.unlock() }; return _hasPaired }
 
     private init(config: AppleTVConfiguration, service: ServiceInfo, connection: CompanionConnection) {
         self.config = config
@@ -82,7 +85,9 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
 
     /// Set the PIN displayed on the Apple TV.
     public func pin(_ pin: String) async throws {
-        self.pin = pin
+        lock.lock()
+        self._pin = pin
+        lock.unlock()
     }
 
     /// Begin the pairing process.
@@ -99,6 +104,9 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
 
     /// Complete the pairing process using the entered PIN.
     public func finish() async throws {
+        lock.lock()
+        let pin = _pin
+        lock.unlock()
         guard let pin else {
             throw ATVError.pairingFailed("PIN not set. Call pin() before finish().")
         }
@@ -123,7 +131,9 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
             throw ATVError.pairingFailed("Pairing failed with error code \(errorData[0])")
         }
 
+        lock.lock()
         _hasPaired = true
+        lock.unlock()
     }
 
     /// Close the pairing handler.

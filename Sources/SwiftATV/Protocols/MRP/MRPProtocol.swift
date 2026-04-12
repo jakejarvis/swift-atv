@@ -74,9 +74,11 @@ public enum MRPConnectionState: Sendable {
 /// - Different key derivation salt/info values
 /// - Heartbeat mechanism for connection health
 /// - Player state tracking across multiple clients/players
+/// Thread safety: Mutable state protected by NSLock.
 public final class MRPConnection: @unchecked Sendable {
     private let host: String
     private let port: Int
+    private let lock = NSLock()
     private var state: MRPConnectionState = .disconnected
 
     public init(host: String, port: Int) {
@@ -87,16 +89,14 @@ public final class MRPConnection: @unchecked Sendable {
     /// Connect to the MRP service.
     public func connect() async throws {
         // TODO: Implement MRP connection using SwiftNIO
-        // - TCP connect
-        // - Varint frame decoder
-        // - Protobuf message serialization
-        // - Pair-verify for encryption
         throw ATVError.notSupported("MRP protocol not yet implemented")
     }
 
     /// Close the connection.
     public func close() async {
+        lock.lock()
         state = .disconnected
+        lock.unlock()
     }
 }
 
@@ -105,7 +105,10 @@ public final class MRPConnection: @unchecked Sendable {
 /// Manages the state of multiple simultaneous media players/clients
 /// on the device, tracking which client/player is active and
 /// processing SET_STATE_MESSAGE updates.
+///
+/// Thread safety: Mutable state protected by NSLock.
 public final class MRPPlayerState: @unchecked Sendable {
+    private let lock = NSLock()
     private var activeClientBundleID: String?
     private var clients: [String: Playing] = [:]
 
@@ -113,6 +116,8 @@ public final class MRPPlayerState: @unchecked Sendable {
 
     /// The currently playing state from the active client.
     public var currentPlaying: Playing {
+        lock.lock()
+        defer { lock.unlock() }
         guard let bundleID = activeClientBundleID else {
             return Playing()
         }
