@@ -17,7 +17,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 ## Requirements
 
-- Swift 6.1+
+- Swift 6.3+
 - macOS 13+ / iOS 16+ / tvOS 16+
 
 ## Installation
