@@ -1,5 +1,4 @@
 import Foundation
-import NIOPosix
 
 /// Setup and lifecycle management for the Companion protocol.
 ///
@@ -75,8 +74,7 @@ public final class CompanionService: @unchecked Sendable {
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings()
     ) {
-        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        self.connection = CompanionConnection(host: host, port: port, group: group)
+        self.connection = CompanionConnection(host: host, port: port)
         self.protocolHandler = CompanionProtocolHandler(connection: connection)
         self.credentials = credentials
         self.settings = settings

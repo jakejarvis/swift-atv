@@ -171,6 +171,7 @@ public actor CompanionProtocolHandler {
         content: OPACK.Value = .dict([]),
         timeout: TimeInterval = defaultCompanionTimeout
     ) async throws(ATVError) -> OPACK.Value {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         xid += 1
         let currentXID = xid
 
@@ -201,7 +202,7 @@ public actor CompanionProtocolHandler {
                         }
                         return
                     }
-                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    try? await Task.sleep(nanoseconds: timeoutNs)
                     if let waiter = await self.takePendingRequest(xid: currentXID) {
                         waiter.resume(
                             throwing: ATVError.operationTimeout(

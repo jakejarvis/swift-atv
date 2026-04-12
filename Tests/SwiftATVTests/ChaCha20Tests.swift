@@ -26,6 +26,20 @@ final class ChaCha20Tests: XCTestCase {
         XCTAssertEqual(decrypted, plaintext)
     }
 
+    func testEncryptDecryptGeneric8ByteNonce() throws {
+        let cipher = ChaCha20Cipher(
+            encryptKey: fakeKey,
+            decryptKey: fakeKey,
+            nonceLength: 8
+        )
+
+        let plaintext = Data("test".utf8)
+        let encrypted = try cipher.encrypt(plaintext)
+        let decrypted = try cipher.decrypt(encrypted)
+
+        XCTAssertEqual(decrypted, plaintext)
+    }
+
     // MARK: - test_8_bytes_nonce
 
     func testEncryptDecrypt8ByteNonce() throws {
@@ -105,6 +119,16 @@ final class ChaCha20Tests: XCTestCase {
 
         // Less than 16 bytes (minimum for auth tag)
         XCTAssertThrowsError(try cipher.decrypt(Data([0x01, 0x02])))
+    }
+
+    func testInvalidNonceLengthThrows() {
+        let cipher = ChaCha20Cipher(
+            encryptKey: fakeKey,
+            decryptKey: fakeKey,
+            nonceLength: 7
+        )
+
+        XCTAssertThrowsError(try cipher.encrypt(Data("test".utf8)))
     }
 
     func testDifferentKeysFailDecrypt() throws {

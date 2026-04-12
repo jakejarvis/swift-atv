@@ -115,6 +115,14 @@ final class OPACKTests: XCTestCase {
         XCTAssertEqual(decoded.intValue, -100000)
     }
 
+    func testEncodeNegativeInt64Min() throws {
+        let encoded = OPACK.encode(.int(Int64.min))
+        XCTAssertEqual(encoded[0], 0x3B)  // neg int64 tag
+
+        let decoded = try OPACK.decode(encoded)
+        XCTAssertEqual(decoded.intValue, Int64.min)
+    }
+
     // MARK: - Floats
 
     func testEncodeDecodeFloat32() throws {
@@ -376,6 +384,32 @@ final class OPACKTests: XCTestCase {
         XCTAssertEqual(decoded[1]?.stringValue, "b")
     }
 
+    // MARK: - Object references
+
+    func testDecodeInlineObjectReference() throws {
+        let data = Data([0xD2, 0x45, 0x68, 0x65, 0x6C, 0x6C, 0x6F, 0xA0])
+        let decoded = try OPACK.decode(data)
+
+        XCTAssertEqual(decoded[0]?.stringValue, "hello")
+        XCTAssertEqual(decoded[1]?.stringValue, "hello")
+    }
+
+    func testDecodeExtendedObjectReference() throws {
+        var data = Data([0xDF])
+        for index in 0..<34 {
+            let string = String(format: "v%02d", index)
+            let bytes = Array(string.utf8)
+            data.append(0x40 + UInt8(bytes.count))
+            data.append(contentsOf: bytes)
+        }
+        data.append(contentsOf: [0xC1, 0x21])
+        data.append(0x03)
+
+        let decoded = try OPACK.decode(data)
+        XCTAssertEqual(decoded[33]?.stringValue, "v33")
+        XCTAssertEqual(decoded[34]?.stringValue, "v33")
+    }
+
     // MARK: - Round-trip complex
 
     func testRoundTripComplex() throws {
@@ -428,6 +462,28 @@ final class OPACKTests: XCTestCase {
     func testDecodeTruncatedInt16() {
         // Tag says uint16 but only 1 byte available
         let data = Data([0x31, 0x01])
+        XCTAssertThrowsError(try OPACK.decode(data))
+    }
+
+    func testDecodeTrailingBytes() {
+        XCTAssertThrowsError(try OPACK.decode(Data([0x01, 0x02])))
+    }
+
+    func testDecodeMissingEndlessListTerminator() {
+        XCTAssertThrowsError(try OPACK.decode(Data([0xDF, 0x01])))
+    }
+
+    func testDecodeMissingEndlessDictTerminator() {
+        XCTAssertThrowsError(try OPACK.decode(Data([0xEF, 0x41, 0x61, 0x01])))
+    }
+
+    func testDecodeNegativeInt64MagnitudeOverflow() {
+        let data = Data([0x3B, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
+        XCTAssertThrowsError(try OPACK.decode(data))
+    }
+
+    func testDecodeData64LengthOverflow() {
+        let data = Data([0x94, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
         XCTAssertThrowsError(try OPACK.decode(data))
     }
 }

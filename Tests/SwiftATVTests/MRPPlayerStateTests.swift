@@ -73,6 +73,14 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertThrowsError(try MRPVarint.decode(invalid, offset: &offset))
     }
 
+    func testVarintOverflowThrows() {
+        var offset = 0
+        var invalid = Data(repeating: 0xFF, count: 9)
+        invalid.append(0x7F)
+
+        XCTAssertThrowsError(try MRPVarint.decode(invalid, offset: &offset))
+    }
+
     func testDeviceInformationMessageSerializesWithExtension() throws {
         let settings = ATVSettings(
             info: InfoSettings(name: "Clicker", remotePairingID: "remote-id")
@@ -128,6 +136,27 @@ final class MRPPlayerStateTests: XCTestCase {
         ) { error in
             guard case ATVError.protocolError = error else {
                 XCTFail("Expected protocolError, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testValidatePairVerifyFinalResponseThrowsOnHAPError() {
+        let errorTLV = TLV8.encode([TLV8.Entry(tag: .error, value: TLVError.authentication.rawValue)])
+
+        XCTAssertThrowsError(try MRPProtocolHandler.validatePairVerifyFinalResponse(errorTLV)) { error in
+            guard case ATVError.authenticationFailed = error else {
+                XCTFail("Expected authenticationFailed, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testValidatePairVerifyFinalResponseRejectsMalformedTLV() {
+        XCTAssertThrowsError(try MRPProtocolHandler.validatePairVerifyFinalResponse(Data([0x07, 0x02, 0x01]))) {
+            error in
+            guard case ATVError.invalidData = error else {
+                XCTFail("Expected invalidData, got \(error)")
                 return
             }
         }

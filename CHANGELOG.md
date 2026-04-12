@@ -129,6 +129,42 @@ Initial pre-release. API is unstable and will change before 1.0.
   checks the signed device identifier against the stored ATV identifier when
   credentials include one, rejecting mismatched devices with
   `.authenticationFailed`.
+- **OPACK decoding is now robust against real Companion payloads and
+  malformed data.** The decoder now supports pyatv-style object
+  references (`0xA0...0xC4`), rejects trailing bytes and missing endless
+  container terminators, and handles `Int64.min` without trapping in
+  negative integer encode/decode paths. Overlarge OPACK lengths and
+  negative magnitudes now throw `.invalidData` instead of risking integer
+  overflow.
+- **HAP TLV8 auth paths now fail strictly on malformed payloads.** Public
+  best-effort `TLV8.decode` remains source-compatible, but pair-setup and
+  pair-verify now use strict TLV decoding so truncated auth data cannot be
+  silently accepted as a partial dictionary.
+- **MRP pair-verify now validates the final device response.** Direct MRP
+  no longer enables encryption after the client proof if the Apple TV
+  replies with a HAP error TLV. Malformed final TLVs now throw
+  `.invalidData`; HAP error TLVs throw `.authenticationFailed`.
+- **MRP varint and frame parsing no longer rely on overflowing integer
+  arithmetic.** Invalid ten-byte varints with too many high bits now throw,
+  and the frame assembler checks `payloadLength <= receiveBuffer.count -
+  offset` instead of evaluating `offset + payloadLength`.
+- **Public timeout inputs now throw instead of trapping.** Scanner,
+  Companion request/wait APIs, and MRP waiters validate timeout values as
+  finite, non-negative, and representable in nanoseconds before converting
+  to `UInt64`.
+- **`ChaCha20Cipher(nonceLength: 8)` no longer crashes.** The generic
+  cipher now validates nonce length, supports the documented 8-byte
+  counter form by constructing a 12-byte ChaCha20-Poly1305 nonce, and
+  throws `.invalidData` for unsupported lengths instead of using `try!`.
+- **`SwiftATV.connect` no longer returns an inert facade.** Requested
+  protocols must have an enabled matching service, unsupported requested
+  protocols throw `.notSupported`, and an unfiltered connection must set up
+  at least one supported service before returning. Malformed stored HAP
+  credentials now fail fast instead of being silently treated as missing.
+- **Connection-owned NIO event loop groups are shut down on close.**
+  Companion and MRP connections now track whether they created their own
+  `MultiThreadedEventLoopGroup` and shut it down on explicit close or peer
+  close, avoiding leaked NIO threads after failed pairing/connect attempts.
 
 Supporting changes that landed with the fixes above:
 - `CompanionConnection.defaultResponseType(for:)` — public static
@@ -213,11 +249,14 @@ Supporting changes that landed with the fixes above:
 - DocC catalog (`Sources/SwiftATV/SwiftATV.docc/`) with a landing page and
   Getting Started article.
 - `.spi.yml` for Swift Package Index hosting.
-- Test suite: 223 XCTest cases covering pyatv ports and SwiftATV-specific
+- Test suite: 250 XCTest cases covering pyatv ports and SwiftATV-specific
   integration logic (codecs, crypto,
   configuration, relayer, settings, interfaces, device info, Companion
   feature availability, MRP framing/message/player-state behavior, scanner
-  pairing flags, MRP volume/command-result behavior) plus 44
+  pairing flags and timeout validation, MRP volume/command-result and
+  pair-verify-final-response behavior, connect-path validation, OPACK object
+  references/malformed-data handling, TLV8 strict auth decoding, and timeout
+  conversion behavior) plus 44
   Swift Testing cases covering SRP-6a, HAP pair-setup,
   `Playing.description`, Companion auth envelopes, and Companion connection
   race handling.

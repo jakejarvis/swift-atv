@@ -105,7 +105,11 @@ public enum MRPVarint {
 
         while index < data.count {
             let byte = data[index]
-            result |= UInt64(byte & 0x7F) << shift
+            let chunk = UInt64(byte & 0x7F)
+            guard shift < 63 || chunk <= 1 else {
+                throw ATVError.invalidData("MRP varint overflows UInt64")
+            }
+            result |= chunk << shift
             index += 1
 
             if byte & 0x80 == 0 {
@@ -150,6 +154,7 @@ public final class MRPConnection: @unchecked Sendable {
     private let host: String
     private let port: Int
     private let group: EventLoopGroup
+    private let ownsGroup: Bool
     private let lock = NSLock()
 
     private var channel: Channel?
@@ -159,6 +164,7 @@ public final class MRPConnection: @unchecked Sendable {
     private var messageContinuation: AsyncStream<ProtocolMessageMessage>.Continuation?
     private var _messageStream: AsyncStream<ProtocolMessageMessage>?
     private var isClosed = false
+    private var didShutdownGroup = false
     private var state: MRPConnectionState = .disconnected
 
     internal weak var delegate: MRPConnectionDelegate?
@@ -187,7 +193,13 @@ public final class MRPConnection: @unchecked Sendable {
     public init(host: String, port: Int, group: EventLoopGroup? = nil) {
         self.host = host
         self.port = port
-        self.group = group ?? MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        if let group {
+            self.group = group
+            self.ownsGroup = false
+        } else {
+            self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+            self.ownsGroup = true
+        }
     }
 
     /// Connect to the MRP service.
@@ -219,6 +231,10 @@ public final class MRPConnection: @unchecked Sendable {
             }
             channel = ch
             state = .connected
+        }
+        let stillOpen = lock.withLock { !isClosed && channel != nil }
+        guard stillOpen else {
+            throw ATVError.connectionLost("Connection has been closed")
         }
     }
 
@@ -274,6 +290,7 @@ public final class MRPConnection: @unchecked Sendable {
         responseType: ProtocolMessageMessage.TypeEnum? = nil,
         timeout: TimeInterval = 5.0
     ) async throws(ATVError) -> ProtocolMessageMessage {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         var outbound = message
         if !outbound.hasIdentifier {
             outbound.identifier = UUID().uuidString
@@ -316,7 +333,7 @@ public final class MRPConnection: @unchecked Sendable {
                     }
 
                     do {
-                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        try await Task.sleep(nanoseconds: timeoutNs)
                     } catch {
                         return
                     }
@@ -356,6 +373,18 @@ public final class MRPConnection: @unchecked Sendable {
         resume(drained, with: ATVError.connectionLost("Connection closed"))
         try? await ch?.close()
         cont?.finish()
+        await shutdownOwnedGroupIfNeeded()
+    }
+
+    private func shutdownOwnedGroupIfNeeded() async {
+        let shouldShutdown = lock.withLock {
+            guard ownsGroup, !didShutdownGroup else { return false }
+            didShutdownGroup = true
+            return true
+        }
+        if shouldShutdown {
+            try? await group.shutdownGracefully()
+        }
     }
 
     private enum WaiterInstallResult {
@@ -413,7 +442,7 @@ public final class MRPConnection: @unchecked Sendable {
             }
 
             guard let payloadLength = length else { break }
-            guard receiveBuffer.count >= offset + payloadLength else { break }
+            guard payloadLength <= receiveBuffer.count - offset else { break }
 
             var payload = Data(receiveBuffer[offset..<offset + payloadLength])
             receiveBuffer = Data(receiveBuffer[(offset + payloadLength)...])
@@ -482,6 +511,9 @@ public final class MRPConnection: @unchecked Sendable {
         drained.0?.finish()
         Task { [weak self] in
             await self?.delegate?.connectionDidClose(error: error)
+        }
+        Task { [weak self] in
+            await self?.shutdownOwnedGroupIfNeeded()
         }
     }
 }

@@ -107,13 +107,22 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `ConstantsTests` <- `tests/test_convert.py`
 - `ConfigurationTests` <- `tests/test_conf.py`
 - `InterfaceTests` <- `tests/test_interface.py`
-- `OPACKTests` <- `tests/support/test_opack.py`
-- `TLV8Tests` <- `tests/auth/test_hap_tlv8.py`
-- `ChaCha20Tests` <- `tests/support/test_chacha20.py`
+- `OPACKTests` <- `tests/support/test_opack.py` plus SwiftATV object-reference,
+  strict-consumption, and integer-overflow regression coverage.
+- `TLV8Tests` <- `tests/auth/test_hap_tlv8.py` plus strict auth-path
+  malformed-input regression coverage.
+- `ChaCha20Tests` <- `tests/support/test_chacha20.py` plus generic
+  `nonceLength` validation coverage.
 - `DeviceInfoTests` <- `tests/support/test_device_info.py`
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
-- `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing
-- `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus SwiftATV MRP framing/message, volume, and command-result coverage
+- `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing and
+  scan timeout validation.
+- `SwiftATVConnectTests.swift` -- connect-path validation for requested,
+  unsupported, and malformed-credential service setup.
+- `TimingTests.swift` -- shared timeout-to-nanoseconds conversion guards.
+- `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus
+  SwiftATV MRP framing/message, volume, command-result, varint overflow, and
+  pair-verify-final-response coverage.
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:

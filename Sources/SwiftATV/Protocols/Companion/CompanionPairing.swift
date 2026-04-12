@@ -44,7 +44,7 @@ internal func unwrapCompanionAuthEnvelope(_ responseBytes: Data) throws(ATVError
         throw ATVError.invalidResponse("Companion auth _pd has unexpected type")
     }
 
-    let inner = TLV8.decode(tlv)
+    let inner = try TLV8.decodeStrict(tlv)
     if let errorData = inner[TLVTag.error.rawValue], !errorData.isEmpty {
         throw ATVError.authenticationFailed(
             "HAP auth error code 0x\(String(errorData[0], radix: 16))"

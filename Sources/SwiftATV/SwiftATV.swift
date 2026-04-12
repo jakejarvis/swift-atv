@@ -64,18 +64,40 @@ public enum SwiftATV {
             throw ATVError.noService("No enabled services in configuration")
         }
 
+        let selectedServices = availableServices.filter { service in
+            guard let requestedProtocol = `protocol` else { return true }
+            return service.protocol == requestedProtocol
+        }
+
+        guard !selectedServices.isEmpty else {
+            if let requestedProtocol = `protocol` {
+                throw ATVError.noService("No enabled \(requestedProtocol) service in configuration")
+            }
+            throw ATVError.noService("No enabled services in configuration")
+        }
+
         // Create the facade that unifies protocol implementations
         let facade = FacadeAppleTV(
             configuration: config,
             settings: deviceSettings
         )
 
-        // Set up each available protocol
-        for service in availableServices {
-            if let requestedProto = `protocol`, service.protocol != requestedProto {
+        var setupCount = 0
+        for service in selectedServices {
+            switch service.protocol {
+            case .companion, .mrp:
+                try await facade.setupProtocol(service)
+                setupCount += 1
+            case .dmap, .airPlay, .raop:
+                if `protocol` != nil {
+                    throw ATVError.notSupported("Connection not yet implemented for \(service.protocol)")
+                }
                 continue
             }
-            try await facade.setupProtocol(service)
+        }
+
+        guard setupCount > 0 else {
+            throw ATVError.noService("No supported enabled services in configuration")
         }
 
         return facade

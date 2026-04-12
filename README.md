@@ -222,7 +222,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 223 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 250 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 44 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -232,7 +232,9 @@ device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata, MRP volume/command-result handling, Bonjour pairing flag parsing,
-and `MessageDispatcher` actor behavior.
+connect-path validation, timeout conversion, strict TLV8 auth decoding,
+OPACK object-reference/malformed-data handling, and `MessageDispatcher`
+actor behavior.
 
 **SwiftATV additions** (Swift Testing) — SRP-6a client verified against a
 canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,

@@ -99,16 +99,36 @@ public enum TLV8 {
     /// Decode TLV8 binary data into a dictionary keyed by tag.
     /// Consecutive entries with the same tag are automatically reassembled.
     public static func decode(_ data: Data) -> [UInt8: Data] {
+        (try? decode(data, strict: false)) ?? [:]
+    }
+
+    /// Decode TLV8 binary data and reject malformed/truncated input.
+    internal static func decodeStrict(_ data: Data) throws(ATVError) -> [UInt8: Data] {
+        try decode(data, strict: true)
+    }
+
+    private static func decode(_ data: Data, strict: Bool) throws(ATVError) -> [UInt8: Data] {
         var result = [UInt8: Data]()
         var offset = 0
         var lastTag: UInt8?
 
-        while offset + 1 < data.count {
+        while offset < data.count {
+            guard offset + 1 < data.count else {
+                if strict {
+                    throw ATVError.invalidData("TLV8: truncated tag/length pair")
+                }
+                break
+            }
             let tag = data[offset]
             let length = Int(data[offset + 1])
             offset += 2
 
-            guard offset + length <= data.count else { break }
+            guard length <= data.count - offset else {
+                if strict {
+                    throw ATVError.invalidData("TLV8: truncated value for tag 0x\(String(tag, radix: 16))")
+                }
+                break
+            }
 
             let chunk = data[offset..<offset + length]
             offset += length
@@ -129,15 +149,35 @@ public enum TLV8 {
     /// Decode TLV8 binary data into an ordered array of entries.
     /// Consecutive entries with the same tag are automatically reassembled.
     public static func decodeEntries(_ data: Data) -> [Entry] {
+        (try? decodeEntries(data, strict: false)) ?? []
+    }
+
+    /// Decode TLV8 entries in order and reject malformed/truncated input.
+    internal static func decodeEntriesStrict(_ data: Data) throws(ATVError) -> [Entry] {
+        try decodeEntries(data, strict: true)
+    }
+
+    private static func decodeEntries(_ data: Data, strict: Bool) throws(ATVError) -> [Entry] {
         var entries = [Entry]()
         var offset = 0
 
-        while offset + 1 < data.count {
+        while offset < data.count {
+            guard offset + 1 < data.count else {
+                if strict {
+                    throw ATVError.invalidData("TLV8: truncated tag/length pair")
+                }
+                break
+            }
             let tag = data[offset]
             let length = Int(data[offset + 1])
             offset += 2
 
-            guard offset + length <= data.count else { break }
+            guard length <= data.count - offset else {
+                if strict {
+                    throw ATVError.invalidData("TLV8: truncated value for tag 0x\(String(tag, radix: 16))")
+                }
+                break
+            }
 
             let chunk = Data(data[offset..<offset + length])
             offset += length

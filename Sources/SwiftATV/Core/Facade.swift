@@ -119,7 +119,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         // Parse credentials from settings
         var credentials: HAPCredentials?
         if let credStr = _settings.protocols.companion.credentials {
-            credentials = try? HAPCredentials.parse(credStr)
+            do {
+                credentials = try HAPCredentials.parse(credStr)
+            } catch {
+                throw ATVError.wrap(error)
+            }
         }
 
         let companion = CompanionService(
@@ -163,7 +167,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private func setupMRP(_ service: ServiceInfo) async throws(ATVError) {
         var credentials: HAPCredentials?
         if let credStr = _settings.protocols.mrp.credentials {
-            credentials = try? HAPCredentials.parse(credStr)
+            do {
+                credentials = try HAPCredentials.parse(credStr)
+            } catch {
+                throw ATVError.wrap(error)
+            }
         }
 
         let mrp = MRPService(

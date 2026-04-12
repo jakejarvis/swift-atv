@@ -100,7 +100,7 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
 
     /// Step 2: Process device response, verify device identity, return encrypted proof.
     public func step2(_ responseData: Data) throws(ATVError) -> Data {
-        let response = TLV8.decode(responseData)
+        let response = try TLV8.decodeStrict(responseData)
 
         guard let peerPubKeyData = response[TLVTag.publicKey.rawValue],
             let encryptedData = response[TLVTag.encryptedData.rawValue]
@@ -140,7 +140,7 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
             nonce: hapNonce("PV-Msg02")
         )
 
-        let innerTLV = TLV8.decode(decrypted)
+        let innerTLV = try TLV8.decodeStrict(decrypted)
         guard let deviceIdentifier = innerTLV[TLVTag.identifier.rawValue],
             let deviceSignature = innerTLV[TLVTag.signature.rawValue]
         else {
@@ -285,7 +285,7 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
     /// M3 TLV (`state=3, publicKey=A, proof=M1proof`). Requires the PIN
     /// entered by the user after seeing it on the Apple TV screen.
     public func m3(fromResponse responseData: Data, pin: String) throws(ATVError) -> Data {
-        let tlv = TLV8.decode(responseData)
+        let tlv = try TLV8.decodeStrict(responseData)
         try throwIfErrorTag(tlv)
 
         guard let salt = tlv[TLVTag.salt.rawValue] else {
@@ -319,7 +319,7 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
     /// controller identity payload. `displayName` is optional — when set
     /// it shows up on the Apple TV's Settings > Users & Accounts entry.
     public func m5(fromResponse responseData: Data, displayName: String? = nil) throws(ATVError) -> Data {
-        let tlv = TLV8.decode(responseData)
+        let tlv = try TLV8.decodeStrict(responseData)
         try throwIfErrorTag(tlv)
 
         guard let serverProof = tlv[TLVTag.proof.rawValue] else {
@@ -395,7 +395,7 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
     /// verifies the accessory's Ed25519 signature (a divergence from pyatv,
     /// which has a TODO to implement this check), and populates `credentials`.
     public func finish(fromResponse responseData: Data) throws(ATVError) {
-        let outer = TLV8.decode(responseData)
+        let outer = try TLV8.decodeStrict(responseData)
         try throwIfErrorTag(outer)
 
         guard let encrypted = outer[TLVTag.encryptedData.rawValue] else {
@@ -413,7 +413,7 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
             nonce: hapNonce("PS-Msg06")
         )
 
-        let inner = TLV8.decode(decrypted)
+        let inner = try TLV8.decodeStrict(decrypted)
         guard let accessoryID = inner[TLVTag.identifier.rawValue],
             let accessoryLTPK = inner[TLVTag.publicKey.rawValue],
             let accessorySig = inner[TLVTag.signature.rawValue]

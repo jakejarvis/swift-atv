@@ -46,6 +46,14 @@ public enum OPACK {
     private static let data32Tag: UInt8 = 0x93
     private static let data64Tag: UInt8 = 0x94
 
+    // Object references (0xA0-0xC0 inline, 0xC1-0xC4 extended)
+    private static let objectRefBase: UInt8 = 0xA0
+    private static let objectRefMax: UInt8 = 0xC0
+    private static let objectRef8Tag: UInt8 = 0xC1
+    private static let objectRef16Tag: UInt8 = 0xC2
+    private static let objectRef32Tag: UInt8 = 0xC3
+    private static let objectRef64Tag: UInt8 = 0xC4
+
     // Lists (0xD0-0xDE fixed, 0xDF endless)
     private static let listBase: UInt8 = 0xD0
     private static let endlessList: UInt8 = 0xDF
@@ -266,7 +274,10 @@ public enum OPACK {
     }
 
     private static func encodeNegInt(_ value: Int64, into data: inout Data) {
-        let absVal = UInt64(abs(value))
+        let absVal =
+            value == Int64.min
+            ? UInt64(Int64.max) + 1
+            : UInt64(-value)
         if absVal <= 0xFF {
             data.append(negInt8Tag)
             data.append(UInt8(absVal))
@@ -290,10 +301,26 @@ public enum OPACK {
     /// Decode an OPACK binary payload into a Value.
     public static func decode(_ data: Data) throws -> Value {
         var offset = 0
-        return try decodeValue(data, offset: &offset)
+        var objectList = [Value]()
+        let value = try decodeValue(data, offset: &offset, objectList: &objectList)
+        guard offset == data.count else {
+            throw ATVError.invalidData("OPACK: trailing bytes after value")
+        }
+        return value
     }
 
-    private static func decodeValue(_ data: Data, offset: inout Int) throws -> Value {
+    private static func decodeValue(
+        _ data: Data,
+        offset: inout Int,
+        objectList: inout [Value]
+    ) throws -> Value {
+        func record(_ value: Value, addToObjectList: Bool = true) -> Value {
+            if addToObjectList && !objectList.contains(where: { valuesEqual($0, value) }) {
+                objectList.append(value)
+            }
+            return value
+        }
+
         guard offset < data.count else {
             throw ATVError.invalidData("OPACK: unexpected end of data")
         }
@@ -303,13 +330,13 @@ public enum OPACK {
 
         switch tag {
         case nilValue:
-            return .null
+            return record(.null, addToObjectList: false)
 
         case trueValue:
-            return .bool(true)
+            return record(.bool(true), addToObjectList: false)
 
         case falseValue:
-            return .bool(false)
+            return record(.bool(false), addToObjectList: false)
 
         case uuidValue:
             guard offset + 16 <= data.count else {
@@ -328,7 +355,7 @@ public enum OPACK {
                     bytes[bytes.startIndex + 12], bytes[bytes.startIndex + 13],
                     bytes[bytes.startIndex + 14], bytes[bytes.startIndex + 15]
                 ))
-            return .uuid(uuid)
+            return record(.uuid(uuid))
 
         case absoluteTime:
             guard offset + 8 <= data.count else {
@@ -336,39 +363,39 @@ public enum OPACK {
             }
             let val = data.loadLittleEndian(at: offset, as: UInt64.self)
             offset += 8
-            return .uint(val)
+            return record(.uint(val))
 
         // Inline integers (0-39)
         case inlineIntBase...inlineIntMax:
-            return .uint(UInt64(tag - inlineIntBase))
+            return record(.uint(UInt64(tag - inlineIntBase)), addToObjectList: false)
 
         // Unsigned integers
         case int8Tag:
             let val = try readUInt8(data, offset: &offset)
-            return .uint(UInt64(val))
+            return record(.uint(UInt64(val)))
         case int16Tag:
             let val = try readUInt16LE(data, offset: &offset)
-            return .uint(UInt64(val))
+            return record(.uint(UInt64(val)))
         case int32Tag:
             let val = try readUInt32LE(data, offset: &offset)
-            return .uint(UInt64(val))
+            return record(.uint(UInt64(val)))
         case int64Tag:
             let val = try readUInt64LE(data, offset: &offset)
-            return .uint(val)
+            return record(.uint(val))
 
         // Negative integers
         case negInt8Tag:
             let val = try readUInt8(data, offset: &offset)
-            return .int(-Int64(val))
+            return record(.int(try negativeMagnitude(UInt64(val))))
         case negInt16Tag:
             let val = try readUInt16LE(data, offset: &offset)
-            return .int(-Int64(val))
+            return record(.int(try negativeMagnitude(UInt64(val))))
         case negInt32Tag:
             let val = try readUInt32LE(data, offset: &offset)
-            return .int(-Int64(val))
+            return record(.int(try negativeMagnitude(UInt64(val))))
         case negInt64Tag:
             let val = try readUInt64LE(data, offset: &offset)
-            return .int(-Int64(val))
+            return record(.int(try negativeMagnitude(val)))
 
         // Floats
         case float32Tag:
@@ -377,7 +404,7 @@ public enum OPACK {
             }
             let bits = data.loadLittleEndian(at: offset, as: UInt32.self)
             offset += 4
-            return .float(Float(bitPattern: bits))
+            return record(.float(Float(bitPattern: bits)))
 
         case float64Tag:
             guard offset + 8 <= data.count else {
@@ -385,48 +412,65 @@ public enum OPACK {
             }
             let bits = data.loadLittleEndian(at: offset, as: UInt64.self)
             offset += 8
-            return .double(Double(bitPattern: bits))
+            return record(.double(Double(bitPattern: bits)))
 
         // Inline strings (0-32 bytes)
         case inlineStringBase...inlineStringMax:
             let len = Int(tag - inlineStringBase)
-            return try readString(data, offset: &offset, length: len)
+            return try record(readString(data, offset: &offset, length: len))
 
         // Extended strings
         case string8Tag:
             let len = Int(try readUInt8(data, offset: &offset))
-            return try readString(data, offset: &offset, length: len)
+            return try record(readString(data, offset: &offset, length: len))
         case string16Tag:
             let len = Int(try readUInt16LE(data, offset: &offset))
-            return try readString(data, offset: &offset, length: len)
+            return try record(readString(data, offset: &offset, length: len))
         case string24Tag:
             let b0 = try readUInt8(data, offset: &offset)
             let b1 = try readUInt8(data, offset: &offset)
             let b2 = try readUInt8(data, offset: &offset)
             let len = Int(b0) | (Int(b1) << 8) | (Int(b2) << 16)
-            return try readString(data, offset: &offset, length: len)
+            return try record(readString(data, offset: &offset, length: len))
         case string32Tag:
             let len = Int(try readUInt32LE(data, offset: &offset))
-            return try readString(data, offset: &offset, length: len)
+            return try record(readString(data, offset: &offset, length: len))
 
         // Inline data (0-32 bytes)
         case inlineDataBase...inlineDataMax:
             let len = Int(tag - inlineDataBase)
-            return try readData(data, offset: &offset, length: len)
+            return try record(readData(data, offset: &offset, length: len))
 
         // Extended data
         case data8Tag:
             let len = Int(try readUInt8(data, offset: &offset))
-            return try readData(data, offset: &offset, length: len)
+            return try record(readData(data, offset: &offset, length: len))
         case data16Tag:
             let len = Int(try readUInt16LE(data, offset: &offset))
-            return try readData(data, offset: &offset, length: len)
+            return try record(readData(data, offset: &offset, length: len))
         case data32Tag:
             let len = Int(try readUInt32LE(data, offset: &offset))
-            return try readData(data, offset: &offset, length: len)
+            return try record(readData(data, offset: &offset, length: len))
         case data64Tag:
-            let len = Int(try readUInt64LE(data, offset: &offset))
-            return try readData(data, offset: &offset, length: len)
+            let len = try intLength(try readUInt64LE(data, offset: &offset))
+            return try record(readData(data, offset: &offset, length: len))
+
+        // Object references
+        case objectRefBase...objectRefMax:
+            let index = Int(tag - objectRefBase)
+            return try objectReference(index, from: objectList)
+        case objectRef8Tag:
+            let index = Int(try readUInt8(data, offset: &offset))
+            return try objectReference(index, from: objectList)
+        case objectRef16Tag:
+            let index = Int(try readUInt16LE(data, offset: &offset))
+            return try objectReference(index, from: objectList)
+        case objectRef32Tag:
+            let index = try intLength(UInt64(try readUInt32LE(data, offset: &offset)))
+            return try objectReference(index, from: objectList)
+        case objectRef64Tag:
+            let index = try intLength(try readUInt64LE(data, offset: &offset))
+            return try objectReference(index, from: objectList)
 
         // Fixed-size lists
         case listBase...0xDE:
@@ -434,18 +478,24 @@ public enum OPACK {
             var arr = [Value]()
             arr.reserveCapacity(count)
             for _ in 0..<count {
-                arr.append(try decodeValue(data, offset: &offset))
+                arr.append(try decodeValue(data, offset: &offset, objectList: &objectList))
             }
-            return .array(arr)
+            return record(.array(arr), addToObjectList: false)
 
         // Endless list
         case endlessList:
             var arr = [Value]()
-            while offset < data.count && data[offset] != terminator {
-                arr.append(try decodeValue(data, offset: &offset))
+            while true {
+                guard offset < data.count else {
+                    throw ATVError.invalidData("OPACK: missing endless list terminator")
+                }
+                if data[offset] == terminator {
+                    offset += 1
+                    break
+                }
+                arr.append(try decodeValue(data, offset: &offset, objectList: &objectList))
             }
-            if offset < data.count { offset += 1 }  // skip terminator
-            return .array(arr)
+            return record(.array(arr), addToObjectList: false)
 
         // Fixed-size dicts
         case dictBase...0xEE:
@@ -453,22 +503,28 @@ public enum OPACK {
             var pairs = [(Value, Value)]()
             pairs.reserveCapacity(count)
             for _ in 0..<count {
-                let key = try decodeValue(data, offset: &offset)
-                let val = try decodeValue(data, offset: &offset)
+                let key = try decodeValue(data, offset: &offset, objectList: &objectList)
+                let val = try decodeValue(data, offset: &offset, objectList: &objectList)
                 pairs.append((key, val))
             }
-            return .dict(pairs)
+            return record(.dict(pairs), addToObjectList: false)
 
         // Endless dict
         case endlessDict:
             var pairs = [(Value, Value)]()
-            while offset < data.count && data[offset] != terminator {
-                let key = try decodeValue(data, offset: &offset)
-                let val = try decodeValue(data, offset: &offset)
+            while true {
+                guard offset < data.count else {
+                    throw ATVError.invalidData("OPACK: missing endless dict terminator")
+                }
+                if data[offset] == terminator {
+                    offset += 1
+                    break
+                }
+                let key = try decodeValue(data, offset: &offset, objectList: &objectList)
+                let val = try decodeValue(data, offset: &offset, objectList: &objectList)
                 pairs.append((key, val))
             }
-            if offset < data.count { offset += 1 }  // skip terminator
-            return .dict(pairs)
+            return record(.dict(pairs), addToObjectList: false)
 
         default:
             throw ATVError.invalidData("OPACK: unknown tag 0x\(String(tag, radix: 16))")
@@ -513,8 +569,33 @@ public enum OPACK {
         return val
     }
 
+    private static func intLength(_ value: UInt64) throws -> Int {
+        guard let length = Int(exactly: value) else {
+            throw ATVError.invalidData("OPACK: length too large")
+        }
+        return length
+    }
+
+    private static func negativeMagnitude(_ magnitude: UInt64) throws -> Int64 {
+        let minMagnitude = UInt64(Int64.max) + 1
+        if magnitude == minMagnitude {
+            return Int64.min
+        }
+        guard magnitude <= UInt64(Int64.max) else {
+            throw ATVError.invalidData("OPACK: negative integer magnitude out of range")
+        }
+        return -Int64(magnitude)
+    }
+
+    private static func objectReference(_ index: Int, from objectList: [Value]) throws -> Value {
+        guard objectList.indices.contains(index) else {
+            throw ATVError.invalidData("OPACK: object reference \(index) out of range")
+        }
+        return objectList[index]
+    }
+
     private static func readString(_ data: Data, offset: inout Int, length: Int) throws -> Value {
-        guard offset + length <= data.count else {
+        guard length <= data.count - offset else {
             throw ATVError.invalidData("OPACK: not enough data for string of length \(length)")
         }
         guard let str = String(data: data[offset..<offset + length], encoding: .utf8) else {
@@ -525,12 +606,51 @@ public enum OPACK {
     }
 
     private static func readData(_ data: Data, offset: inout Int, length: Int) throws -> Value {
-        guard offset + length <= data.count else {
+        guard length <= data.count - offset else {
             throw ATVError.invalidData("OPACK: not enough data for blob of length \(length)")
         }
         let d = Data(data[offset..<offset + length])
         offset += length
         return .data(d)
+    }
+
+    private static func valuesEqual(_ lhs: Value, _ rhs: Value) -> Bool {
+        switch (lhs, rhs) {
+        case (.null, .null):
+            return true
+        case (.bool(let lhs), .bool(let rhs)):
+            return lhs == rhs
+        case (.int(let lhs), .int(let rhs)):
+            return lhs == rhs
+        case (.uint(let lhs), .uint(let rhs)):
+            return lhs == rhs
+        case (.float(let lhs), .float(let rhs)):
+            return lhs.bitPattern == rhs.bitPattern
+        case (.double(let lhs), .double(let rhs)):
+            return lhs.bitPattern == rhs.bitPattern
+        case (.string(let lhs), .string(let rhs)):
+            return lhs == rhs
+        case (.data(let lhs), .data(let rhs)):
+            return lhs == rhs
+        case (.uuid(let lhs), .uuid(let rhs)):
+            return lhs == rhs
+        case (.array(let lhs), .array(let rhs)):
+            guard lhs.count == rhs.count else { return false }
+            for (lhsValue, rhsValue) in zip(lhs, rhs) {
+                if !valuesEqual(lhsValue, rhsValue) { return false }
+            }
+            return true
+        case (.dict(let lhs), .dict(let rhs)):
+            guard lhs.count == rhs.count else { return false }
+            for (lhsPair, rhsPair) in zip(lhs, rhs) {
+                if !valuesEqual(lhsPair.0, rhsPair.0) || !valuesEqual(lhsPair.1, rhsPair.1) {
+                    return false
+                }
+            }
+            return true
+        default:
+            return false
+        }
     }
 }
 

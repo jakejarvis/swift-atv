@@ -33,7 +33,7 @@ public final class ChaCha20Cipher: @unchecked Sendable {
         lock.unlock()
 
         do {
-            let nonce = makeNonce(counter: counter, length: nonceLength)
+            let nonce = try makeNonce(counter: counter, length: nonceLength)
             let sealedBox: ChaChaPoly.SealedBox
             if let aad {
                 sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce, authenticating: aad)
@@ -59,7 +59,7 @@ public final class ChaCha20Cipher: @unchecked Sendable {
         }
 
         do {
-            let nonce = makeNonce(counter: counter, length: nonceLength)
+            let nonce = try makeNonce(counter: counter, length: nonceLength)
             let ciphertext = data[data.startIndex..<data.endIndex - 16]
             let tag = data[data.endIndex - 16..<data.endIndex]
 
@@ -76,17 +76,20 @@ public final class ChaCha20Cipher: @unchecked Sendable {
         }
     }
 
-    private func makeNonce(counter: UInt64, length: Int) -> ChaChaPoly.Nonce {
-        var nonceData = Data(count: length)
+    private func makeNonce(counter: UInt64, length: Int) throws(ATVError) -> ChaChaPoly.Nonce {
+        guard length == 8 || length == 12 else {
+            throw ATVError.invalidData("ChaCha20 nonce length must be 8 or 12 bytes")
+        }
+
+        var nonceData = Data(count: 12)
         var le = counter.littleEndian
-        let counterSize = min(8, length)
-        let counterOffset = length - counterSize
-        nonceData.replaceSubrange(
-            counterOffset..<counterOffset + counterSize,
-            with: Data(bytes: &le, count: counterSize)
-        )
-        // Safe: nonce data is always the correct length
-        return try! ChaChaPoly.Nonce(data: nonceData)
+        nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
+
+        do {
+            return try ChaChaPoly.Nonce(data: nonceData)
+        } catch {
+            throw ATVError.wrap(error)
+        }
     }
 }
 

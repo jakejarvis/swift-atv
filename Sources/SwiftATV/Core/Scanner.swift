@@ -82,6 +82,8 @@
             identifiers: Set<String>?,
             protocols: Set<ATVProtocol>?
         ) async throws(ATVError) -> [AppleTVConfiguration] {
+            _ = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+
             // Determine which service types to scan based on protocol filter
             let serviceTypes: [BonjourServiceType]
             if let protocols {
@@ -258,7 +260,9 @@
             serviceType: BonjourServiceType,
             timeout: TimeInterval
         ) async throws -> [DiscoveredService] {
-            try await withCheckedThrowingContinuation { continuation in
+            let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+
+            return try await withCheckedThrowingContinuation { continuation in
                 let state = BrowseState()
 
                 let params = NWParameters()
@@ -270,7 +274,7 @@
                 )
 
                 let timeoutTask = Task {
-                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    try? await Task.sleep(nanoseconds: timeoutNs)
                     state.safeResume(continuation)
                 }
 

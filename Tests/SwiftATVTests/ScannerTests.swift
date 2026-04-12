@@ -44,5 +44,17 @@
                 .disabled
             )
         }
+
+        func testScanRejectsNegativeTimeout() async {
+            do {
+                _ = try await SwiftATV.scan(timeout: -1)
+                XCTFail("Expected scan to throw")
+            } catch let error {
+                guard case ATVError.invalidConfig = error else {
+                    XCTFail("Expected invalidConfig, got \(error)")
+                    return
+                }
+            }
+        }
     }
 #endif

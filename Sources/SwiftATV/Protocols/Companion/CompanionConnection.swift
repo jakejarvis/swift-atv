@@ -83,6 +83,7 @@ public final class CompanionConnection: @unchecked Sendable {
     private let host: String
     private let port: Int
     private let group: EventLoopGroup
+    private let ownsGroup: Bool
     private let lock = NSLock()
 
     // Protected by lock
@@ -99,6 +100,7 @@ public final class CompanionConnection: @unchecked Sendable {
     /// `close()` can't register a waiter that the (now empty) drain has
     /// already missed.
     private var isClosed = false
+    private var didShutdownGroup = false
 
     public weak var delegate: CompanionConnectionDelegate?
 
@@ -136,7 +138,13 @@ public final class CompanionConnection: @unchecked Sendable {
     public init(host: String, port: Int, group: EventLoopGroup? = nil) {
         self.host = host
         self.port = port
-        self.group = group ?? MultiThreadedEventLoopGroup(numberOfThreads: 1)
+        if let group {
+            self.group = group
+            self.ownsGroup = false
+        } else {
+            self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+            self.ownsGroup = true
+        }
     }
 
     /// Connect to the device.
@@ -288,6 +296,7 @@ public final class CompanionConnection: @unchecked Sendable {
         waitType: CompanionFrameType? = nil,
         timeout: TimeInterval = 5.0
     ) async throws(ATVError) -> Data {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         let responseType = waitType ?? Self.defaultResponseType(for: type)
 
         do {
@@ -340,7 +349,7 @@ public final class CompanionConnection: @unchecked Sendable {
                     //     cancels us after delivery, at which point we
                     //     exit without touching the dict.
                     do {
-                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        try await Task.sleep(nanoseconds: timeoutNs)
                     } catch {
                         return
                     }
@@ -398,6 +407,7 @@ public final class CompanionConnection: @unchecked Sendable {
     /// `.invalidState`. Each waiter is identity-checked on timeout so a
     /// stale timeout from a previous wait cannot steal this one.
     public func waitForFrame(type: CompanionFrameType, timeout: TimeInterval = 5.0) async throws(ATVError) -> Data {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         do {
             return try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<Data, Error>) in
@@ -422,7 +432,7 @@ public final class CompanionConnection: @unchecked Sendable {
 
                 let task = Task { [weak self] in
                     do {
-                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        try await Task.sleep(nanoseconds: timeoutNs)
                     } catch {
                         return
                     }
@@ -526,6 +536,18 @@ public final class CompanionConnection: @unchecked Sendable {
         let (ch, cont) = drainAndResumeWaiters(error: .connectionLost("Connection closed"))
         try? await ch?.close()
         cont?.finish()
+        await shutdownOwnedGroupIfNeeded()
+    }
+
+    private func shutdownOwnedGroupIfNeeded() async {
+        let shouldShutdown = lock.withLock {
+            guard ownsGroup, !didShutdownGroup else { return false }
+            didShutdownGroup = true
+            return true
+        }
+        if shouldShutdown {
+            try? await group.shutdownGracefully()
+        }
     }
 
     /// Atomically: snapshot+clear `channel` and `frameWaiters` under the
@@ -688,6 +710,9 @@ public final class CompanionConnection: @unchecked Sendable {
             await self?.delegate?.connectionDidClose(error: error)
         }
         drained.cont?.finish()
+        Task { [weak self] in
+            await self?.shutdownOwnedGroupIfNeeded()
+        }
     }
 }
 

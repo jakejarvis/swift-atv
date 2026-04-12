@@ -160,4 +160,24 @@ final class TLV8Tests: XCTestCase {
         let decoded = TLV8.decode(Data())
         XCTAssertTrue(decoded.isEmpty)
     }
+
+    // MARK: - Strict decode
+
+    func testDecodeStrictTruncatedTagLengthPair() {
+        XCTAssertThrowsError(try TLV8.decodeStrict(Data([0x01])))
+    }
+
+    func testDecodeStrictTruncatedValue() {
+        XCTAssertThrowsError(try TLV8.decodeStrict(Data([0x01, 0x03, 0x41])))
+    }
+
+    func testDecodeEntriesStrictTruncatedValue() {
+        XCTAssertThrowsError(try TLV8.decodeEntriesStrict(Data([0x01, 0x03, 0x41])))
+    }
+
+    func testDecodeKeepsLegacyBestEffortBehavior() {
+        let decoded = TLV8.decode(Data([0x01, 0x01, 0x41, 0x02, 0x03, 0x42]))
+        XCTAssertEqual(decoded[0x01], Data([0x41]))
+        XCTAssertNil(decoded[0x02])
+    }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import NIOPosix
 
 final class MRPStateStore: @unchecked Sendable {
     private let lock = NSLock()
@@ -184,8 +183,7 @@ public final class MRPService: @unchecked Sendable {
 
     /// Create an MRP service for a host and port.
     public init(host: String, port: Int, credentials: HAPCredentials? = nil, settings: ATVSettings) {
-        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let connection = MRPConnection(host: host, port: port, group: group)
+        let connection = MRPConnection(host: host, port: port)
         let handler = MRPProtocolHandler(
             connection: connection,
             playerState: playerState,
@@ -361,9 +359,20 @@ actor MRPProtocolHandler: MRPConnectionDelegate {
             MRPMessages.cryptoPairing(step2),
             responseType: .cryptoPairingMessage
         )
-        _ = step2Response.cryptoPairingMessage
+        try Self.validatePairVerifyFinalResponse(
+            step2Response.cryptoPairingMessage.pairingData
+        )
         let keys = try verifier.deriveKeys()
         connection.enableEncryption(outputKey: keys.outputKey, inputKey: keys.inputKey)
+    }
+
+    internal static func validatePairVerifyFinalResponse(_ data: Data) throws(ATVError) {
+        let tlv = try TLV8.decodeStrict(data)
+        if let errorData = tlv[TLVTag.error.rawValue], !errorData.isEmpty {
+            throw ATVError.authenticationFailed(
+                "HAP pair-verify error code 0x\(String(errorData[0], radix: 16))"
+            )
+        }
     }
 
     private func startHeartbeat() {
