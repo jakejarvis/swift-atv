@@ -14,9 +14,12 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private let _settings: ATVSettings
     private let lock = NSLock()
     private var companionService: CompanionService?
+    private var mrpService: MRPService?
 
     // Relayers for each interface (internally thread-safe)
     private let remoteControlRelayer = Relayer<RemoteControl>()
+    private let metadataRelayer = Relayer<ATVMetadata>()
+    private let pushUpdaterRelayer = Relayer<PushUpdater>()
     private let appsRelayer = Relayer<AppsController>()
     private let userAccountsRelayer = Relayer<UserAccountsController>()
     private let powerRelayer = Relayer<PowerController>()
@@ -45,11 +48,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public var metadata: ATVMetadata {
-        UnsupportedMetadata()
+        metadataRelayer.main ?? UnsupportedMetadata()
     }
 
     public var pushUpdater: PushUpdater {
-        UnsupportedPushUpdater()
+        pushUpdaterRelayer.main ?? UnsupportedPushUpdater()
     }
 
     public var stream: StreamController {
@@ -104,7 +107,9 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         switch service.protocol {
         case .companion:
             try await setupCompanion(service)
-        case .mrp, .dmap, .airPlay, .raop:
+        case .mrp:
+            try await setupMRP(service)
+        case .dmap, .airPlay, .raop:
             // These protocols will be added in future phases
             break
         }
@@ -154,6 +159,43 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         }
     }
 
+    private func setupMRP(_ service: ServiceInfo) async throws(ATVError) {
+        var credentials: HAPCredentials?
+        if let credStr = _settings.protocols.mrp.credentials {
+            credentials = try? HAPCredentials.parse(credStr)
+        }
+
+        let mrp = MRPService(
+            host: configuration.address,
+            port: service.port,
+            credentials: credentials,
+            settings: _settings
+        )
+        try await mrp.setup()
+        lock.withLock {
+            self.mrpService = mrp
+        }
+
+        if let rc = mrp.remoteControl {
+            remoteControlRelayer.register(rc, for: .mrp)
+        }
+        if let metadata = mrp.metadata {
+            metadataRelayer.register(metadata, for: .mrp)
+        }
+        if let push = mrp.pushUpdater {
+            pushUpdaterRelayer.register(push, for: .mrp)
+        }
+        if let pwr = mrp.power {
+            powerRelayer.register(pwr, for: .mrp)
+        }
+        if let aud = mrp.audio {
+            audioRelayer.register(aud, for: .mrp)
+        }
+        if let feat = mrp.features {
+            featureRelayer.register(feat, for: .mrp)
+        }
+    }
+
     // MARK: - Connect / Close
 
     public func connect() async throws(ATVError) {
@@ -161,10 +203,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public func close() async {
-        let (service, cont) = lock.withLock {
-            (companionService, eventContinuation)
+        let (companion, mrp, cont) = lock.withLock {
+            (companionService, mrpService, eventContinuation)
         }
-        await service?.close()
+        await companion?.close()
+        await mrp?.close()
         cont?.finish()
     }
 }

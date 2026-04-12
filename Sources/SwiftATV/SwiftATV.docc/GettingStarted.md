@@ -56,10 +56,10 @@ let companionOnly = try await ATVScanner.scan(
 
 ## Pair with a device
 
-The first time your app talks to an Apple TV, you must exchange a PIN. The
-Apple TV displays the PIN on screen; your app submits it back to complete
-the handshake. SwiftATV runs the full HAP SRP-6a pair-setup handshake for
-you; all you need is the `begin` → `pin` → `finish` flow.
+The first time your app talks to an Apple TV over Companion or MRP, you must
+exchange a PIN. The Apple TV displays the PIN on screen; your app submits it
+back to complete the handshake. SwiftATV runs the full HAP SRP-6a pair-setup
+handshake for you; all you need is the `begin` → `pin` → `finish` flow.
 
 ```swift
 let handler = try await SwiftATV.pair(device, protocol: .companion)
@@ -85,6 +85,25 @@ Store the serialized credentials under the device's
 ``AppleTVConfiguration/mainIdentifier`` so you can restore them on the next
 connection.
 
+To pair through direct MRP, request `.mrp` and store the credentials for
+`.mrp`:
+
+```swift
+let handler = try await SwiftATV.pair(device, protocol: .mrp)
+
+try await handler.begin()
+try await handler.pin(userEnteredPIN)
+try await handler.finish()
+
+if let mrp = handler as? MRPPairingHandler,
+   let credentials = mrp.credentials
+{
+    try keychain.store(credentials.serialize(), for: device.mainIdentifier)
+}
+
+await handler.close()
+```
+
 ## Connect and issue commands
 
 Once paired, connect by loading the stored credentials into
@@ -93,6 +112,7 @@ Once paired, connect by loading the stored credentials into
 ```swift
 var settings = ATVSettings()
 settings.setCredentials(storedCredentialsString, for: .companion)
+// Use `.mrp` here when you stored credentials from MRPPairingHandler.
 
 let atv = try await SwiftATV.connect(device, settings: settings)
 

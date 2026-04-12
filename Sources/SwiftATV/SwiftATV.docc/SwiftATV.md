@@ -7,9 +7,10 @@ AirPlay devices.
 
 SwiftATV is a Swift port of [pyatv](https://github.com/postlund/pyatv). It
 exposes a unified ``AppleTVDevice`` interface that routes each command to the
-highest-priority protocol that supports it — Companion is the primary backend
-today (full SRP-6a pair-setup, pair-verify, remote control, apps, keyboard,
-touch, audio, power), with MRP, DMAP, AirPlay, and RAOP planned.
+highest-priority protocol that supports it. MRP provides protobuf-based direct
+remote control, metadata, push updates, power, audio, and HAP pairing; Companion
+provides modern app, keyboard, touch, power, audio, and remote-control support.
+DMAP, AirPlay, and RAOP are planned.
 
 All public methods are typed-throws (`async throws(ATVError)`), so you can
 catch `ATVError` exhaustively without worrying about stray NIO or CryptoKit
@@ -27,8 +28,8 @@ try await atv.remoteControl.play()
 await atv.close()
 ```
 
-> Important: SwiftATV is pre-1.0. The API will change as the MRP, DMAP,
-> AirPlay, and RAOP protocols come online. Pin to a specific minor version in
+> Important: SwiftATV is pre-1.0. The API will change as DMAP, AirPlay, and
+> RAOP protocols come online. Pin to a specific minor version in
 > your `Package.swift` and review the [CHANGELOG](https://github.com/jakejarvis/swift-atv/blob/main/CHANGELOG.md)
 > before upgrading.
 
@@ -51,6 +52,8 @@ await atv.close()
 - ``RemoteControl``
 - ``PowerController``
 - ``AudioController``
+- ``ATVMetadata``
+- ``PushUpdater``
 - ``KeyboardController``
 - ``TouchController``
 - ``AppsController``
@@ -62,6 +65,7 @@ await atv.close()
 - ``PairingHandler``
 - ``CompanionPairingHandler``
 - ``CompanionPairVerifyHandler``
+- ``MRPPairingHandler``
 - ``HAPPairSetupHandler``
 - ``HAPPairVerifyHandler``
 - ``HAPCredentials``
@@ -72,6 +76,19 @@ await atv.close()
 - ``CompanionService``
 - ``CompanionProtocolHandler``
 - ``CompanionConnection``
+- ``MRPService``
+- ``MRPConnection``
+- ``MRPPlayerState``
+- ``MRPRemoteControl``
+- ``MRPMetadata``
+- ``MRPPushUpdater``
+- ``MRPPower``
+- ``MRPAudio``
+- ``MRPFeatures``
+- ``MRPFrameType``
+- ``MRPMessageType``
+- ``MRPConnectionState``
+- ``MRPVarint``
 
 ### Support types
 

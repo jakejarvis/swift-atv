@@ -99,6 +99,10 @@ Initial pre-release. API is unstable and will change before 1.0.
   Fixed by clearing `channel = nil` in `handleConnectionClosed` under
   the same lock, and gating `send()` on `isClosed` so it bails before
   touching any retained channel reference.
+- **Pair-verify now validates the accessory identifier.** `HAPPairVerifyHandler`
+  checks the signed device identifier against the stored ATV identifier when
+  credentials include one, rejecting mismatched devices with
+  `.authenticationFailed`.
 
 Supporting changes that landed with the fixes above:
 - `CompanionConnection.defaultResponseType(for:)` — public static
@@ -156,8 +160,20 @@ Supporting changes that landed with the fixes above:
   ChaCha20-Poly1305 with fixed-nonce entry points shared between the
   pair-setup and pair-verify handlers.
 - OPACK binary serialization codec.
-- MRP protocol type definitions and a `MRPPlayerState` actor (connection
-  implementation pending).
+- Direct MRP implementation:
+  - SwiftProtobuf generation from pyatv's MRP `.proto` files via
+    `SwiftProtobufPlugin`.
+  - Varint-framed TCP connection, protobuf extension dispatch, request/response
+    waiters, HAP pair-verify, and ChaCha20-Poly1305 encryption using the
+    8-byte nonce variant.
+  - MRP HAP pair-setup through `MRPPairingHandler`, surfaced by
+    `SwiftATV.pair(..., protocol: .mrp)`.
+  - Remote control, metadata, push updates, power, audio/output-device
+    controls, and feature availability registered into `FacadeAppleTV` with
+    MRP priority over Companion.
+  - `MRPPlayerState` actor for active client/player tracking, now-playing
+    metadata, app/artwork IDs, shuffle/repeat state, and supported-command
+    feature mapping.
 - Swift 6 language mode with strict concurrency. `CompanionPower`,
   `CompanionAudio`, `CompanionKeyboard`, `MRPPlayerState`,
   `CompanionProtocolHandler`, and `MessageDispatcher` are actors;
@@ -171,26 +187,28 @@ Supporting changes that landed with the fixes above:
 - DocC catalog (`Sources/SwiftATV/SwiftATV.docc/`) with a landing page and
   Getting Started article.
 - `.spi.yml` for Swift Package Index hosting.
-- Test suite: 212 XCTest cases ported from pyatv (codecs, crypto,
+- Test suite: 217 XCTest cases ported from pyatv (codecs, crypto,
   configuration, relayer, settings, interfaces, device info, Companion
-  feature availability) plus 16 Swift Testing cases covering SRP-6a (6),
-  HAP pair-setup (6), and `Playing.description` (4).
+  feature availability, MRP framing/message/player-state behavior) plus 43
+  Swift Testing cases covering SRP-6a, HAP pair-setup,
+  `Playing.description`, Companion auth envelopes, and Companion connection
+  race handling.
 
 ### Dependencies
 
 - `apple/swift-nio` — TCP/UDP for protocol connections.
 - `apple/swift-nio-ssl` — TLS support.
 - `apple/swift-crypto` — Ed25519, X25519, ChaCha20-Poly1305, HKDF.
-- `apple/swift-protobuf` — For MRP protocol (protobuf messages, future).
+- `apple/swift-protobuf` — Generates and serializes direct-MRP protobuf
+  messages from pyatv's `.proto` definitions.
 - `attaswift/BigInt` — 3072-bit modular exponentiation for SRP-6a
   pair-setup. swift-crypto has no primitives for this.
 
 ### Known limitations
 
-- **MRP, DMAP, AirPlay, RAOP** protocols are not yet implemented. Only
-  Companion is functional end-to-end — which is sufficient for remote
-  control, apps, power, audio, keyboard, and touch. Metadata, streaming,
-  and real-time audio are future work.
+- **DMAP, AirPlay, RAOP** protocols are not yet implemented. Direct MRP and
+  Companion are functional for control-oriented workflows. AirPlay/RAOP
+  streaming and legacy DMAP are future work.
 
 [Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.1.0...HEAD
 [0.1.0]: https://github.com/jakejarvis/swift-atv/releases/tag/0.1.0

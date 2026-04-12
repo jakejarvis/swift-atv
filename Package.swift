@@ -34,6 +34,9 @@ let package = Package(
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
                 .product(name: "BigInt", package: "BigInt"),
+            ],
+            plugins: [
+                .plugin(name: "SwiftProtobufPlugin", package: "swift-protobuf")
             ]
         ),
         .testTarget(

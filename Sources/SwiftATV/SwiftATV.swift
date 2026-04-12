@@ -11,34 +11,34 @@ public enum SwiftATV {
     public static let version = "0.1.0"
 
     #if canImport(Network)
-    /// Scan the local network for Apple TV devices.
-    ///
-    /// Uses Bonjour/mDNS to discover Apple TV, HomePod, and AirPlay devices
-    /// on the local network.
-    ///
-    /// - Parameters:
-    ///   - timeout: Maximum time to scan in seconds. Default is 5.
-    ///   - identifiers: Optional set of device identifiers to filter by.
-    ///   - protocols: Optional set of protocols to scan for.
-    /// - Returns: Array of discovered device configurations.
-    ///
-    /// ```swift
-    /// let devices = try await SwiftATV.scan()
-    /// for device in devices {
-    ///     print("\(device.name) at \(device.address)")
-    /// }
-    /// ```
-    public static func scan(
-        timeout: TimeInterval = 5.0,
-        identifiers: Set<String>? = nil,
-        protocols: Set<ATVProtocol>? = nil
-    ) async throws(ATVError) -> [AppleTVConfiguration] {
-        try await ATVScanner.scan(
-            timeout: timeout,
-            identifiers: identifiers,
-            protocols: protocols
-        )
-    }
+        /// Scan the local network for Apple TV devices.
+        ///
+        /// Uses Bonjour/mDNS to discover Apple TV, HomePod, and AirPlay devices
+        /// on the local network.
+        ///
+        /// - Parameters:
+        ///   - timeout: Maximum time to scan in seconds. Default is 5.
+        ///   - identifiers: Optional set of device identifiers to filter by.
+        ///   - protocols: Optional set of protocols to scan for.
+        /// - Returns: Array of discovered device configurations.
+        ///
+        /// ```swift
+        /// let devices = try await SwiftATV.scan()
+        /// for device in devices {
+        ///     print("\(device.name) at \(device.address)")
+        /// }
+        /// ```
+        public static func scan(
+            timeout: TimeInterval = 5.0,
+            identifiers: Set<String>? = nil,
+            protocols: Set<ATVProtocol>? = nil
+        ) async throws(ATVError) -> [AppleTVConfiguration] {
+            try await ATVScanner.scan(
+                timeout: timeout,
+                identifiers: identifiers,
+                protocols: protocols
+            )
+        }
     #endif
 
     /// Connect to an Apple TV device.
@@ -100,6 +100,11 @@ public enum SwiftATV {
         switch `protocol` {
         case .companion:
             return try await CompanionPairingHandler.create(
+                config: config,
+                service: service
+            )
+        case .mrp:
+            return try await MRPPairingHandler.create(
                 config: config,
                 service: service
             )

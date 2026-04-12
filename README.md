@@ -5,17 +5,18 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 ## Features
 
 - **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS
-- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over the Companion link
+- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
+- **Metadata and Push Updates** -- Read now-playing metadata, artwork, current app, and MRP push updates
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
 - **Power Control** -- Turn devices on/off and monitor power state
 - **Audio Control** -- Adjust volume, manage output devices
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures
 - **Virtual Keyboard** -- Text input via the virtual keyboard
-- **Encrypted Communication** -- ChaCha20-Poly1305 over the Companion link
+- **Encrypted Communication** -- ChaCha20-Poly1305 over Companion and MRP pair-verified links
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
-- **Multi-Protocol** -- Unified facade across Companion (implemented), MRP, DMAP, AirPlay, and RAOP (planned)
+- **Multi-Protocol** -- Unified facade across MRP and Companion, with DMAP, AirPlay, and RAOP planned
 
 ## Requirements
 
@@ -116,6 +117,11 @@ if let creds = (handler as? CompanionPairingHandler)?.credentials {
 await handler.close()
 ```
 
+Use `.mrp` instead of `.companion` to pair against the direct Media Remote
+Protocol service. Persist the returned credentials under
+`ATVSettings.protocols.mrp.credentials` by calling
+`settings.setCredentials(credentials.serialize(), for: .mrp)`.
+
 ### Check Feature Availability
 
 ```swift
@@ -161,8 +167,8 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
+| **MRP** | Media Remote Protocol: protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
 | **Companion** | Modern control, apps, keyboard, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented |
-| **MRP** | Media Remote Protocol (protobuf-based) | Stub |
 | **DMAP** | Legacy Digital Media Access Protocol | Planned |
 | **AirPlay** | Audio/video streaming | Planned |
 | **RAOP** | Remote Audio Output Protocol | Planned |
@@ -201,7 +207,13 @@ Sources/SwiftATV/
     │   ├── CompanionInterfaces.swift
     │   └── CompanionService.swift
     └── MRP/
-        └── MRPProtocol.swift   # Message types + MRPPlayerState actor
+        ├── Protobuf/           # pyatv MRP .proto definitions
+        ├── MRPProtocol.swift   # TCP framing, protobuf dispatch, encryption
+        ├── MRPMessages.swift   # Outbound MRP message builders
+        ├── MRPPlayerState.swift # Now-playing state actor
+        ├── MRPInterfaces.swift # Remote, metadata, push, power, audio, features
+        ├── MRPPairing.swift    # MRP HAP pair-setup flow
+        └── MRPService.swift    # Direct-MRP lifecycle and facade registration
 ```
 
 ## Testing
@@ -210,7 +222,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 212 XCTest cases ported from pyatv plus 16 Swift Testing
+The test suite runs 217 XCTest cases ported from pyatv plus 43 Swift Testing
 cases for SwiftATV-specific logic:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -218,13 +230,14 @@ every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
 8-byte nonce), configuration/service merging, `Playing` state equality,
 device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
-`MessageDispatcher` actor behavior.
+MRP varint framing, MRP protobuf message construction, MRP player-state
+metadata, and `MessageDispatcher` actor behavior.
 
 **SwiftATV additions** (Swift Testing) — SRP-6a client verified against a
 canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,
 and matches A/M1/K byte-for-byte), HAP pair-setup state machine (M1 encoding,
 M3 output against canned M2, error-TLV surfacing, state ordering),
-`Playing.description` edge cases.
+`Playing.description` edge cases, and Companion connection race handling.
 
 CI runs the full suite on `macos-15` (Swift 6.0, 6.1) and
 `swift:6.0-jammy` / `swift:6.1-jammy` on `ubuntu-latest`, plus a

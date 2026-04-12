@@ -17,7 +17,7 @@ swift format lint --recursive Sources Tests
 
 No special setup or environment variables needed. Requires Swift 6.0+ and macOS 13+/iOS 16+.
 
-The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLanguageModes: [.v6]`) and strict concurrency enabled. All public protocol methods in `Interfaces.swift` are typed-throws (`async throws(ATVError)`); NIO and CryptoKit errors are wrapped into `ATVError` at the Companion / ChaCha20Cipher / HAPPairing boundaries. Classes that manage mutable internal state use `@unchecked Sendable` with encapsulated synchronization. The `MessageDispatcher`, `CompanionProtocolHandler`, `CompanionPower`/`Audio`/`Keyboard`, and `MRPPlayerState` use Swift actors for safe concurrency.
+The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLanguageModes: [.v6]`) and strict concurrency enabled. All public protocol methods in `Interfaces.swift` are typed-throws (`async throws(ATVError)`); NIO, CryptoKit, and SwiftProtobuf errors are wrapped into `ATVError` at the Companion / MRP / ChaCha20Cipher / HAPPairing boundaries. Classes that manage mutable internal state use `@unchecked Sendable` with encapsulated synchronization. The `MessageDispatcher`, `CompanionProtocolHandler`, `MRPProtocolHandler`, `CompanionPower`/`Audio`/`Keyboard`, and `MRPPlayerState` use Swift actors for safe concurrency.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLa
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
   - `Protocols/Companion/` -- Full Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify)
-  - `Protocols/MRP/` -- MRP stub (message types + player-state actor, connection implementation pending)
+  - `Protocols/MRP/` -- Direct MRP implementation (SwiftProtobuf-generated pyatv messages, TCP framing, pair-setup/pair-verify, interfaces, player-state actor)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
 
@@ -52,7 +52,7 @@ The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLa
 | Protocol | Status | Notes |
 |----------|--------|-------|
 | Companion | Complete | Connection, pair-setup (SRP-6a), pair-verify, all interfaces |
-| MRP | Stub | Types defined, needs protobuf compilation |
+| MRP | Implemented | Direct TCP/protobuf connection, pair-setup, pair-verify, remote, metadata, push, power, audio. AirPlay tunnel/streaming not included |
 | DMAP | Not started | Legacy protocol |
 | AirPlay | Not started | Streaming |
 | RAOP | Not started | Audio streaming |
@@ -71,7 +71,7 @@ The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLa
 - `apple/swift-nio` -- TCP/UDP for protocol connections
 - `apple/swift-nio-ssl` -- TLS support
 - `apple/swift-crypto` -- Ed25519, X25519, ChaCha20-Poly1305, HKDF
-- `apple/swift-protobuf` -- For MRP protocol (protobuf messages)
+- `apple/swift-protobuf` -- Generates and serializes MRP protobuf messages from pyatv `.proto` files
 - `attaswift/BigInt` -- 3072-bit modular exponentiation for SRP-6a pair-setup
 
 ## Docs stay in sync with the code (required)
@@ -112,7 +112,7 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `ChaCha20Tests` <- `tests/support/test_chacha20.py`
 - `DeviceInfoTests` <- `tests/support/test_device_info.py`
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
-- `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py`
+- `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus SwiftATV MRP framing/message coverage
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:

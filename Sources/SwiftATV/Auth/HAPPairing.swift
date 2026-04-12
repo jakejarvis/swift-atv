@@ -146,6 +146,9 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
         else {
             throw ATVError.pairingFailed("Missing identifier or signature in verify proof")
         }
+        if !credentials.atvIdentifier.isEmpty, deviceIdentifier != credentials.atvIdentifier {
+            throw ATVError.authenticationFailed("Pair-verify response came from an unexpected device")
+        }
 
         // Verify the device's signature
         let myPublicKey = Data(privateKey.publicKey.rawRepresentation)
