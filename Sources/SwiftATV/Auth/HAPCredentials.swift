@@ -38,7 +38,7 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
     public static let transient = HAPCredentials(
         ltpk: Data(),
         ltsk: Data(),
-        atvIdentifier: Data([0x74, 0x72, 0x61, 0x6E, 0x73, 0x69, 0x65, 0x6E, 0x74]), // "transient"
+        atvIdentifier: Data([0x74, 0x72, 0x61, 0x6E, 0x73, 0x69, 0x65, 0x6E, 0x74]),  // "transient"
         clientIdentifier: Data()
     )
 

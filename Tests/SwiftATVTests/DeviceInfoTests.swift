@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/support/test_device_info.py
@@ -125,7 +126,7 @@ final class DeviceInfoTests: XCTestCase {
 
     func testFromPropertiesInternalNameFallback() {
         let props = [
-            "internalName": "J42dAP",
+            "internalName": "J42dAP"
         ]
         let info = DeviceInfo.fromProperties(props)
         XCTAssertEqual(info.model, .gen4K)

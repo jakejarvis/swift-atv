@@ -27,14 +27,46 @@ public final class CompanionService: @unchecked Sendable {
     private var _touch: CompanionTouch?
     private var _features: CompanionFeatures?
 
-    public var remoteControl: CompanionRemoteControl? { lock.lock(); defer { lock.unlock() }; return _remoteControl }
-    public var apps: CompanionApps? { lock.lock(); defer { lock.unlock() }; return _apps }
-    public var userAccounts: CompanionUserAccounts? { lock.lock(); defer { lock.unlock() }; return _userAccounts }
-    public var power: CompanionPower? { lock.lock(); defer { lock.unlock() }; return _power }
-    public var audio: CompanionAudio? { lock.lock(); defer { lock.unlock() }; return _audio }
-    public var keyboard: CompanionKeyboard? { lock.lock(); defer { lock.unlock() }; return _keyboard }
-    public var touch: CompanionTouch? { lock.lock(); defer { lock.unlock() }; return _touch }
-    public var features: CompanionFeatures? { lock.lock(); defer { lock.unlock() }; return _features }
+    public var remoteControl: CompanionRemoteControl? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _remoteControl
+    }
+    public var apps: CompanionApps? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _apps
+    }
+    public var userAccounts: CompanionUserAccounts? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _userAccounts
+    }
+    public var power: CompanionPower? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _power
+    }
+    public var audio: CompanionAudio? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _audio
+    }
+    public var keyboard: CompanionKeyboard? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _keyboard
+    }
+    public var touch: CompanionTouch? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _touch
+    }
+    public var features: CompanionFeatures? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _features
+    }
 
     public init(host: String, port: Int, credentials: HAPCredentials? = nil) {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)

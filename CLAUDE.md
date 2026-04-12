@@ -12,9 +12,9 @@ swift test           # Run all tests (12 test files)
 swift package clean  # Clean build artifacts
 ```
 
-No special setup or environment variables needed. Requires Swift 6.3+ and macOS 13+/iOS 16+.
+No special setup or environment variables needed. Requires Swift 6.0+ and macOS 13+/iOS 16+.
 
-The package uses `swift-tools-version: 6.3` with strict concurrency enabled by default. Classes that manage mutable internal state use `@unchecked Sendable` with encapsulated synchronization. The `MessageDispatcher` and `CompanionProtocolHandler` use Swift actors for safe concurrency.
+The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLanguageModes: [.v6]`) and strict concurrency enabled. Classes that manage mutable internal state use `@unchecked Sendable` with encapsulated synchronization. The `MessageDispatcher` and `CompanionProtocolHandler` use Swift actors for safe concurrency.
 
 ## Architecture
 

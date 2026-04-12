@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/test_interface.py
@@ -25,7 +26,7 @@ final class InterfaceTests: XCTestCase {
             seasonNumber: 1245,
             episodeNumber: 2468,
             contentIdentifier: "content_id",
-            iTunesStoreIdentifier: 123456789
+            iTunesStoreIdentifier: 123_456_789
         )
 
         let out = playing.description

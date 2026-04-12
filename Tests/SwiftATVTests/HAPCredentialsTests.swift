@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Tests for HAP credentials and hex utilities.

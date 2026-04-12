@@ -65,7 +65,11 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
 
     public var service: ServiceInfo { _service }
     public var deviceProvidesPin: Bool { true }
-    public var hasPaired: Bool { lock.lock(); defer { lock.unlock() }; return _hasPaired }
+    public var hasPaired: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _hasPaired
+    }
 
     private init(config: AppleTVConfiguration, service: ServiceInfo, connection: CompanionConnection) {
         self.config = config

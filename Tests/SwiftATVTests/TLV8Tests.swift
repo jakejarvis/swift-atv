@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/auth/test_hap_tlv8.py
@@ -20,10 +21,12 @@ final class TLV8Tests: XCTestCase {
             TLV8.Entry(tag: 4, data: Data("222".utf8)),
         ]
         let encoded = TLV8.encode(entries)
-        XCTAssertEqual(encoded, Data([
-            0x01, 0x03, 0x31, 0x31, 0x31,
-            0x04, 0x03, 0x32, 0x32, 0x32,
-        ]))
+        XCTAssertEqual(
+            encoded,
+            Data([
+                0x01, 0x03, 0x31, 0x31, 0x31,
+                0x04, 0x03, 0x32, 0x32, 0x32,
+            ]))
     }
 
     func testWriteKeyLargerThan255Bytes() {

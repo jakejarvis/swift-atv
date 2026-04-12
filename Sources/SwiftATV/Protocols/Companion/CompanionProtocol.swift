@@ -141,9 +141,10 @@ public actor CompanionProtocolHandler {
             Task {
                 try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 if let waiter = self.pendingRequests.removeValue(forKey: currentXID) {
-                    waiter.resume(throwing: ATVError.operationTimeout(
-                        "Timeout waiting for response to \(identifier)"
-                    ))
+                    waiter.resume(
+                        throwing: ATVError.operationTimeout(
+                            "Timeout waiting for response to \(identifier)"
+                        ))
                 }
             }
         }
@@ -212,7 +213,7 @@ public actor CompanionProtocolHandler {
     /// Subscribe to events from the device.
     public func subscribeEvents(_ events: [String]) async throws {
         let content = OPACK.Value.dictionary([
-            ("_regEvents", .array(events.map { .string($0) })),
+            ("_regEvents", .array(events.map { .string($0) }))
         ])
         _ = try await sendRequest("_interest", content: content)
     }
@@ -230,7 +231,7 @@ public actor CompanionProtocolHandler {
     /// Stop touchpad.
     public func stopTouch() async throws {
         let content = OPACK.Value.dictionary([
-            ("_i", .uint(1)),
+            ("_i", .uint(1))
         ])
         try await sendEvent("_touchStop", content: content)
     }

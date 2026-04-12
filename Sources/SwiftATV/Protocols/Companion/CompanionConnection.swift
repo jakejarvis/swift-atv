@@ -158,9 +158,10 @@ public final class CompanionConnection: @unchecked Sendable {
                 let waiter = lock.withLock {
                     frameWaiters.removeValue(forKey: type.rawValue)
                 }
-                waiter?.resume(throwing: ATVError.operationTimeout(
-                    "Timeout waiting for frame type \(type)"
-                ))
+                waiter?.resume(
+                    throwing: ATVError.operationTimeout(
+                        "Timeout waiting for frame type \(type)"
+                    ))
             }
         }
     }
@@ -191,7 +192,8 @@ public final class CompanionConnection: @unchecked Sendable {
         receiveBuffer.append(data)
 
         while receiveBuffer.count >= Self.headerLength {
-            let payloadLength = (Int(receiveBuffer[1]) << 16)
+            let payloadLength =
+                (Int(receiveBuffer[1]) << 16)
                 | (Int(receiveBuffer[2]) << 8)
                 | Int(receiveBuffer[3])
 

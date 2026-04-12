@@ -193,8 +193,12 @@ private struct UnsupportedRemoteControl: RemoteControl {
     func topMenu() async throws { throw ATVError.notSupported("Remote control not available") }
     func suspend() async throws { throw ATVError.notSupported("Remote control not available") }
     func wakeUp() async throws { throw ATVError.notSupported("Remote control not available") }
-    func skipForward(interval: TimeInterval) async throws { throw ATVError.notSupported("Remote control not available") }
-    func skipBackward(interval: TimeInterval) async throws { throw ATVError.notSupported("Remote control not available") }
+    func skipForward(interval: TimeInterval) async throws {
+        throw ATVError.notSupported("Remote control not available")
+    }
+    func skipBackward(interval: TimeInterval) async throws {
+        throw ATVError.notSupported("Remote control not available")
+    }
     func setPosition(_ position: Int) async throws { throw ATVError.notSupported("Remote control not available") }
     func setShuffle(_ state: ShuffleState) async throws { throw ATVError.notSupported("Remote control not available") }
     func setRepeat(_ state: RepeatState) async throws { throw ATVError.notSupported("Remote control not available") }
@@ -222,7 +226,9 @@ private struct UnsupportedPushUpdater: PushUpdater {
 
 private struct UnsupportedStream: StreamController {
     func playURL(_ url: URL) async throws { throw ATVError.notSupported("Streaming not available") }
-    func streamFile(_ fileURL: URL, metadata: MediaMetadata?) async throws { throw ATVError.notSupported("Streaming not available") }
+    func streamFile(_ fileURL: URL, metadata: MediaMetadata?) async throws {
+        throw ATVError.notSupported("Streaming not available")
+    }
     func close() async {}
 }
 
@@ -254,7 +260,9 @@ private struct UnsupportedAudio: AudioController {
     var volumeStream: AsyncStream<Float> { AsyncStream { $0.finish() } }
     var outputDevices: [OutputDevice] { get async { [] } }
     var outputDevicesStream: AsyncStream<[OutputDevice]> { AsyncStream { $0.finish() } }
-    func setVolume(_ level: Float, device: OutputDevice?) async throws { throw ATVError.notSupported("Audio not available") }
+    func setVolume(_ level: Float, device: OutputDevice?) async throws {
+        throw ATVError.notSupported("Audio not available")
+    }
     func volumeUp() async throws { throw ATVError.notSupported("Audio not available") }
     func volumeDown() async throws { throw ATVError.notSupported("Audio not available") }
     func addOutputDevices(_ deviceIDs: [String]) async throws { throw ATVError.notSupported("Audio not available") }
@@ -272,7 +280,9 @@ private struct UnsupportedKeyboard: KeyboardController {
 }
 
 private struct UnsupportedTouch: TouchController {
-    func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws { throw ATVError.notSupported("Touch not available") }
+    func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws {
+        throw ATVError.notSupported("Touch not available")
+    }
     func action(x: Int, y: Int, mode: TouchAction) async throws { throw ATVError.notSupported("Touch not available") }
     func click(action: InputAction) async throws { throw ATVError.notSupported("Touch not available") }
 }

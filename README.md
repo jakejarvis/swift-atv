@@ -17,7 +17,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 ## Requirements
 
-- Swift 6.3+
+- Swift 6.0+
 - macOS 13+ / iOS 16+ / tvOS 16+
 
 ## Installation
@@ -28,9 +28,12 @@ Add SwiftATV to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jakejarvis/swift-atv.git", branch: "main"),
+    .package(url: "https://github.com/jakejarvis/swift-atv.git", from: "0.1.0"),
 ]
 ```
+
+> SwiftATV is pre-1.0 — the API may change in minor releases. Review the
+> [CHANGELOG](CHANGELOG.md) before upgrading.
 
 Then add it as a dependency to your target:
 

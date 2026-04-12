@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Thread-safe accumulator for use in @Sendable test closures.
@@ -30,9 +31,9 @@ final class MRPPlayerStateTests: XCTestCase {
 
     // MARK: - Basic state
 
-    func testDefaultState() {
+    func testDefaultState() async {
         let state = MRPPlayerState()
-        let playing = state.currentPlaying
+        let playing = await state.currentPlaying
 
         XCTAssertEqual(playing.mediaType, .unknown)
         XCTAssertEqual(playing.deviceState, .idle)
@@ -54,7 +55,7 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(received.values, ["hello"])
 
         await dispatcher.dispatch("type2", message: "world")
-        XCTAssertEqual(received.values, ["hello"]) // type2 not registered
+        XCTAssertEqual(received.values, ["hello"])  // type2 not registered
     }
 
     func testMessageDispatcherMultipleHandlers() async {
@@ -87,7 +88,7 @@ final class MRPPlayerStateTests: XCTestCase {
 
         await dispatcher.removeHandler(id)
         await dispatcher.dispatch("test", message: "second")
-        XCTAssertEqual(received.count, 1) // handler removed
+        XCTAssertEqual(received.count, 1)  // handler removed
     }
 
     func testMessageDispatcherRemoveAllHandlers() async {
@@ -139,10 +140,9 @@ final class MRPPlayerStateTests: XCTestCase {
 
         await dispatcher.listen(
             to: "numbers",
-            filter: { $0 > 5 }
-        ) { msg in
-            received.append(msg)
-        }
+            filter: { $0 > 5 },
+            handler: { msg in received.append(msg) }
+        )
 
         await dispatcher.dispatch("numbers", message: 3)
         await dispatcher.dispatch("numbers", message: 7)

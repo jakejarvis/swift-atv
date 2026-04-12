@@ -166,11 +166,11 @@ public struct Playing: Sendable, Hashable, CustomStringConvertible {
         if let artist { parts.append("Artist: \(artist)") }
         if let album { parts.append("Album: \(album)") }
         switch (position, totalTime) {
-        case let (p?, t?):
+        case (let p?, let t?):
             parts.append("Position: \(p)/\(t)s")
-        case let (p?, nil):
+        case (let p?, nil):
             parts.append("Position: \(p)s")
-        case let (nil, t?):
+        case (nil, let t?):
             parts.append("Total time: \(t)s")
         case (nil, nil):
             break

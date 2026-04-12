@@ -151,7 +151,8 @@ public actor ATVScanner {
         guard let proto = service.serviceType.atvProtocol else { return }
 
         // Extract identifier from TXT record
-        let identifier = service.txtRecord["UniqueIdentifier"]
+        let identifier =
+            service.txtRecord["UniqueIdentifier"]
             ?? service.txtRecord["deviceid"]
             ?? service.txtRecord["DACP-ID"]
 
@@ -286,8 +287,8 @@ public actor ATVScanner {
             switch state {
             case .ready:
                 if let path = connection.currentPath,
-                   let remoteEndpoint = path.remoteEndpoint,
-                   case .hostPort(let host, let port) = remoteEndpoint
+                    let remoteEndpoint = path.remoteEndpoint,
+                    case .hostPort(let host, let port) = remoteEndpoint
                 {
                     let hostStr: String
                     switch host {

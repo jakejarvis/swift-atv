@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/test_convert.py

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/protocols/companion/test_companion.py

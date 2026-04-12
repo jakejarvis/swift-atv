@@ -254,7 +254,7 @@ public enum OPACK {
             data.append(int16Tag)
             var le = UInt16(value).littleEndian
             data.append(Data(bytes: &le, count: 2))
-        } else if value <= 0xFFFFFFFF {
+        } else if value <= 0xFFFF_FFFF {
             data.append(int32Tag)
             var le = UInt32(value).littleEndian
             data.append(Data(bytes: &le, count: 4))
@@ -274,7 +274,7 @@ public enum OPACK {
             data.append(negInt16Tag)
             var le = UInt16(absVal).littleEndian
             data.append(Data(bytes: &le, count: 2))
-        } else if absVal <= 0xFFFFFFFF {
+        } else if absVal <= 0xFFFF_FFFF {
             data.append(negInt32Tag)
             var le = UInt32(absVal).littleEndian
             data.append(Data(bytes: &le, count: 4))
@@ -317,16 +317,17 @@ public enum OPACK {
             }
             let bytes = data[offset..<offset + 16]
             offset += 16
-            let uuid = UUID(uuid: (
-                bytes[bytes.startIndex], bytes[bytes.startIndex + 1],
-                bytes[bytes.startIndex + 2], bytes[bytes.startIndex + 3],
-                bytes[bytes.startIndex + 4], bytes[bytes.startIndex + 5],
-                bytes[bytes.startIndex + 6], bytes[bytes.startIndex + 7],
-                bytes[bytes.startIndex + 8], bytes[bytes.startIndex + 9],
-                bytes[bytes.startIndex + 10], bytes[bytes.startIndex + 11],
-                bytes[bytes.startIndex + 12], bytes[bytes.startIndex + 13],
-                bytes[bytes.startIndex + 14], bytes[bytes.startIndex + 15]
-            ))
+            let uuid = UUID(
+                uuid: (
+                    bytes[bytes.startIndex], bytes[bytes.startIndex + 1],
+                    bytes[bytes.startIndex + 2], bytes[bytes.startIndex + 3],
+                    bytes[bytes.startIndex + 4], bytes[bytes.startIndex + 5],
+                    bytes[bytes.startIndex + 6], bytes[bytes.startIndex + 7],
+                    bytes[bytes.startIndex + 8], bytes[bytes.startIndex + 9],
+                    bytes[bytes.startIndex + 10], bytes[bytes.startIndex + 11],
+                    bytes[bytes.startIndex + 12], bytes[bytes.startIndex + 13],
+                    bytes[bytes.startIndex + 14], bytes[bytes.startIndex + 15]
+                ))
             return .uuid(uuid)
 
         case absoluteTime:
@@ -443,7 +444,7 @@ public enum OPACK {
             while offset < data.count && data[offset] != terminator {
                 arr.append(try decodeValue(data, offset: &offset))
             }
-            if offset < data.count { offset += 1 } // skip terminator
+            if offset < data.count { offset += 1 }  // skip terminator
             return .array(arr)
 
         // Fixed-size dicts
@@ -466,7 +467,7 @@ public enum OPACK {
                 let val = try decodeValue(data, offset: &offset)
                 pairs.append((key, val))
             }
-            if offset < data.count { offset += 1 } // skip terminator
+            if offset < data.count { offset += 1 }  // skip terminator
             return .dict(pairs)
 
         default:

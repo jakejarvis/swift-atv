@@ -180,113 +180,81 @@ public struct CompanionUserAccounts: UserAccountsController, Sendable {
 // MARK: - Power
 
 /// Companion protocol implementation of PowerController.
-/// Uses NSLock to protect mutable power state.
-public final class CompanionPower: PowerController, @unchecked Sendable {
+public actor CompanionPower: PowerController {
     private let handler: CompanionProtocolHandler
-    private let lock = NSLock()
     private var _powerState: PowerState = .unknown
-    private var continuation: AsyncStream<PowerState>.Continuation?
-    private var _powerStream: AsyncStream<PowerState>?
+    public nonisolated let powerStateStream: AsyncStream<PowerState>
+    private nonisolated let continuation: AsyncStream<PowerState>.Continuation
 
     public init(protocol handler: CompanionProtocolHandler) {
         self.handler = handler
+        let (stream, cont) = AsyncStream<PowerState>.makeStream()
+        self.powerStateStream = stream
+        self.continuation = cont
     }
 
-    public var powerState: PowerState {
-        get async {
-            lock.withLock { _powerState }
-        }
-    }
-
-    public var powerStateStream: AsyncStream<PowerState> {
-        lock.lock()
-        defer { lock.unlock() }
-        if let existing = _powerStream { return existing }
-        let stream = AsyncStream<PowerState> { [weak self] continuation in
-            self?.lock.lock()
-            self?.continuation = continuation
-            self?.lock.unlock()
-        }
-        _powerStream = stream
-        return stream
-    }
+    public var powerState: PowerState { _powerState }
 
     public func turnOn(awaitNewState: Bool) async throws {
-        try await handler.sendEvent("_hidC", content: OPACK.Value.dictionary([
-            ("_hBtS", .uint(1)),
-            ("_hidC", .uint(UInt64(HIDCommand.wake.rawValue))),
-        ]))
-        try await handler.sendEvent("_hidC", content: OPACK.Value.dictionary([
-            ("_hBtS", .uint(2)),
-            ("_hidC", .uint(UInt64(HIDCommand.wake.rawValue))),
-        ]))
-        updatePowerState(.on)
+        try await handler.sendEvent(
+            "_hidC",
+            content: OPACK.Value.dictionary([
+                ("_hBtS", .uint(1)),
+                ("_hidC", .uint(UInt64(HIDCommand.wake.rawValue))),
+            ]))
+        try await handler.sendEvent(
+            "_hidC",
+            content: OPACK.Value.dictionary([
+                ("_hBtS", .uint(2)),
+                ("_hidC", .uint(UInt64(HIDCommand.wake.rawValue))),
+            ]))
+        _powerState = .on
+        continuation.yield(.on)
     }
 
     public func turnOff(awaitNewState: Bool) async throws {
-        try await handler.sendEvent("_hidC", content: OPACK.Value.dictionary([
-            ("_hBtS", .uint(1)),
-            ("_hidC", .uint(UInt64(HIDCommand.sleep.rawValue))),
-        ]))
-        try await handler.sendEvent("_hidC", content: OPACK.Value.dictionary([
-            ("_hBtS", .uint(2)),
-            ("_hidC", .uint(UInt64(HIDCommand.sleep.rawValue))),
-        ]))
-        updatePowerState(.off)
-    }
-
-    private func updatePowerState(_ state: PowerState) {
-        lock.lock()
-        _powerState = state
-        let cont = continuation
-        lock.unlock()
-        cont?.yield(state)
+        try await handler.sendEvent(
+            "_hidC",
+            content: OPACK.Value.dictionary([
+                ("_hBtS", .uint(1)),
+                ("_hidC", .uint(UInt64(HIDCommand.sleep.rawValue))),
+            ]))
+        try await handler.sendEvent(
+            "_hidC",
+            content: OPACK.Value.dictionary([
+                ("_hBtS", .uint(2)),
+                ("_hidC", .uint(UInt64(HIDCommand.sleep.rawValue))),
+            ]))
+        _powerState = .off
+        continuation.yield(.off)
     }
 }
 
 // MARK: - Audio
 
 /// Companion protocol implementation of AudioController.
-/// Uses NSLock to protect mutable volume/device state.
-public final class CompanionAudio: AudioController, @unchecked Sendable {
+public actor CompanionAudio: AudioController {
     private let handler: CompanionProtocolHandler
-    private let lock = NSLock()
     private var _volume: Float = 0
     private var _outputDevices: [OutputDevice] = []
-    private var volumeContinuation: AsyncStream<Float>.Continuation?
-    private var devicesContinuation: AsyncStream<[OutputDevice]>.Continuation?
+    public nonisolated let volumeStream: AsyncStream<Float>
+    private nonisolated let volumeContinuation: AsyncStream<Float>.Continuation
+    public nonisolated let outputDevicesStream: AsyncStream<[OutputDevice]>
+    private nonisolated let devicesContinuation: AsyncStream<[OutputDevice]>.Continuation
 
     public init(protocol handler: CompanionProtocolHandler) {
         self.handler = handler
+        let (vs, vc) = AsyncStream<Float>.makeStream()
+        self.volumeStream = vs
+        self.volumeContinuation = vc
+        let (ds, dc) = AsyncStream<[OutputDevice]>.makeStream()
+        self.outputDevicesStream = ds
+        self.devicesContinuation = dc
     }
 
-    public var volume: Float {
-        get async {
-            lock.withLock { _volume }
-        }
-    }
+    public var volume: Float { _volume }
 
-    public var volumeStream: AsyncStream<Float> {
-        AsyncStream { [weak self] continuation in
-            self?.lock.lock()
-            self?.volumeContinuation = continuation
-            self?.lock.unlock()
-        }
-    }
-
-    public var outputDevices: [OutputDevice] {
-        get async {
-            lock.withLock { _outputDevices }
-        }
-    }
-
-    public var outputDevicesStream: AsyncStream<[OutputDevice]> {
-        AsyncStream { [weak self] continuation in
-            self?.lock.lock()
-            self?.devicesContinuation = continuation
-            self?.lock.unlock()
-        }
-    }
+    public var outputDevices: [OutputDevice] { _outputDevices }
 
     public func setVolume(_ level: Float, device: OutputDevice?) async throws {
         let content = OPACK.Value.dictionary([
@@ -294,21 +262,16 @@ public final class CompanionAudio: AudioController, @unchecked Sendable {
             ("_vol", .double(Double(level))),
         ])
         _ = try await handler.sendRequest("_mcc", content: content)
-        let cont: AsyncStream<Float>.Continuation? = lock.withLock {
-            _volume = level
-            return volumeContinuation
-        }
-        cont?.yield(level)
+        _volume = level
+        volumeContinuation.yield(level)
     }
 
     public func volumeUp() async throws {
-        let current = await volume
-        try await setVolume(min(current + 5, 100))
+        try await setVolume(min(_volume + 5, 100), device: nil)
     }
 
     public func volumeDown() async throws {
-        let current = await volume
-        try await setVolume(max(current - 5, 0))
+        try await setVolume(max(_volume - 5, 0), device: nil)
     }
 
     public func addOutputDevices(_ deviceIDs: [String]) async throws {
@@ -327,25 +290,20 @@ public final class CompanionAudio: AudioController, @unchecked Sendable {
 // MARK: - Keyboard
 
 /// Companion protocol implementation of KeyboardController.
-/// Uses NSLock to protect mutable focus state.
-public final class CompanionKeyboard: KeyboardController, @unchecked Sendable {
+public actor CompanionKeyboard: KeyboardController {
     private let handler: CompanionProtocolHandler
-    private let lock = NSLock()
     private var _focusState: KeyboardFocusState = .unknown
+    public nonisolated let focusStateStream: AsyncStream<KeyboardFocusState>
+    private nonisolated let continuation: AsyncStream<KeyboardFocusState>.Continuation
 
     public init(protocol handler: CompanionProtocolHandler) {
         self.handler = handler
+        let (stream, cont) = AsyncStream<KeyboardFocusState>.makeStream()
+        self.focusStateStream = stream
+        self.continuation = cont
     }
 
-    public var textFocusState: KeyboardFocusState {
-        get async {
-            lock.withLock { _focusState }
-        }
-    }
-
-    public var focusStateStream: AsyncStream<KeyboardFocusState> {
-        AsyncStream { _ in }
-    }
+    public var textFocusState: KeyboardFocusState { _focusState }
 
     public func textGet() async throws -> String? {
         throw ATVError.notSupported("textGet not yet implemented for Companion")
@@ -391,9 +349,7 @@ public struct CompanionTouch: TouchController, Sendable {
             let y = Int(Double(startY) + progress * Double(endY - startY))
 
             let phase: TouchAction
-            if i == 0 { phase = .press }
-            else if i == steps { phase = .release }
-            else { phase = .hold }
+            if i == 0 { phase = .press } else if i == steps { phase = .release } else { phase = .hold }
 
             try await sendTouchEvent(x: x, y: y, phase: phase)
             if i < steps {

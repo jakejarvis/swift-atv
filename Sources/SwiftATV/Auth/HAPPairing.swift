@@ -52,7 +52,7 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
         let response = TLV8.decode(responseData)
 
         guard let peerPubKeyData = response[TLVTag.publicKey.rawValue],
-              let encryptedData = response[TLVTag.encryptedData.rawValue]
+            let encryptedData = response[TLVTag.encryptedData.rawValue]
         else {
             throw ATVError.pairingFailed("Missing public key or encrypted data in verify response")
         }
@@ -93,7 +93,7 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
 
         let innerTLV = TLV8.decode(decrypted)
         guard let deviceIdentifier = innerTLV[TLVTag.identifier.rawValue],
-              let deviceSignature = innerTLV[TLVTag.signature.rawValue]
+            let deviceSignature = innerTLV[TLVTag.signature.rawValue]
         else {
             throw ATVError.pairingFailed("Missing identifier or signature in verify proof")
         }
@@ -105,11 +105,13 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
         deviceInfo.append(deviceIdentifier)
         deviceInfo.append(myPublicKey)
 
-        guard (try? SRPAuthHandler.verifySignature(
-            deviceSignature,
-            message: deviceInfo,
-            publicKey: credentials.ltpk
-        )) == true else {
+        guard
+            (try? SRPAuthHandler.verifySignature(
+                deviceSignature,
+                message: deviceInfo,
+                publicKey: credentials.ltpk
+            )) == true
+        else {
             throw ATVError.authenticationFailed("Device signature verification failed")
         }
 

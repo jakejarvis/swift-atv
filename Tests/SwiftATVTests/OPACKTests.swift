@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/support/test_opack.py
@@ -382,13 +383,16 @@ final class OPACKTests: XCTestCase {
             ("_i", .string("_systemInfo")),
             ("_t", .uint(2)),
             ("_x", .uint(12345)),
-            ("_c", .dictionary([
-                ("_bf", .uint(0)),
-                ("_cf", .uint(512)),
-                ("model", .string("iPhone14,2")),
-                ("name", .string("SwiftATV")),
-                ("nested", .array([.bool(true), .null, .int(-1)])),
-            ])),
+            (
+                "_c",
+                .dictionary([
+                    ("_bf", .uint(0)),
+                    ("_cf", .uint(512)),
+                    ("model", .string("iPhone14,2")),
+                    ("name", .string("SwiftATV")),
+                    ("nested", .array([.bool(true), .null, .int(-1)])),
+                ])
+            ),
         ])
 
         let encoded = OPACK.encode(value)

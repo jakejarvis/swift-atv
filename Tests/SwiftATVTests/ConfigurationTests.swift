@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import SwiftATV
 
 /// Ported from pyatv tests/test_conf.py
@@ -143,9 +144,10 @@ final class ConfigurationTests: XCTestCase {
 
     func testDescription() {
         var config = makeConfig()
-        config.addService(ServiceInfo(
-            protocol: .dmap, port: 3689, identifier: identifier1, credentials: "LOGIN_ID"
-        ))
+        config.addService(
+            ServiceInfo(
+                protocol: .dmap, port: 3689, identifier: identifier1, credentials: "LOGIN_ID"
+            ))
         config.addService(ServiceInfo(protocol: .mrp, port: port2, identifier: identifier2))
 
         let output = config.description
