@@ -58,19 +58,25 @@ let companionOnly = try await ATVScanner.scan(
 
 The first time your app talks to an Apple TV, you must exchange a PIN. The
 Apple TV displays the PIN on screen; your app submits it back to complete
-the handshake.
+the handshake. SwiftATV runs the full HAP SRP-6a pair-setup handshake for
+you; all you need is the `begin` → `pin` → `finish` flow.
 
 ```swift
 let handler = try await SwiftATV.pair(device, protocol: .companion)
-try await handler.begin()
 
-// Apple TV now displays a 4-digit PIN. Prompt the user for it.
+// begin() starts the handshake. The Apple TV now displays a 4-digit PIN
+// on screen. Ask the user to enter it.
+try await handler.begin()
 try await handler.pin(userEnteredPIN)
 try await handler.finish()
 
-// Persist the resulting credentials somewhere safe.
-let credentialsString = handler.credentials?.serialized
-try keychain.store(credentialsString, for: device.mainIdentifier)
+// Pull out the resulting HAP long-term credentials. They're only exposed
+// on the concrete CompanionPairingHandler, not the PairingHandler protocol.
+if let companion = handler as? CompanionPairingHandler,
+   let credentials = companion.credentials
+{
+    try keychain.store(credentials.serialize(), for: device.mainIdentifier)
+}
 
 await handler.close()
 ```
@@ -82,11 +88,11 @@ connection.
 ## Connect and issue commands
 
 Once paired, connect by loading the stored credentials into
-``ATVSettings`` and calling ``SwiftATV/connect(_:settings:)``:
+``ATVSettings`` and calling ``SwiftATV/connect(_:protocol:settings:)``:
 
 ```swift
-let settings = ATVSettings()
-settings.protocols.companion.credentials = storedCredentialsString
+var settings = ATVSettings()
+settings.setCredentials(storedCredentialsString, for: .companion)
 
 let atv = try await SwiftATV.connect(device, settings: settings)
 

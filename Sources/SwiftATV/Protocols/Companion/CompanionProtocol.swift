@@ -117,11 +117,17 @@ public actor CompanionProtocolHandler {
     // MARK: - Sending Messages
 
     /// Send an OPACK request and wait for the response.
+    ///
+    /// Race safety: the XID→continuation mapping is installed **before**
+    /// the send so a fast device reply cannot be silently dropped. The
+    /// old ordering (send then register) produced occasional false
+    /// timeouts when the Apple TV responded on the same event-loop tick
+    /// as the write.
     public func sendRequest(
         _ identifier: String,
         content: OPACK.Value = .dict([]),
         timeout: TimeInterval = defaultCompanionTimeout
-    ) async throws -> OPACK.Value {
+    ) async throws(ATVError) -> OPACK.Value {
         xid += 1
         let currentXID = xid
 
@@ -131,30 +137,54 @@ public actor CompanionProtocolHandler {
             (.string("_c"), content),
             (.string("_x"), .uint(UInt64(currentXID))),
         ])
-
         let data = OPACK.encode(message)
-        try await connection.send(type: .eOPACK, payload: data)
 
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingRequests[currentXID] = continuation
-
-            Task {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                if let waiter = self.pendingRequests.removeValue(forKey: currentXID) {
-                    waiter.resume(
-                        throwing: ATVError.operationTimeout(
-                            "Timeout waiting for response to \(identifier)"
-                        ))
+        do {
+            return try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<OPACK.Value, Error>) in
+                // 1. Synchronously install the waiter in the actor's state.
+                //    (Fine to touch actor-isolated state here: this closure
+                //    runs synchronously on the actor before any suspension.)
+                self.pendingRequests[currentXID] = continuation
+                // 2. Kick off the send + timeout on a detached Task that
+                //    hops back onto the actor when it needs to touch state.
+                Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.connection.send(type: .eOPACK, payload: data)
+                    } catch {
+                        if let waiter = await self.takePendingRequest(xid: currentXID) {
+                            waiter.resume(throwing: error)
+                        }
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    if let waiter = await self.takePendingRequest(xid: currentXID) {
+                        waiter.resume(
+                            throwing: ATVError.operationTimeout(
+                                "Timeout waiting for response to \(identifier)"
+                            ))
+                    }
                 }
             }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
         }
+    }
+
+    /// Actor-isolated helper so the send + timeout Task can remove a
+    /// pending request atomically before resuming its continuation.
+    private func takePendingRequest(xid: Int) -> CheckedContinuation<OPACK.Value, Error>? {
+        pendingRequests.removeValue(forKey: xid)
     }
 
     /// Send an OPACK event (no response expected).
     public func sendEvent(
         _ identifier: String,
         content: OPACK.Value = .dict([])
-    ) async throws {
+    ) async throws(ATVError) {
         let message = OPACK.Value.dict([
             (.string("_i"), .string(identifier)),
             (.string("_t"), .uint(UInt64(CompanionMessageType.event.rawValue))),
@@ -174,7 +204,7 @@ public actor CompanionProtocolHandler {
         remotePairingID: String? = nil,
         clientID: String? = nil,
         deviceID: String? = nil
-    ) async throws {
+    ) async throws(ATVError) {
         let rpID = remotePairingID ?? UUID().uuidString
         let idsID = clientID ?? UUID().uuidString
         let pubID = deviceID ?? UUID().uuidString
@@ -196,7 +226,7 @@ public actor CompanionProtocolHandler {
     }
 
     /// Start a session with the device.
-    public func startSession() async throws {
+    public func startSession() async throws(ATVError) {
         let localSID = UInt64.random(in: 0..<UInt64(UInt32.max))
 
         let content = OPACK.Value.dictionary([
@@ -211,7 +241,7 @@ public actor CompanionProtocolHandler {
     }
 
     /// Subscribe to events from the device.
-    public func subscribeEvents(_ events: [String]) async throws {
+    public func subscribeEvents(_ events: [String]) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_regEvents", .array(events.map { .string($0) }))
         ])
@@ -219,7 +249,7 @@ public actor CompanionProtocolHandler {
     }
 
     /// Initialize touchpad.
-    public func startTouch() async throws {
+    public func startTouch() async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_height", .uint(1000)),
             ("_tFl", .uint(0)),
@@ -229,7 +259,7 @@ public actor CompanionProtocolHandler {
     }
 
     /// Stop touchpad.
-    public func stopTouch() async throws {
+    public func stopTouch() async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_i", .uint(1))
         ])

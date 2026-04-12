@@ -64,7 +64,7 @@ public actor ATVScanner {
         timeout: TimeInterval = 5.0,
         identifiers: Set<String>? = nil,
         protocols: Set<ATVProtocol>? = nil
-    ) async throws -> [AppleTVConfiguration] {
+    ) async throws(ATVError) -> [AppleTVConfiguration] {
         let scanner = ATVScanner()
         return try await scanner.performScan(
             timeout: timeout,
@@ -81,7 +81,7 @@ public actor ATVScanner {
         timeout: TimeInterval,
         identifiers: Set<String>?,
         protocols: Set<ATVProtocol>?
-    ) async throws -> [AppleTVConfiguration] {
+    ) async throws(ATVError) -> [AppleTVConfiguration] {
         // Determine which service types to scan based on protocol filter
         let serviceTypes: [BonjourServiceType]
         if let protocols {
@@ -97,20 +97,27 @@ public actor ATVScanner {
         let allTypes = serviceTypes + [.deviceInfo]
 
         // Browse for each service type concurrently
-        let services = try await withThrowingTaskGroup(
-            of: [DiscoveredService].self
-        ) { group in
-            for serviceType in allTypes {
-                group.addTask {
-                    try await Self.browse(serviceType: serviceType, timeout: timeout)
+        let services: [DiscoveredService]
+        do {
+            services = try await withThrowingTaskGroup(
+                of: [DiscoveredService].self
+            ) { group in
+                for serviceType in allTypes {
+                    group.addTask {
+                        try await Self.browse(serviceType: serviceType, timeout: timeout)
+                    }
                 }
-            }
 
-            var allServices: [DiscoveredService] = []
-            for try await result in group {
-                allServices.append(contentsOf: result)
+                var allServices: [DiscoveredService] = []
+                for try await result in group {
+                    allServices.append(contentsOf: result)
+                }
+                return allServices
             }
-            return allServices
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
         }
 
         // Aggregate services by host address

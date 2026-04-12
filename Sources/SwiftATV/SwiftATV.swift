@@ -32,7 +32,7 @@ public enum SwiftATV {
         timeout: TimeInterval = 5.0,
         identifiers: Set<String>? = nil,
         protocols: Set<ATVProtocol>? = nil
-    ) async throws -> [AppleTVConfiguration] {
+    ) async throws(ATVError) -> [AppleTVConfiguration] {
         try await ATVScanner.scan(
             timeout: timeout,
             identifiers: identifiers,
@@ -54,7 +54,7 @@ public enum SwiftATV {
         _ config: AppleTVConfiguration,
         protocol: ATVProtocol? = nil,
         settings: ATVSettings? = nil
-    ) async throws -> any AppleTVDevice {
+    ) async throws(ATVError) -> any AppleTVDevice {
         let deviceSettings = settings ?? ATVSettings()
 
         // Determine which protocols to connect
@@ -92,7 +92,7 @@ public enum SwiftATV {
     public static func pair(
         _ config: AppleTVConfiguration,
         protocol: ATVProtocol
-    ) async throws -> any PairingHandler {
+    ) async throws(ATVError) -> any PairingHandler {
         guard let service = config.service(for: `protocol`) else {
             throw ATVError.noService("No \(`protocol`) service found")
         }

@@ -183,48 +183,48 @@ public struct Playing: Sendable, Hashable, CustomStringConvertible {
 
 /// Remote control interface for sending button presses and commands.
 public protocol RemoteControl: Sendable {
-    func up(action: InputAction) async throws
-    func down(action: InputAction) async throws
-    func left(action: InputAction) async throws
-    func right(action: InputAction) async throws
-    func play() async throws
-    func playPause() async throws
-    func pause() async throws
-    func stop() async throws
-    func next() async throws
-    func previous() async throws
-    func select(action: InputAction) async throws
-    func menu(action: InputAction) async throws
-    func volumeUp() async throws
-    func volumeDown() async throws
-    func home(action: InputAction) async throws
-    func homeHold() async throws
-    func topMenu() async throws
-    func suspend() async throws
-    func wakeUp() async throws
-    func skipForward(interval: TimeInterval) async throws
-    func skipBackward(interval: TimeInterval) async throws
-    func setPosition(_ position: Int) async throws
-    func setShuffle(_ state: ShuffleState) async throws
-    func setRepeat(_ state: RepeatState) async throws
-    func channelUp() async throws
-    func channelDown() async throws
-    func screensaver() async throws
-    func guide() async throws
-    func controlCenter() async throws
+    func up(action: InputAction) async throws(ATVError)
+    func down(action: InputAction) async throws(ATVError)
+    func left(action: InputAction) async throws(ATVError)
+    func right(action: InputAction) async throws(ATVError)
+    func play() async throws(ATVError)
+    func playPause() async throws(ATVError)
+    func pause() async throws(ATVError)
+    func stop() async throws(ATVError)
+    func next() async throws(ATVError)
+    func previous() async throws(ATVError)
+    func select(action: InputAction) async throws(ATVError)
+    func menu(action: InputAction) async throws(ATVError)
+    func volumeUp() async throws(ATVError)
+    func volumeDown() async throws(ATVError)
+    func home(action: InputAction) async throws(ATVError)
+    func homeHold() async throws(ATVError)
+    func topMenu() async throws(ATVError)
+    func suspend() async throws(ATVError)
+    func wakeUp() async throws(ATVError)
+    func skipForward(interval: TimeInterval) async throws(ATVError)
+    func skipBackward(interval: TimeInterval) async throws(ATVError)
+    func setPosition(_ position: Int) async throws(ATVError)
+    func setShuffle(_ state: ShuffleState) async throws(ATVError)
+    func setRepeat(_ state: RepeatState) async throws(ATVError)
+    func channelUp() async throws(ATVError)
+    func channelDown() async throws(ATVError)
+    func screensaver() async throws(ATVError)
+    func guide() async throws(ATVError)
+    func controlCenter() async throws(ATVError)
 }
 
 // Default parameter values
 extension RemoteControl {
-    public func up() async throws { try await up(action: .singleTap) }
-    public func down() async throws { try await down(action: .singleTap) }
-    public func left() async throws { try await left(action: .singleTap) }
-    public func right() async throws { try await right(action: .singleTap) }
-    public func select() async throws { try await select(action: .singleTap) }
-    public func menu() async throws { try await menu(action: .singleTap) }
-    public func home() async throws { try await home(action: .singleTap) }
-    public func skipForward() async throws { try await skipForward(interval: 0) }
-    public func skipBackward() async throws { try await skipBackward(interval: 0) }
+    public func up() async throws(ATVError) { try await up(action: .singleTap) }
+    public func down() async throws(ATVError) { try await down(action: .singleTap) }
+    public func left() async throws(ATVError) { try await left(action: .singleTap) }
+    public func right() async throws(ATVError) { try await right(action: .singleTap) }
+    public func select() async throws(ATVError) { try await select(action: .singleTap) }
+    public func menu() async throws(ATVError) { try await menu(action: .singleTap) }
+    public func home() async throws(ATVError) { try await home(action: .singleTap) }
+    public func skipForward() async throws(ATVError) { try await skipForward(interval: 0) }
+    public func skipBackward() async throws(ATVError) { try await skipBackward(interval: 0) }
 }
 
 // MARK: - Metadata Protocol
@@ -234,12 +234,12 @@ public protocol ATVMetadata: Sendable {
     var deviceID: String? { get }
     var artworkID: String { get }
     var currentApp: App? { get }
-    func artwork(width: Int?, height: Int?) async throws -> ArtworkInfo?
-    func playing() async throws -> Playing
+    func artwork(width: Int?, height: Int?) async throws(ATVError) -> ArtworkInfo?
+    func playing() async throws(ATVError) -> Playing
 }
 
 extension ATVMetadata {
-    public func artwork() async throws -> ArtworkInfo? {
+    public func artwork() async throws(ATVError) -> ArtworkInfo? {
         try await artwork(width: 512, height: nil)
     }
 }
@@ -250,25 +250,25 @@ extension ATVMetadata {
 public protocol PushUpdater: Sendable {
     var isActive: Bool { get }
     var playingStream: AsyncStream<Playing> { get }
-    func start(initialDelay: Int) async throws
+    func start(initialDelay: Int) async throws(ATVError)
     func stop() async
 }
 
 extension PushUpdater {
-    public func start() async throws { try await start(initialDelay: 0) }
+    public func start() async throws(ATVError) { try await start(initialDelay: 0) }
 }
 
 // MARK: - Stream Protocol
 
 /// Interface for streaming media to the device.
 public protocol StreamController: Sendable {
-    func playURL(_ url: URL) async throws
-    func streamFile(_ fileURL: URL, metadata: MediaMetadata?) async throws
+    func playURL(_ url: URL) async throws(ATVError)
+    func streamFile(_ fileURL: URL, metadata: MediaMetadata?) async throws(ATVError)
     func close() async
 }
 
 extension StreamController {
-    public func streamFile(_ fileURL: URL) async throws {
+    public func streamFile(_ fileURL: URL) async throws(ATVError) {
         try await streamFile(fileURL, metadata: nil)
     }
 }
@@ -279,13 +279,13 @@ extension StreamController {
 public protocol PowerController: Sendable {
     var powerState: PowerState { get async }
     var powerStateStream: AsyncStream<PowerState> { get }
-    func turnOn(awaitNewState: Bool) async throws
-    func turnOff(awaitNewState: Bool) async throws
+    func turnOn(awaitNewState: Bool) async throws(ATVError)
+    func turnOff(awaitNewState: Bool) async throws(ATVError)
 }
 
 extension PowerController {
-    public func turnOn() async throws { try await turnOn(awaitNewState: false) }
-    public func turnOff() async throws { try await turnOff(awaitNewState: false) }
+    public func turnOn() async throws(ATVError) { try await turnOn(awaitNewState: false) }
+    public func turnOff() async throws(ATVError) { try await turnOff(awaitNewState: false) }
 }
 
 // MARK: - Audio Protocol
@@ -296,16 +296,16 @@ public protocol AudioController: Sendable {
     var volumeStream: AsyncStream<Float> { get }
     var outputDevices: [OutputDevice] { get async }
     var outputDevicesStream: AsyncStream<[OutputDevice]> { get }
-    func setVolume(_ level: Float, device: OutputDevice?) async throws
-    func volumeUp() async throws
-    func volumeDown() async throws
-    func addOutputDevices(_ deviceIDs: [String]) async throws
-    func removeOutputDevices(_ deviceIDs: [String]) async throws
-    func setOutputDevices(_ deviceIDs: [String]) async throws
+    func setVolume(_ level: Float, device: OutputDevice?) async throws(ATVError)
+    func volumeUp() async throws(ATVError)
+    func volumeDown() async throws(ATVError)
+    func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError)
+    func removeOutputDevices(_ deviceIDs: [String]) async throws(ATVError)
+    func setOutputDevices(_ deviceIDs: [String]) async throws(ATVError)
 }
 
 extension AudioController {
-    public func setVolume(_ level: Float) async throws {
+    public func setVolume(_ level: Float) async throws(ATVError) {
         try await setVolume(level, device: nil)
     }
 }
@@ -314,8 +314,8 @@ extension AudioController {
 
 /// Interface for listing and launching apps.
 public protocol AppsController: Sendable {
-    func appList() async throws -> [App]
-    func launchApp(bundleID: String) async throws
+    func appList() async throws(ATVError) -> [App]
+    func launchApp(bundleID: String) async throws(ATVError)
 }
 
 // MARK: - Keyboard Protocol
@@ -324,27 +324,27 @@ public protocol AppsController: Sendable {
 public protocol KeyboardController: Sendable {
     var textFocusState: KeyboardFocusState { get async }
     var focusStateStream: AsyncStream<KeyboardFocusState> { get }
-    func textGet() async throws -> String?
-    func textClear() async throws
-    func textAppend(_ text: String) async throws
-    func textSet(_ text: String) async throws
+    func textGet() async throws(ATVError) -> String?
+    func textClear() async throws(ATVError)
+    func textAppend(_ text: String) async throws(ATVError)
+    func textSet(_ text: String) async throws(ATVError)
 }
 
 // MARK: - Touch Protocol
 
 /// Interface for touch gestures.
 public protocol TouchController: Sendable {
-    func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws
-    func action(x: Int, y: Int, mode: TouchAction) async throws
-    func click(action: InputAction) async throws
+    func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws(ATVError)
+    func action(x: Int, y: Int, mode: TouchAction) async throws(ATVError)
+    func click(action: InputAction) async throws(ATVError)
 }
 
 // MARK: - User Accounts Protocol
 
 /// Interface for managing user accounts.
 public protocol UserAccountsController: Sendable {
-    func accountList() async throws -> [UserAccount]
-    func switchAccount(_ accountID: String) async throws
+    func accountList() async throws(ATVError) -> [UserAccount]
+    func switchAccount(_ accountID: String) async throws(ATVError)
 }
 
 // MARK: - Features Protocol
@@ -373,9 +373,9 @@ public protocol PairingHandler: Sendable {
     var deviceProvidesPin: Bool { get }
     var hasPaired: Bool { get }
     var service: ServiceInfo { get }
-    func pin(_ pin: String) async throws
-    func begin() async throws
-    func finish() async throws
+    func pin(_ pin: String) async throws(ATVError)
+    func begin() async throws(ATVError)
+    func finish() async throws(ATVError)
     func close() async
 }
 
@@ -406,6 +406,6 @@ public protocol AppleTVDevice: Sendable {
     var touch: TouchController { get }
     var deviceEvents: AsyncStream<DeviceEvent> { get }
 
-    func connect() async throws
+    func connect() async throws(ATVError)
     func close() async
 }

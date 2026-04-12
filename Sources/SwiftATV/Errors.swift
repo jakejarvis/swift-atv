@@ -56,6 +56,11 @@ public enum ATVError: Error, LocalizedError, Sendable {
     /// Back-off requested; retry later.
     case backOff(String)
 
+    /// Wrapping case for non-ATVError errors bubbled up from NIO, Crypto, or
+    /// other lower-level frameworks. Used at boundaries to preserve typed
+    /// `throws(ATVError)` contracts on public APIs.
+    case internalError(String)
+
     public var errorDescription: String? {
         switch self {
         case .noService(let msg): return "No service: \(msg)"
@@ -76,6 +81,15 @@ public enum ATVError: Error, LocalizedError, Sendable {
         case .invalidConfig(let msg): return "Invalid config: \(msg)"
         case .invalidData(let msg): return "Invalid data: \(msg)"
         case .backOff(let msg): return "Back off: \(msg)"
+        case .internalError(let msg): return "Internal error: \(msg)"
         }
+    }
+
+    /// Wrap an arbitrary error into an `ATVError`. If the error is already
+    /// an `ATVError`, it is returned as-is; otherwise it becomes
+    /// `.internalError` with a description.
+    public static func wrap(_ error: Error) -> ATVError {
+        if let atv = error as? ATVError { return atv }
+        return .internalError(String(describing: error))
     }
 }

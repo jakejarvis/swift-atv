@@ -76,7 +76,7 @@ public final class CompanionService: @unchecked Sendable {
     }
 
     /// Connect and set up the Companion protocol.
-    public func setup() async throws {
+    public func setup() async throws(ATVError) {
         try await connection.connect()
         await protocolHandler.startReceiving()
 

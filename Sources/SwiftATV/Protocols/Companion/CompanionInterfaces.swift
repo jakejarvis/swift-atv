@@ -29,7 +29,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
 
     // MARK: - HID Commands
 
-    private func sendHIDCommand(_ command: HIDCommand, action: InputAction) async throws {
+    private func sendHIDCommand(_ command: HIDCommand, action: InputAction) async throws(ATVError) {
         let downContent = OPACK.Value.dictionary([
             ("_hBtS", .uint(1)),
             ("_hidC", .uint(UInt64(command.rawValue))),
@@ -37,7 +37,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
         try await handler.sendEvent("_hidC", content: downContent)
 
         if action == .hold {
-            try await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
 
         let upContent = OPACK.Value.dictionary([
@@ -51,46 +51,46 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
         }
     }
 
-    public func up(action: InputAction) async throws { try await sendHIDCommand(.up, action: action) }
-    public func down(action: InputAction) async throws { try await sendHIDCommand(.down, action: action) }
-    public func left(action: InputAction) async throws { try await sendHIDCommand(.left, action: action) }
-    public func right(action: InputAction) async throws { try await sendHIDCommand(.right, action: action) }
+    public func up(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.up, action: action) }
+    public func down(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.down, action: action) }
+    public func left(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.left, action: action) }
+    public func right(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.right, action: action) }
 
-    public func play() async throws {
+    public func play() async throws(ATVError) {
         let content = OPACK.Value.dictionary([("_mcc", .uint(UInt64(MediaControlCommand.play.rawValue)))])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    public func playPause() async throws { try await sendHIDCommand(.playPause, action: .singleTap) }
+    public func playPause() async throws(ATVError) { try await sendHIDCommand(.playPause, action: .singleTap) }
 
-    public func pause() async throws {
+    public func pause() async throws(ATVError) {
         let content = OPACK.Value.dictionary([("_mcc", .uint(UInt64(MediaControlCommand.pause.rawValue)))])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    public func stop() async throws { try await pause() }
+    public func stop() async throws(ATVError) { try await pause() }
 
-    public func next() async throws {
+    public func next() async throws(ATVError) {
         let content = OPACK.Value.dictionary([("_mcc", .uint(UInt64(MediaControlCommand.nextTrack.rawValue)))])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    public func previous() async throws {
+    public func previous() async throws(ATVError) {
         let content = OPACK.Value.dictionary([("_mcc", .uint(UInt64(MediaControlCommand.previousTrack.rawValue)))])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    public func select(action: InputAction) async throws { try await sendHIDCommand(.select, action: action) }
-    public func menu(action: InputAction) async throws { try await sendHIDCommand(.menu, action: action) }
-    public func volumeUp() async throws { try await sendHIDCommand(.volumeUp, action: .singleTap) }
-    public func volumeDown() async throws { try await sendHIDCommand(.volumeDown, action: .singleTap) }
-    public func home(action: InputAction) async throws { try await sendHIDCommand(.home, action: action) }
-    public func homeHold() async throws { try await sendHIDCommand(.home, action: .hold) }
-    public func topMenu() async throws { try await sendHIDCommand(.menu, action: .singleTap) }
-    public func suspend() async throws { try await sendHIDCommand(.sleep, action: .singleTap) }
-    public func wakeUp() async throws { try await sendHIDCommand(.wake, action: .singleTap) }
+    public func select(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.select, action: action) }
+    public func menu(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.menu, action: action) }
+    public func volumeUp() async throws(ATVError) { try await sendHIDCommand(.volumeUp, action: .singleTap) }
+    public func volumeDown() async throws(ATVError) { try await sendHIDCommand(.volumeDown, action: .singleTap) }
+    public func home(action: InputAction) async throws(ATVError) { try await sendHIDCommand(.home, action: action) }
+    public func homeHold() async throws(ATVError) { try await sendHIDCommand(.home, action: .hold) }
+    public func topMenu() async throws(ATVError) { try await sendHIDCommand(.menu, action: .singleTap) }
+    public func suspend() async throws(ATVError) { try await sendHIDCommand(.sleep, action: .singleTap) }
+    public func wakeUp() async throws(ATVError) { try await sendHIDCommand(.wake, action: .singleTap) }
 
-    public func skipForward(interval: TimeInterval) async throws {
+    public func skipForward(interval: TimeInterval) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.skipBy.rawValue))),
             ("_ski", .double(interval)),
@@ -98,7 +98,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    public func skipBackward(interval: TimeInterval) async throws {
+    public func skipBackward(interval: TimeInterval) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.skipBy.rawValue))),
             ("_ski", .double(-interval)),
@@ -106,23 +106,23 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    public func setPosition(_ position: Int) async throws {
+    public func setPosition(_ position: Int) async throws(ATVError) {
         throw ATVError.notSupported("setPosition not supported via Companion")
     }
 
-    public func setShuffle(_ state: ShuffleState) async throws {
+    public func setShuffle(_ state: ShuffleState) async throws(ATVError) {
         throw ATVError.notSupported("setShuffle not supported via Companion")
     }
 
-    public func setRepeat(_ state: RepeatState) async throws {
+    public func setRepeat(_ state: RepeatState) async throws(ATVError) {
         throw ATVError.notSupported("setRepeat not supported via Companion")
     }
 
-    public func channelUp() async throws { try await sendHIDCommand(.channelIncrement, action: .singleTap) }
-    public func channelDown() async throws { try await sendHIDCommand(.channelDecrement, action: .singleTap) }
-    public func screensaver() async throws { try await sendHIDCommand(.screensaver, action: .singleTap) }
-    public func guide() async throws { try await sendHIDCommand(.guide, action: .singleTap) }
-    public func controlCenter() async throws { try await sendHIDCommand(.home, action: .hold) }
+    public func channelUp() async throws(ATVError) { try await sendHIDCommand(.channelIncrement, action: .singleTap) }
+    public func channelDown() async throws(ATVError) { try await sendHIDCommand(.channelDecrement, action: .singleTap) }
+    public func screensaver() async throws(ATVError) { try await sendHIDCommand(.screensaver, action: .singleTap) }
+    public func guide() async throws(ATVError) { try await sendHIDCommand(.guide, action: .singleTap) }
+    public func controlCenter() async throws(ATVError) { try await sendHIDCommand(.home, action: .hold) }
 }
 
 // MARK: - Apps
@@ -136,7 +136,7 @@ public struct CompanionApps: AppsController, Sendable {
         self.handler = handler
     }
 
-    public func appList() async throws -> [App] {
+    public func appList() async throws(ATVError) -> [App] {
         let response = try await handler.sendRequest("FetchLaunchableApplicationsEvent")
         guard case .dict(let pairs) = response["_c"] else { return [] }
         return pairs.compactMap { key, value in
@@ -145,7 +145,7 @@ public struct CompanionApps: AppsController, Sendable {
         }
     }
 
-    public func launchApp(bundleID: String) async throws {
+    public func launchApp(bundleID: String) async throws(ATVError) {
         let content = OPACK.Value.dictionary([("_bundleID", .string(bundleID))])
         _ = try await handler.sendRequest("_launchApp", content: content)
     }
@@ -162,7 +162,7 @@ public struct CompanionUserAccounts: UserAccountsController, Sendable {
         self.handler = handler
     }
 
-    public func accountList() async throws -> [UserAccount] {
+    public func accountList() async throws(ATVError) -> [UserAccount] {
         let response = try await handler.sendRequest("FetchUserAccountsEvent")
         guard case .dict(let pairs) = response["_c"] else { return [] }
         return pairs.compactMap { key, value in
@@ -171,7 +171,7 @@ public struct CompanionUserAccounts: UserAccountsController, Sendable {
         }
     }
 
-    public func switchAccount(_ accountID: String) async throws {
+    public func switchAccount(_ accountID: String) async throws(ATVError) {
         let content = OPACK.Value.dictionary([("SwitchAccountID", .string(accountID))])
         _ = try await handler.sendRequest("SwitchUserAccountEvent", content: content)
     }
@@ -195,7 +195,7 @@ public actor CompanionPower: PowerController {
 
     public var powerState: PowerState { _powerState }
 
-    public func turnOn(awaitNewState: Bool) async throws {
+    public func turnOn(awaitNewState: Bool) async throws(ATVError) {
         try await handler.sendEvent(
             "_hidC",
             content: OPACK.Value.dictionary([
@@ -212,7 +212,7 @@ public actor CompanionPower: PowerController {
         continuation.yield(.on)
     }
 
-    public func turnOff(awaitNewState: Bool) async throws {
+    public func turnOff(awaitNewState: Bool) async throws(ATVError) {
         try await handler.sendEvent(
             "_hidC",
             content: OPACK.Value.dictionary([
@@ -256,7 +256,7 @@ public actor CompanionAudio: AudioController {
 
     public var outputDevices: [OutputDevice] { _outputDevices }
 
-    public func setVolume(_ level: Float, device: OutputDevice?) async throws {
+    public func setVolume(_ level: Float, device: OutputDevice?) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.setVolume.rawValue))),
             ("_vol", .double(Double(level))),
@@ -266,23 +266,23 @@ public actor CompanionAudio: AudioController {
         volumeContinuation.yield(level)
     }
 
-    public func volumeUp() async throws {
+    public func volumeUp() async throws(ATVError) {
         try await setVolume(min(_volume + 5, 100), device: nil)
     }
 
-    public func volumeDown() async throws {
+    public func volumeDown() async throws(ATVError) {
         try await setVolume(max(_volume - 5, 0), device: nil)
     }
 
-    public func addOutputDevices(_ deviceIDs: [String]) async throws {
+    public func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         throw ATVError.notSupported("addOutputDevices not yet implemented for Companion")
     }
 
-    public func removeOutputDevices(_ deviceIDs: [String]) async throws {
+    public func removeOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         throw ATVError.notSupported("removeOutputDevices not yet implemented for Companion")
     }
 
-    public func setOutputDevices(_ deviceIDs: [String]) async throws {
+    public func setOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         throw ATVError.notSupported("setOutputDevices not yet implemented for Companion")
     }
 }
@@ -305,19 +305,19 @@ public actor CompanionKeyboard: KeyboardController {
 
     public var textFocusState: KeyboardFocusState { _focusState }
 
-    public func textGet() async throws -> String? {
+    public func textGet() async throws(ATVError) -> String? {
         throw ATVError.notSupported("textGet not yet implemented for Companion")
     }
 
-    public func textClear() async throws {
+    public func textClear() async throws(ATVError) {
         throw ATVError.notSupported("textClear not yet implemented for Companion")
     }
 
-    public func textAppend(_ text: String) async throws {
+    public func textAppend(_ text: String) async throws(ATVError) {
         throw ATVError.notSupported("textAppend not yet implemented for Companion")
     }
 
-    public func textSet(_ text: String) async throws {
+    public func textSet(_ text: String) async throws(ATVError) {
         throw ATVError.notSupported("textSet not yet implemented for Companion")
     }
 }
@@ -339,7 +339,7 @@ public struct CompanionTouch: TouchController, Sendable {
         UInt64(Date().timeIntervalSince1970 * 1_000_000_000) - baseTimestamp
     }
 
-    public func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws {
+    public func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws(ATVError) {
         let steps = max(durationMs / 16, 2)
         let delayNs: UInt64 = 16_000_000
 
@@ -353,20 +353,20 @@ public struct CompanionTouch: TouchController, Sendable {
 
             try await sendTouchEvent(x: x, y: y, phase: phase)
             if i < steps {
-                try await Task.sleep(nanoseconds: delayNs)
+                try? await Task.sleep(nanoseconds: delayNs)
             }
         }
     }
 
-    public func action(x: Int, y: Int, mode: TouchAction) async throws {
+    public func action(x: Int, y: Int, mode: TouchAction) async throws(ATVError) {
         try await sendTouchEvent(x: x, y: y, phase: mode)
     }
 
-    public func click(action: InputAction) async throws {
+    public func click(action: InputAction) async throws(ATVError) {
         try await sendTouchEvent(x: 500, y: 500, phase: .click)
     }
 
-    private func sendTouchEvent(x: Int, y: Int, phase: TouchAction) async throws {
+    private func sendTouchEvent(x: Int, y: Int, phase: TouchAction) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_ns", .uint(currentTimestamp)),
             ("_tFg", .uint(1)),

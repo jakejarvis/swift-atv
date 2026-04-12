@@ -26,25 +26,29 @@ public final class ChaCha20Cipher: @unchecked Sendable {
     }
 
     /// Encrypt data with optional additional authenticated data.
-    public func encrypt(_ plaintext: Data, aad: Data? = nil) throws -> Data {
+    public func encrypt(_ plaintext: Data, aad: Data? = nil) throws(ATVError) -> Data {
         lock.lock()
         let counter = encryptCounter
         encryptCounter += 1
         lock.unlock()
 
-        let nonce = makeNonce(counter: counter, length: nonceLength)
-        let sealedBox: ChaChaPoly.SealedBox
-        if let aad {
-            sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce, authenticating: aad)
-        } else {
-            sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce)
+        do {
+            let nonce = makeNonce(counter: counter, length: nonceLength)
+            let sealedBox: ChaChaPoly.SealedBox
+            if let aad {
+                sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce, authenticating: aad)
+            } else {
+                sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce)
+            }
+            return sealedBox.ciphertext + sealedBox.tag
+        } catch {
+            throw ATVError.wrap(error)
         }
-        return sealedBox.ciphertext + sealedBox.tag
     }
 
     /// Decrypt data with optional additional authenticated data.
     /// - Parameter data: Ciphertext concatenated with 16-byte Poly1305 tag.
-    public func decrypt(_ data: Data, aad: Data? = nil) throws -> Data {
+    public func decrypt(_ data: Data, aad: Data? = nil) throws(ATVError) -> Data {
         lock.lock()
         let counter = decryptCounter
         decryptCounter += 1
@@ -54,15 +58,21 @@ public final class ChaCha20Cipher: @unchecked Sendable {
             throw ATVError.invalidData("Encrypted data too short (need at least 16 bytes for tag)")
         }
 
-        let nonce = makeNonce(counter: counter, length: nonceLength)
-        let ciphertext = data[data.startIndex..<data.endIndex - 16]
-        let tag = data[data.endIndex - 16..<data.endIndex]
+        do {
+            let nonce = makeNonce(counter: counter, length: nonceLength)
+            let ciphertext = data[data.startIndex..<data.endIndex - 16]
+            let tag = data[data.endIndex - 16..<data.endIndex]
 
-        let sealedBox = try ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-        if let aad {
-            return try ChaChaPoly.open(sealedBox, using: decryptKey, authenticating: aad)
-        } else {
-            return try ChaChaPoly.open(sealedBox, using: decryptKey)
+            let sealedBox = try ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+            if let aad {
+                return try ChaChaPoly.open(sealedBox, using: decryptKey, authenticating: aad)
+            } else {
+                return try ChaChaPoly.open(sealedBox, using: decryptKey)
+            }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
         }
     }
 
@@ -96,28 +106,32 @@ public final class ChaCha20Cipher8ByteNonce: @unchecked Sendable {
     }
 
     /// Encrypt data, returning ciphertext + tag.
-    public func encrypt(_ plaintext: Data, aad: Data? = nil) throws -> Data {
+    public func encrypt(_ plaintext: Data, aad: Data? = nil) throws(ATVError) -> Data {
         lock.lock()
         let counter = encryptCounter
         encryptCounter += 1
         lock.unlock()
 
-        var nonceData = Data(count: 12)
-        var le = counter.littleEndian
-        nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
+        do {
+            var nonceData = Data(count: 12)
+            var le = counter.littleEndian
+            nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
 
-        let nonce = try ChaChaPoly.Nonce(data: nonceData)
-        let sealedBox: ChaChaPoly.SealedBox
-        if let aad {
-            sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce, authenticating: aad)
-        } else {
-            sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce)
+            let nonce = try ChaChaPoly.Nonce(data: nonceData)
+            let sealedBox: ChaChaPoly.SealedBox
+            if let aad {
+                sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce, authenticating: aad)
+            } else {
+                sealedBox = try ChaChaPoly.seal(plaintext, using: encryptKey, nonce: nonce)
+            }
+            return sealedBox.ciphertext + sealedBox.tag
+        } catch {
+            throw ATVError.wrap(error)
         }
-        return sealedBox.ciphertext + sealedBox.tag
     }
 
     /// Decrypt data (ciphertext + 16-byte tag).
-    public func decrypt(_ data: Data, aad: Data? = nil) throws -> Data {
+    public func decrypt(_ data: Data, aad: Data? = nil) throws(ATVError) -> Data {
         lock.lock()
         let counter = decryptCounter
         decryptCounter += 1
@@ -127,19 +141,25 @@ public final class ChaCha20Cipher8ByteNonce: @unchecked Sendable {
             throw ATVError.invalidData("Encrypted data too short")
         }
 
-        var nonceData = Data(count: 12)
-        var le = counter.littleEndian
-        nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
+        do {
+            var nonceData = Data(count: 12)
+            var le = counter.littleEndian
+            nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
 
-        let nonce = try ChaChaPoly.Nonce(data: nonceData)
-        let ciphertext = data[data.startIndex..<data.endIndex - 16]
-        let tag = data[data.endIndex - 16..<data.endIndex]
-        let sealedBox = try ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+            let nonce = try ChaChaPoly.Nonce(data: nonceData)
+            let ciphertext = data[data.startIndex..<data.endIndex - 16]
+            let tag = data[data.endIndex - 16..<data.endIndex]
+            let sealedBox = try ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
 
-        if let aad {
-            return try ChaChaPoly.open(sealedBox, using: decryptKey, authenticating: aad)
-        } else {
-            return try ChaChaPoly.open(sealedBox, using: decryptKey)
+            if let aad {
+                return try ChaChaPoly.open(sealedBox, using: decryptKey, authenticating: aad)
+            } else {
+                return try ChaChaPoly.open(sealedBox, using: decryptKey)
+            }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
         }
     }
 }

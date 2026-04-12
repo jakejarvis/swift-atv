@@ -18,6 +18,9 @@ public enum TLVTag: UInt8, Sendable {
     case permissions = 0x0B
     case fragmentData = 0x0C
     case fragmentLast = 0x0D
+    /// Apple-specific: OPACK-packed `{"name": <displayName>}` for pair-setup
+    /// M5. pyatv calls this `TlvValue.Name`.
+    case name = 0x11
     case flags = 0x13
     case separator = 0xFF
 }

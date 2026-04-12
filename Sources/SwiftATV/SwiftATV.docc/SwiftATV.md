@@ -8,7 +8,12 @@ AirPlay devices.
 SwiftATV is a Swift port of [pyatv](https://github.com/postlund/pyatv). It
 exposes a unified ``AppleTVDevice`` interface that routes each command to the
 highest-priority protocol that supports it — Companion is the primary backend
-today, with MRP, DMAP, AirPlay, and RAOP planned.
+today (full SRP-6a pair-setup, pair-verify, remote control, apps, keyboard,
+touch, audio, power), with MRP, DMAP, AirPlay, and RAOP planned.
+
+All public methods are typed-throws (`async throws(ATVError)`), so you can
+catch `ATVError` exhaustively without worrying about stray NIO or CryptoKit
+errors leaking through.
 
 ```swift
 import SwiftATV
@@ -55,6 +60,10 @@ await atv.close()
 ### Pairing and authentication
 
 - ``PairingHandler``
+- ``CompanionPairingHandler``
+- ``CompanionPairVerifyHandler``
+- ``HAPPairSetupHandler``
+- ``HAPPairVerifyHandler``
 - ``HAPCredentials``
 
 ### Protocols

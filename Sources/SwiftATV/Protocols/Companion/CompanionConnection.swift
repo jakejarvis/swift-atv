@@ -89,26 +89,32 @@ public final class CompanionConnection: @unchecked Sendable {
     }
 
     /// Connect to the device.
-    public func connect() async throws {
+    public func connect() async throws(ATVError) {
         let bootstrap = ClientBootstrap(group: group)
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
             .channelInitializer { [self] channel in
                 channel.pipeline.addHandler(CompanionFrameHandler(connection: self))
             }
 
-        let ch = try await bootstrap.connect(host: host, port: port).get()
+        let ch: Channel
+        do {
+            ch = try await bootstrap.connect(host: host, port: port).get()
+        } catch {
+            throw ATVError.wrap(error)
+        }
         lock.withLock {
             self.channel = ch
         }
     }
 
     /// Send a frame to the device.
-    public func send(type: CompanionFrameType, payload: Data = Data()) async throws {
-        let (channel, currentCipher): (Channel, ChaCha20Cipher?) = try lock.withLock {
-            guard let channel = self.channel else {
-                throw ATVError.connectionFailed("Not connected")
-            }
+    public func send(type: CompanionFrameType, payload: Data = Data()) async throws(ATVError) {
+        let channelAndCipher: (Channel, ChaCha20Cipher?)? = lock.withLock {
+            guard let channel = self.channel else { return nil }
             return (channel, cipher)
+        }
+        guard let (channel, currentCipher) = channelAndCipher else {
+            throw ATVError.connectionFailed("Not connected")
         }
 
         var header = Data(count: Self.headerLength)
@@ -132,37 +138,142 @@ public final class CompanionConnection: @unchecked Sendable {
 
         var buffer = channel.allocator.buffer(capacity: frameData.count)
         buffer.writeBytes(frameData)
-        try await channel.writeAndFlush(buffer)
+        do {
+            try await channel.writeAndFlush(buffer)
+        } catch {
+            throw ATVError.wrap(error)
+        }
     }
 
-    /// Send a frame and wait for a response with the matching frame type.
+    /// Send a frame and wait for the expected response frame.
+    ///
+    /// If `waitType` is omitted, the response type is inferred via
+    /// `defaultResponseType(for:)`. That default handles the asymmetric
+    /// auth handshake: a `PS_Start` / `PV_Start` request is always answered
+    /// on the corresponding `PS_Next` / `PV_Next` channel for the full
+    /// duration of pair-setup / pair-verify. Matches pyatv's
+    /// `CompanionProtocol.exchange_auth` contract.
+    ///
+    /// For non-auth frame types the default is the same type as sent.
+    ///
+    /// Race safety: the response waiter is installed **before** the send so a
+    /// fast device reply (landing between the send completing and the
+    /// waiter being registered) cannot be silently dropped. The alternative
+    /// ordering ("send then wait") causes occasional false timeouts when
+    /// the Apple TV responds on the same event-loop tick as the write.
     public func sendAndReceive(
         type: CompanionFrameType,
         payload: Data = Data(),
+        waitType: CompanionFrameType? = nil,
         timeout: TimeInterval = 5.0
-    ) async throws -> Data {
-        try await send(type: type, payload: payload)
-        return try await waitForFrame(type: type, timeout: timeout)
+    ) async throws(ATVError) -> Data {
+        let responseType = waitType ?? Self.defaultResponseType(for: type)
+
+        do {
+            return try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Data, Error>) in
+                // 1. Install the waiter synchronously before any async work.
+                let alreadyRegistered: Bool = lock.withLock {
+                    if frameWaiters[responseType.rawValue] != nil { return true }
+                    frameWaiters[responseType.rawValue] = continuation
+                    return false
+                }
+                if alreadyRegistered {
+                    continuation.resume(
+                        throwing: ATVError.invalidState(
+                            "Frame waiter for type \(responseType) already registered"
+                        ))
+                    return
+                }
+                // 2. Kick off the send + timeout in a child Task so the
+                //    withCheckedThrowingContinuation body stays sync.
+                Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.send(type: type, payload: payload)
+                    } catch {
+                        let waiter = self.lock.withLock {
+                            self.frameWaiters.removeValue(forKey: responseType.rawValue)
+                        }
+                        waiter?.resume(throwing: error)
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    let waiter = self.lock.withLock {
+                        self.frameWaiters.removeValue(forKey: responseType.rawValue)
+                    }
+                    waiter?.resume(
+                        throwing: ATVError.operationTimeout(
+                            "Timeout waiting for frame type \(responseType)"
+                        ))
+                }
+            }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
+        }
     }
 
-    /// Wait for a specific frame type.
-    public func waitForFrame(type: CompanionFrameType, timeout: TimeInterval = 5.0) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            frameWaiters[type.rawValue] = continuation
-            lock.unlock()
+    /// Map a request frame type to the frame type the device uses to reply.
+    ///
+    /// `PS_Start` and `PV_Start` are only used for the first message of a
+    /// handshake — every subsequent message (including the *response* to
+    /// `*_Start`) travels on the corresponding `*_Next` channel. See the
+    /// comment in pyatv's `protocols/companion/protocol.py::exchange_auth`
+    /// ("`_Start` is only used for first message, then `_Next` is used for
+    /// remaining message (even response to first message)").
+    ///
+    /// All other frame types map to themselves.
+    public static func defaultResponseType(for requestType: CompanionFrameType) -> CompanionFrameType {
+        switch requestType {
+        case .psStart: return .psNext
+        case .pvStart: return .pvNext
+        default: return requestType
+        }
+    }
 
-            Task { [weak self] in
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                guard let self else { return }
-                let waiter = lock.withLock {
-                    frameWaiters.removeValue(forKey: type.rawValue)
+    /// Wait for the next frame of the given type.
+    ///
+    /// Only one waiter at a time may be registered for a given frame type;
+    /// attempting to register a second concurrent waiter throws
+    /// `.invalidState`. In practice only pair-setup and pair-verify use
+    /// this API, and they both drive sequential message exchanges, so this
+    /// constraint is a guard against future misuse rather than a current
+    /// limitation.
+    public func waitForFrame(type: CompanionFrameType, timeout: TimeInterval = 5.0) async throws(ATVError) -> Data {
+        do {
+            return try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Data, Error>) in
+                let alreadyRegistered: Bool = lock.withLock {
+                    if frameWaiters[type.rawValue] != nil { return true }
+                    frameWaiters[type.rawValue] = continuation
+                    return false
                 }
-                waiter?.resume(
-                    throwing: ATVError.operationTimeout(
-                        "Timeout waiting for frame type \(type)"
-                    ))
+                if alreadyRegistered {
+                    continuation.resume(
+                        throwing: ATVError.invalidState(
+                            "Frame waiter for type \(type) already registered"
+                        ))
+                    return
+                }
+
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    guard let self else { return }
+                    let waiter = lock.withLock {
+                        frameWaiters.removeValue(forKey: type.rawValue)
+                    }
+                    waiter?.resume(
+                        throwing: ATVError.operationTimeout(
+                            "Timeout waiting for frame type \(type)"
+                        ))
+                }
             }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
         }
     }
 
@@ -187,7 +298,10 @@ public final class CompanionConnection: @unchecked Sendable {
 
     // MARK: - Internal Frame Processing (called from NIO event loop)
 
-    fileprivate func handleReceivedData(_ data: Data) {
+    /// Feed raw bytes into the frame assembler. Called by the NIO pipeline
+    /// handler on the event loop thread. Also `internal` so tests can inject
+    /// synthesized frames without a live TCP connection.
+    internal func handleReceivedData(_ data: Data) {
         lock.lock()
         receiveBuffer.append(data)
 

@@ -5,6 +5,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 ## Features
 
 - **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS
+- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over the Companion link
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
@@ -12,8 +13,9 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Audio Control** -- Adjust volume, manage output devices
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures
 - **Virtual Keyboard** -- Text input via the virtual keyboard
-- **Encrypted Communication** -- HAP pair-verify with ChaCha20-Poly1305 encryption
-- **Multi-Protocol** -- Unified interface across Companion, MRP, DMAP, AirPlay, and RAOP protocols
+- **Encrypted Communication** -- ChaCha20-Poly1305 over the Companion link
+- **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
+- **Multi-Protocol** -- Unified facade across Companion (implemented), MRP, DMAP, AirPlay, and RAOP (planned)
 
 ## Requirements
 
@@ -32,7 +34,8 @@ dependencies: [
 ]
 ```
 
-> SwiftATV is pre-1.0 — the API may change in minor releases. Review the
+> SwiftATV is pre-1.0. The first tagged release is `0.1.0`; until then,
+> pin to `branch: "main"`. API may change in minor releases — review the
 > [CHANGELOG](CHANGELOG.md) before upgrading.
 
 Then add it as a dependency to your target:
@@ -95,13 +98,21 @@ await atv.close()
 
 ```swift
 let handler = try await SwiftATV.pair(device, protocol: .companion)
+
+// Start the handshake. The Apple TV now displays a 4-digit PIN on screen.
 try await handler.begin()
 
-// Apple TV displays a PIN -- enter it:
-try await handler.pin("1234")
+// Prompt the user for the PIN, then complete pair-setup:
+try await handler.pin(userEnteredPIN)
 try await handler.finish()
 
-print("Paired: \(handler.hasPaired)")
+// Pull the HAP long-term credentials and persist them. On the next
+// connection, load them into ATVSettings so SwiftATV uses pair-verify
+// instead of pair-setup.
+if let creds = (handler as? CompanionPairingHandler)?.credentials {
+    try keychain.store(creds.serialize(), for: device.mainIdentifier)
+}
+
 await handler.close()
 ```
 
@@ -150,7 +161,7 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
-| **Companion** | Modern control, apps, keyboard, touch | Implemented |
+| **Companion** | Modern control, apps, keyboard, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented |
 | **MRP** | Media Remote Protocol (protobuf-based) | Stub |
 | **DMAP** | Legacy Digital Media Access Protocol | Planned |
 | **AirPlay** | Audio/video streaming | Planned |
@@ -162,11 +173,12 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 Sources/SwiftATV/
 ├── SwiftATV.swift              # Public API: scan(), connect(), pair()
 ├── Constants.swift             # All enums (ATVProtocol, FeatureName, etc.)
-├── Errors.swift                # ATVError enum
-├── Interfaces.swift            # Swift protocols for all interfaces
+├── Errors.swift                # ATVError + wrap() factory
+├── Interfaces.swift            # Swift protocols (all throws(ATVError))
 ├── Configuration.swift         # AppleTVConfiguration, ServiceInfo
 ├── Settings.swift              # Per-protocol settings (Codable)
 ├── DeviceInfo.swift            # Device model/OS lookup tables
+├── SwiftATV.docc/              # DocC catalog
 ├── Support/
 │   ├── OPACK.swift             # OPACK binary serialization codec
 │   ├── TLV8.swift              # TLV8 encoding for HAP auth
@@ -178,17 +190,18 @@ Sources/SwiftATV/
 │   └── Scanner.swift           # Bonjour/mDNS device discovery
 ├── Auth/
 │   ├── HAPCredentials.swift    # Credential storage/serialization
-│   ├── SRPAuth.swift           # Ed25519/X25519 + HKDF
-│   └── HAPPairing.swift        # Pair-verify procedure
+│   ├── SRPAuth.swift           # Ed25519/X25519 + HKDF primitives
+│   ├── SRP.swift               # SRP-6a client (pyatv/srptools compatible)
+│   └── HAPPairing.swift        # HAPPairSetupHandler + HAPPairVerifyHandler
 └── Protocols/
     ├── Companion/              # Full Companion protocol implementation
     │   ├── CompanionConnection.swift
     │   ├── CompanionProtocol.swift
-    │   ├── CompanionPairing.swift
+    │   ├── CompanionPairing.swift     # OPACK-wrapped PS_Start/PS_Next flow
     │   ├── CompanionInterfaces.swift
     │   └── CompanionService.swift
     └── MRP/
-        └── MRPProtocol.swift   # Message types + stub
+        └── MRPProtocol.swift   # Message types + MRPPlayerState actor
 ```
 
 ## Testing
@@ -197,20 +210,25 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite (12 files, 2400+ lines) is ported from pyatv's Python tests and covers:
+The test suite runs 212 XCTest cases ported from pyatv plus 16 Swift Testing
+cases for SwiftATV-specific logic:
 
-- All enum raw values and descriptions
-- OPACK binary serialization (encode/decode for every type)
-- TLV8 encoding with chunk splitting/reassembly
-- ChaCha20-Poly1305 encryption (12-byte and 8-byte nonce)
-- Configuration and service merging
-- Playing state equality across all fields
-- Device model/OS lookup tables
-- Settings Codable round-trips
-- Relayer priority ordering and takeover
-- Companion protocol feature availability
-- HAP credential serialization
-- MessageDispatcher actor behavior
+**Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
+every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
+8-byte nonce), configuration/service merging, `Playing` state equality,
+device model lookups, settings Codable round-trips, relayer priority and
+takeover, Companion feature availability, HAP credential serialization,
+`MessageDispatcher` actor behavior.
+
+**SwiftATV additions** (Swift Testing) — SRP-6a client verified against a
+canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,
+and matches A/M1/K byte-for-byte), HAP pair-setup state machine (M1 encoding,
+M3 output against canned M2, error-TLV surfacing, state ordering),
+`Playing.description` edge cases.
+
+CI runs the full suite on `macos-15` (Swift 6.0, 6.1) and
+`swift:6.0-jammy` / `swift:6.1-jammy` on `ubuntu-latest`, plus a
+`swift format lint --strict` job on macOS.
 
 ## Credits
 
