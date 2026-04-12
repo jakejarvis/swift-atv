@@ -4,15 +4,12 @@ import Testing
 @testable import SwiftATV
 
 /// Tests for the shared OPACK auth envelope used by Companion pair-setup
-/// and pair-verify.
-///
-/// Regression context: two bugs were caught by the adversarial review +
-/// follow-up sweep:
-/// 1. `CompanionPairVerifyHandler.verify()` used to send raw TLV8 bytes
-///    where pyatv wraps them in an OPACK dict (`{_pd, _auTy: 4}`). Real
-///    Apple TVs reject the unwrapped form — pair-verify never worked.
-/// 2. `CompanionPairVerifyHandler` was additionally sending `_auTy` on the
-///    PV_Next frame even though pyatv drops it after PV_Start.
+/// and pair-verify. Pins two invariants that an earlier pair-verify
+/// implementation got wrong:
+/// 1. Inner TLV8 bytes must be wrapped in an OPACK dict (`{_pd, _auTy: 4}`).
+///    Real Apple TVs reject raw TLV8.
+/// 2. `_auTy` appears only on the `PV_Start` frame; pyatv (and we) drop it
+///    from `PV_Next`.
 ///
 /// These tests pin the exact wire format so future edits can't regress it.
 @Suite("Companion auth OPACK envelope")

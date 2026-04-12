@@ -20,16 +20,15 @@ Initial pre-release. API is unstable and will change before 1.0.
   worked against a real Apple TV:
   1. It sent `.pvStart` and waited for another `.pvStart` frame, but the
      device replies to all auth `*_Start` frames on the corresponding
-     `*_Next` channel. Caught by Codex adversarial review.
-     Now handled by `CompanionConnection.defaultResponseType(for:)`,
-     which maps `.pvStart` → `.pvNext` / `.psStart` → `.psNext` as the
-     default for `sendAndReceive`. Matches pyatv's `exchange_auth`.
+     `*_Next` channel. Now handled by
+     `CompanionConnection.defaultResponseType(for:)`, which maps
+     `.pvStart` → `.pvNext` / `.psStart` → `.psNext` as the default for
+     `sendAndReceive`. Matches pyatv's `exchange_auth`.
   2. It sent raw TLV8 bytes on the wire instead of wrapping them in the
      Companion OPACK auth envelope `{_pd, _auTy: 4}` that pyatv's
-     `CompanionPairVerifyProcedure` uses. Caught while verifying (1).
+     `CompanionPairVerifyProcedure` uses.
   3. It also wrongly kept `_auTy: 4` on the PV_Next frame even though
-     pyatv drops the auth-type marker after PV_Start. Caught while
-     verifying (2).
+     pyatv drops the auth-type marker after PV_Start.
 - **Race conditions in `sendAndReceive` / `sendRequest`.** Both now
   register their response waiter **before** performing the network
   send. Previously a fast device reply (one that landed between the
@@ -47,6 +46,59 @@ Initial pre-release. API is unstable and will change before 1.0.
   fixed `m5` to use it. This only affected callers that passed a
   display name to be shown in the Apple TV's Settings > Users &
   Accounts entry.
+- **Stale-timeout waiter theft.** A latent bug in the
+  waiter-before-send fix that showed up on pair-setup's three-in-a-row
+  `.psNext` waits: if the first call's timeout task had not yet woken
+  up by the time the second call installed a new waiter for the same
+  frame type, the stale timeout task would clobber the new waiter and
+  resume it with `operationTimeout`. Fixed by wrapping each waiter in
+  a reference-typed `PendingFrameWaiter` with a UUID identity:
+  `handleReceivedData` now cancels the waiter's timeout task on
+  delivery, and the timeout task itself performs an identity-checked
+  removal so a stale task cannot resume a waiter it doesn't own.
+  `Task.sleep` calls in the timeout body now use
+  `do { try ... } catch { return }` instead of `try?` so cancellation
+  actually stops the task. The same treatment is applied to both
+  `sendAndReceive` and `waitForFrame`.
+- **`CompanionConnection.close()` / connection-closed did not cancel
+  pending frame waiters.** If the connection closed mid-handshake, the
+  caller would hang on the waiter's continuation until its 5-second
+  timeout fired, instead of unblocking immediately. Both the explicit
+  `close()` path and the NIO-side `handleConnectionClosed` now drain
+  `frameWaiters`, cancel their timeout tasks, and resume each
+  continuation with `.connectionLost`.
+- **`close()` resumed waiters *after* awaiting the channel close.**
+  An earlier version of the close-cancels-waiters fix removed waiters
+  from the dictionary synchronously but only resumed their continuations
+  after `try? await ch?.close()`. If the NIO close future was slow or
+  stalled, callers stayed suspended even though their dict entry was
+  gone — and their now-orphaned timeout task would find nothing to
+  resume on wake-up. Fixed by extracting a synchronous
+  `drainAndResumeWaiters(error:)` helper that does dict removal and
+  continuation resume in one uninterruptible step. `close()` calls it
+  before any awaited I/O, guaranteeing waiters cannot be stranded
+  behind a stuck channel close.
+- **Install-after-close race could strand fresh waiters.** A
+  `waitForFrame` / `sendAndReceive` call that started just before
+  `close()` but hadn't yet reached its install step could install a
+  waiter on a connection that had already drained — the waiter would
+  then sit until its full timeout (60 seconds for pair-setup) instead
+  of unblocking immediately. Fixed with a sticky `isClosed` flag set
+  under the same lock as `drainAndResumeWaiters` and
+  `handleConnectionClosed`. The install paths now check `isClosed`
+  atomically and refuse to register, resuming the caller with
+  `.connectionLost` instead. `connect()` is also blocked after close —
+  closure is terminal; callers that need to reconnect should allocate
+  a fresh `CompanionConnection`.
+- **Peer-close left a dead channel installed.** `handleConnectionClosed`
+  flipped `isClosed` and drained waiters but never cleared `channel`,
+  so a fire-and-forget `send` (e.g. `CompanionProtocolHandler.sendEvent`)
+  could still pass `channel != nil` and attempt a write against the
+  dead pipe — surfacing a wrapped NIO error (`.internalError`) instead
+  of the terminal `.connectionLost` that waiter-based callers see.
+  Fixed by clearing `channel = nil` in `handleConnectionClosed` under
+  the same lock, and gating `send()` on `isClosed` so it bails before
+  touching any retained channel reference.
 
 Supporting changes that landed with the fixes above:
 - `CompanionConnection.defaultResponseType(for:)` — public static

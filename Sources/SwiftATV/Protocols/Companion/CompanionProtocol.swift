@@ -87,6 +87,14 @@ public actor CompanionProtocolHandler {
     }
 
     /// Start processing incoming OPACK frames.
+    ///
+    /// When the underlying frame stream ends — which `CompanionConnection`
+    /// guarantees on both explicit `close()` and NIO peer-close paths —
+    /// the receive loop drains any pending OPACK requests and resumes
+    /// each one with `.connectionLost`. Without this, a `sendRequest`
+    /// caller waiting for a response when the connection drops would
+    /// hang until its 5-second timeout fired and then surface
+    /// `.operationTimeout` instead of the real failure cause.
     public func startReceiving() {
         guard !isRunning else { return }
         isRunning = true
@@ -97,6 +105,11 @@ public actor CompanionProtocolHandler {
             for await frame in stream {
                 await self.handleFrame(frame)
             }
+            // Stream ended → connection is closed. Drain any pending
+            // OPACK requests so callers see `.connectionLost` immediately.
+            await self.failPendingRequests(
+                reason: .connectionLost("Connection closed")
+            )
         }
     }
 
@@ -106,12 +119,42 @@ public actor CompanionProtocolHandler {
         receiveTask?.cancel()
         receiveTask = nil
         eventContinuation?.finish()
+        failPendingRequests(reason: .connectionLost("Protocol stopped"))
+    }
 
-        // Cancel all pending requests
-        for (_, continuation) in pendingRequests {
-            continuation.resume(throwing: ATVError.connectionLost("Protocol stopped"))
-        }
+    /// Resume every pending OPACK request continuation with the given
+    /// terminal error and clear the dictionary. Used by `stop()` and by
+    /// the receive-loop exit path when the underlying frame stream ends.
+    /// Idempotent — calling it on an empty `pendingRequests` is a no-op.
+    internal func failPendingRequests(reason: ATVError) {
+        let snapshot = pendingRequests
         pendingRequests.removeAll()
+        for (_, continuation) in snapshot {
+            continuation.resume(throwing: reason)
+        }
+    }
+
+    /// Test-only seam: install a continuation in `pendingRequests`
+    /// directly, bypassing `sendRequest`'s real send path. The returned
+    /// async function suspends until the continuation is resumed (which
+    /// would normally happen via `handleFrame` matching the XID, or via
+    /// `failPendingRequests` on connection close). Used by regression
+    /// tests that need to drive the drain path without a live channel.
+    internal func _testInstallPendingRequest(xid: Int) async throws(ATVError) -> OPACK.Value {
+        do {
+            return try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<OPACK.Value, Error>) in
+                pendingRequests[xid] = continuation
+            }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
+        }
+    }
+
+    internal func _testPendingRequestCount() -> Int {
+        pendingRequests.count
     }
 
     // MARK: - Sending Messages

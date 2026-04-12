@@ -13,7 +13,7 @@ let package = Package(
         .library(
             name: "SwiftATV",
             targets: ["SwiftATV"]
-        ),
+        )
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.97.1"),
