@@ -1,6 +1,30 @@
 import XCTest
 @testable import SwiftATV
 
+/// Thread-safe accumulator for use in @Sendable test closures.
+private final class Accumulator<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [T] = []
+
+    var values: [T] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _values
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _values.count
+    }
+
+    func append(_ value: T) {
+        lock.lock()
+        _values.append(value)
+        lock.unlock()
+    }
+}
+
 /// Ported from pyatv tests/protocols/mrp/test_player_state.py
 final class MRPPlayerStateTests: XCTestCase {
 
@@ -20,23 +44,23 @@ final class MRPPlayerStateTests: XCTestCase {
 
     func testMessageDispatcherRegisterAndDispatch() async {
         let dispatcher = MessageDispatcher<String, String>()
-        var received: [String] = []
+        let received = Accumulator<String>()
 
         await dispatcher.listen(to: "type1") { message in
             received.append(message)
         }
 
         await dispatcher.dispatch("type1", message: "hello")
-        XCTAssertEqual(received, ["hello"])
+        XCTAssertEqual(received.values, ["hello"])
 
         await dispatcher.dispatch("type2", message: "world")
-        XCTAssertEqual(received, ["hello"]) // type2 not registered
+        XCTAssertEqual(received.values, ["hello"]) // type2 not registered
     }
 
     func testMessageDispatcherMultipleHandlers() async {
         let dispatcher = MessageDispatcher<String, Int>()
-        var received1: [Int] = []
-        var received2: [Int] = []
+        let received1 = Accumulator<Int>()
+        let received2 = Accumulator<Int>()
 
         await dispatcher.listen(to: "count") { msg in
             received1.append(msg)
@@ -46,13 +70,13 @@ final class MRPPlayerStateTests: XCTestCase {
         }
 
         await dispatcher.dispatch("count", message: 42)
-        XCTAssertEqual(received1, [42])
-        XCTAssertEqual(received2, [42])
+        XCTAssertEqual(received1.values, [42])
+        XCTAssertEqual(received2.values, [42])
     }
 
     func testMessageDispatcherRemoveHandler() async {
         let dispatcher = MessageDispatcher<String, String>()
-        var received: [String] = []
+        let received = Accumulator<String>()
 
         let id = await dispatcher.listen(to: "test") { msg in
             received.append(msg)
@@ -68,30 +92,30 @@ final class MRPPlayerStateTests: XCTestCase {
 
     func testMessageDispatcherRemoveAllHandlers() async {
         let dispatcher = MessageDispatcher<String, String>()
-        var count = 0
+        let counter = Accumulator<String>()
 
-        await dispatcher.listen(to: "a") { _ in count += 1 }
-        await dispatcher.listen(to: "b") { _ in count += 1 }
+        await dispatcher.listen(to: "a") { _ in counter.append("a") }
+        await dispatcher.listen(to: "b") { _ in counter.append("b") }
 
         await dispatcher.removeAllHandlers()
 
         await dispatcher.dispatch("a", message: "x")
         await dispatcher.dispatch("b", message: "y")
-        XCTAssertEqual(count, 0)
+        XCTAssertEqual(counter.count, 0)
     }
 
     func testMessageDispatcherDefaultHandler() async {
         let dispatcher = MessageDispatcher<String, String>()
-        var defaultReceived: [String] = []
+        let received = Accumulator<String>()
 
         await dispatcher.listenAll { msg in
-            defaultReceived.append(msg)
+            received.append(msg)
         }
 
         await dispatcher.dispatch("any_type", message: "hello")
         await dispatcher.dispatch("other_type", message: "world")
 
-        XCTAssertEqual(defaultReceived, ["hello", "world"])
+        XCTAssertEqual(received.values, ["hello", "world"])
     }
 
     func testMessageDispatcherHasHandlers() async {
@@ -111,7 +135,7 @@ final class MRPPlayerStateTests: XCTestCase {
 
     func testMessageDispatcherFilter() async {
         let dispatcher = MessageDispatcher<String, Int>()
-        var received: [Int] = []
+        let received = Accumulator<Int>()
 
         await dispatcher.listen(
             to: "numbers",
@@ -125,6 +149,6 @@ final class MRPPlayerStateTests: XCTestCase {
         await dispatcher.dispatch("numbers", message: 1)
         await dispatcher.dispatch("numbers", message: 10)
 
-        XCTAssertEqual(received, [7, 10])
+        XCTAssertEqual(received.values, [7, 10])
     }
 }

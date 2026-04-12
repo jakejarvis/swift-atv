@@ -376,7 +376,7 @@ public protocol PairingHandler: Sendable {
 
 /// Events emitted by the device connection.
 public enum DeviceEvent: Sendable {
-    case connectionLost(Error)
+    case connectionLost(any Error & Sendable)
     case connectionClosed
 }
 

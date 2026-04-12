@@ -184,25 +184,28 @@ public actor ATVScanner {
         return .unsupported
     }
 
+    /// Mutable state shared across @Sendable NWBrowser callbacks.
+    private final class BrowseState: @unchecked Sendable {
+        let lock = NSLock()
+        var discovered: [DiscoveredService] = []
+        var hasResumed = false
+
+        func safeResume(_ continuation: CheckedContinuation<[DiscoveredService], Error>) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !hasResumed else { return }
+            hasResumed = true
+            continuation.resume(returning: discovered)
+        }
+    }
+
     /// Browse for a specific Bonjour service type and resolve endpoints.
     private static func browse(
         serviceType: BonjourServiceType,
         timeout: TimeInterval
     ) async throws -> [DiscoveredService] {
         try await withCheckedThrowingContinuation { continuation in
-            var discovered: [DiscoveredService] = []
-            var resolved = 0
-            var pendingEndpoints: [NWBrowser.Result] = []
-            var hasResumed = false
-            let lock = NSLock()
-
-            func safeResume() {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !hasResumed else { return }
-                hasResumed = true
-                continuation.resume(returning: discovered)
-            }
+            let state = BrowseState()
 
             let params = NWParameters()
             params.includePeerToPeer = true
@@ -212,45 +215,40 @@ public actor ATVScanner {
                 using: params
             )
 
-            // Set up timeout
-            let timeoutItem = DispatchWorkItem { safeResume() }
+            let timeoutItem = DispatchWorkItem { state.safeResume(continuation) }
             DispatchQueue.global().asyncAfter(
                 deadline: .now() + timeout,
                 execute: timeoutItem
             )
 
-            browser.stateUpdateHandler = { state in
-                if case .failed = state {
+            browser.stateUpdateHandler = { browserState in
+                if case .failed = browserState {
                     timeoutItem.cancel()
-                    safeResume()
+                    state.safeResume(continuation)
                 }
             }
 
             browser.browseResultsChangedHandler = { results, _ in
-                lock.lock()
-                guard !hasResumed else {
-                    lock.unlock()
+                state.lock.lock()
+                guard !state.hasResumed else {
+                    state.lock.unlock()
                     return
                 }
                 let newResults = Array(results)
-                pendingEndpoints = newResults
-                lock.unlock()
+                state.lock.unlock()
 
                 for result in newResults {
                     Self.resolveEndpoint(result, serviceType: serviceType) { service in
-                        lock.lock()
-                        if let service, !hasResumed {
-                            discovered.append(service)
+                        state.lock.lock()
+                        if let service, !state.hasResumed {
+                            state.discovered.append(service)
                         }
-                        resolved += 1
-                        lock.unlock()
+                        state.lock.unlock()
                     }
                 }
             }
 
             browser.start(queue: .global())
-
-            // Cleanup happens when timeout fires or failure
         }
     }
 
