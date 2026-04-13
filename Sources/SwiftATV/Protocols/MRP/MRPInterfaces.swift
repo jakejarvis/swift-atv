@@ -113,15 +113,21 @@ public final class MRPRemoteControl: @unchecked Sendable, RemoteControl {
     }
 }
 
+protocol MRPProtocolHandling: Sendable {
+    func artwork(width: Int?, height: Int?) async throws(ATVError) -> ArtworkInfo?
+    func refreshPlaying() async throws(ATVError) -> Playing
+}
+
 /// Metadata provider backed by direct MRP now-playing and playback-queue messages.
+///
+/// `playing()` actively refreshes the playback queue over MRP before returning
+/// the current snapshot.
 public final class MRPMetadata: @unchecked Sendable, ATVMetadata {
-    private let `protocol`: MRPProtocolHandler
-    private let playerState: MRPPlayerState
+    private let protocolHandler: any MRPProtocolHandling
     private let stateStore: MRPStateStore
 
-    init(protocol: MRPProtocolHandler, playerState: MRPPlayerState, stateStore: MRPStateStore) {
-        self.protocol = `protocol`
-        self.playerState = playerState
+    init(protocol protocolHandler: any MRPProtocolHandling, playerState: MRPPlayerState, stateStore: MRPStateStore) {
+        self.protocolHandler = protocolHandler
         self.stateStore = stateStore
     }
 
@@ -132,11 +138,11 @@ public final class MRPMetadata: @unchecked Sendable, ATVMetadata {
     public var currentApp: App? { stateStore.currentApp }
 
     public func artwork(width: Int?, height: Int?) async throws(ATVError) -> ArtworkInfo? {
-        try await `protocol`.artwork(width: width, height: height)
+        try await protocolHandler.artwork(width: width, height: height)
     }
 
     public func playing() async throws(ATVError) -> Playing {
-        await playerState.currentPlaying
+        try await protocolHandler.refreshPlaying()
     }
 }
 

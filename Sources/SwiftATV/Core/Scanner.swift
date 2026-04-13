@@ -38,7 +38,7 @@
     }
 
     /// Discovered service result from a Bonjour browser.
-    private struct DiscoveredService: Sendable {
+    internal struct DiscoveredService: Sendable {
         let serviceType: BonjourServiceType
         let name: String
         let host: String
@@ -72,8 +72,6 @@
                 protocols: protocols
             )
         }
-
-        private var devices: [String: AppleTVConfiguration] = [:]
 
         private init() {}
 
@@ -122,66 +120,26 @@
                 throw ATVError.wrap(error)
             }
 
-            // Aggregate services by host address
-            for service in services {
-                processDiscoveredService(service)
-            }
-
-            var results = Array(devices.values)
+            var results = Self.configurations(from: services)
 
             // Filter by identifiers if specified
             if let identifiers {
                 results = results.filter { config in
-                    guard let id = config.mainIdentifier else { return false }
-                    return identifiers.contains(id)
+                    !config.allIdentifiers.isDisjoint(with: identifiers)
                 }
             }
 
             return results
         }
 
-        private func processDiscoveredService(_ service: DiscoveredService) {
-            let address = service.host
+        internal static func configurations(from services: [DiscoveredService]) -> [AppleTVConfiguration] {
+            var configs: [AppleTVConfiguration] = []
 
-            if devices[address] == nil {
-                devices[address] = AppleTVConfiguration(
-                    address: address,
-                    name: service.name
-                )
+            for service in services {
+                merge(service, into: &configs)
             }
 
-            // Update device info from properties
-            if service.serviceType == .deviceInfo {
-                devices[address]?.deviceInfo = DeviceInfo.fromProperties(service.txtRecord)
-                return
-            }
-
-            // Add protocol service
-            guard let proto = service.serviceType.atvProtocol else { return }
-
-            // Extract identifier from TXT record
-            let identifier =
-                service.txtRecord["UniqueIdentifier"]
-                ?? service.txtRecord["deviceid"]
-                ?? service.txtRecord["DACP-ID"]
-
-            let serviceInfo = ServiceInfo(
-                protocol: proto,
-                port: service.port,
-                identifier: identifier,
-                properties: service.txtRecord,
-                pairingRequirement: Self.pairingRequirement(from: service.txtRecord, for: proto)
-            )
-
-            devices[address]?.addService(serviceInfo)
-
-            // Update device info from service properties if not already set
-            if devices[address]?.deviceInfo.model == .unknown {
-                let info = DeviceInfo.fromProperties(service.txtRecord)
-                if info.model != .unknown {
-                    devices[address]?.deviceInfo = info
-                }
-            }
+            return configs
         }
 
         internal static func pairingRequirement(
@@ -212,6 +170,108 @@
             case .dmap:
                 return .unsupported
             }
+        }
+
+        private static func merge(
+            _ service: DiscoveredService,
+            into configs: inout [AppleTVConfiguration]
+        ) {
+            let identifiers = serviceIdentifiers(from: service.txtRecord)
+            let matchingIndices = configs.indices.filter { index in
+                let config = configs[index]
+                let hasSharedIdentifier =
+                    !identifiers.isEmpty && !config.allIdentifiers.isDisjoint(with: identifiers)
+                return hasSharedIdentifier || config.address == service.host
+            }
+
+            let targetIndex: Int
+            if let first = matchingIndices.first {
+                targetIndex = first
+                if matchingIndices.count > 1 {
+                    for duplicateIndex in matchingIndices.dropFirst().reversed() {
+                        let duplicate = configs.remove(at: duplicateIndex)
+                        merge(duplicate, into: &configs[targetIndex])
+                    }
+                }
+            } else {
+                configs.append(
+                    AppleTVConfiguration(
+                        address: service.host,
+                        name: service.name,
+                        identifier: identifiers.sorted().first
+                    )
+                )
+                targetIndex = configs.index(before: configs.endIndex)
+            }
+
+            apply(service, to: &configs[targetIndex], identifiers: identifiers)
+        }
+
+        private static func merge(
+            _ source: AppleTVConfiguration,
+            into target: inout AppleTVConfiguration
+        ) {
+            if target.identifier == nil {
+                target.identifier = source.identifier
+            }
+            target.deepSleep = target.deepSleep || source.deepSleep
+            if target.deviceInfo.model == .unknown, source.deviceInfo.model != .unknown {
+                target.deviceInfo = source.deviceInfo
+            }
+            for service in source.services {
+                target.addService(service)
+            }
+        }
+
+        private static func apply(
+            _ service: DiscoveredService,
+            to config: inout AppleTVConfiguration,
+            identifiers: Set<String>
+        ) {
+            if config.identifier == nil {
+                config.identifier = identifiers.sorted().first
+            }
+
+            if service.serviceType == .deviceInfo {
+                config.deviceInfo = DeviceInfo.fromProperties(service.txtRecord)
+                return
+            }
+
+            guard let proto = service.serviceType.atvProtocol else { return }
+
+            let serviceInfo = ServiceInfo(
+                protocol: proto,
+                port: service.port,
+                identifier: preferredIdentifier(from: service.txtRecord),
+                properties: service.txtRecord,
+                pairingRequirement: Self.pairingRequirement(from: service.txtRecord, for: proto)
+            )
+
+            config.addService(serviceInfo)
+
+            if config.deviceInfo.model == .unknown {
+                let info = DeviceInfo.fromProperties(service.txtRecord)
+                if info.model != .unknown {
+                    config.deviceInfo = info
+                }
+            }
+        }
+
+        private static func serviceIdentifiers(from properties: [String: String]) -> Set<String> {
+            Set(
+                ["UniqueIdentifier", "deviceid", "DACP-ID", "hg", "gid"].compactMap { key in
+                    property(properties, keys: [key])
+                }.filter { !$0.isEmpty }
+            )
+        }
+
+        private static func preferredIdentifier(from properties: [String: String]) -> String? {
+            for key in ["UniqueIdentifier", "deviceid", "DACP-ID", "hg", "gid"] {
+                if let value = property(properties, keys: [key]), !value.isEmpty {
+                    return value
+                }
+            }
+            return nil
         }
 
         private static func property(_ properties: [String: String], keys: [String]) -> String? {
@@ -245,12 +305,54 @@
             let lock = NSLock()
             var discovered: [DiscoveredService] = []
             var hasResumed = false
+            var browser: NWBrowser?
+            var resolvers: [ObjectIdentifier: NWConnection] = [:]
+
+            func setBrowser(_ browser: NWBrowser) {
+                lock.withLock {
+                    self.browser = browser
+                }
+            }
+
+            func addResolver(_ connection: NWConnection) {
+                lock.withLock {
+                    resolvers[ObjectIdentifier(connection)] = connection
+                }
+            }
+
+            func removeResolver(_ connection: NWConnection) {
+                _ = lock.withLock {
+                    resolvers.removeValue(forKey: ObjectIdentifier(connection))
+                }
+            }
+
+            func append(_ service: DiscoveredService?) {
+                lock.withLock {
+                    guard let service, !hasResumed else { return }
+                    discovered.append(service)
+                }
+            }
 
             func safeResume(_ continuation: CheckedContinuation<[DiscoveredService], Error>) {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !hasResumed else { return }
-                hasResumed = true
+                let snapshot = lock.withLock {
+                    guard !hasResumed else {
+                        return nil as (NWBrowser?, [NWConnection], [DiscoveredService])?
+                    }
+                    hasResumed = true
+                    let snapshot = (browser, Array(resolvers.values), discovered)
+                    browser = nil
+                    resolvers.removeAll()
+                    return snapshot
+                }
+
+                guard let (browser, resolvers, discovered) = snapshot else {
+                    return
+                }
+
+                browser?.cancel()
+                for resolver in resolvers {
+                    resolver.cancel()
+                }
                 continuation.resume(returning: discovered)
             }
         }
@@ -272,6 +374,7 @@
                     for: .bonjour(type: serviceType.rawValue, domain: "local."),
                     using: params
                 )
+                state.setBrowser(browser)
 
                 let timeoutTask = Task {
                     try? await Task.sleep(nanoseconds: timeoutNs)
@@ -295,12 +398,8 @@
                     state.lock.unlock()
 
                     for result in newResults {
-                        Self.resolveEndpoint(result, serviceType: serviceType) { service in
-                            state.lock.lock()
-                            if let service, !state.hasResumed {
-                                state.discovered.append(service)
-                            }
-                            state.lock.unlock()
+                        Self.resolveEndpoint(result, serviceType: serviceType, browseState: state) { service in
+                            state.append(service)
                         }
                     }
                 }
@@ -313,6 +412,7 @@
         private static func resolveEndpoint(
             _ result: NWBrowser.Result,
             serviceType: BonjourServiceType,
+            browseState: BrowseState,
             completion: @escaping @Sendable (DiscoveredService?) -> Void
         ) {
             let endpoint = result.endpoint
@@ -339,10 +439,12 @@
             // Create a connection to resolve the address
             let params = NWParameters.tcp
             let connection = NWConnection(to: endpoint, using: params)
+            browseState.addResolver(connection)
 
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
+                    browseState.removeResolver(connection)
                     if let path = connection.currentPath,
                         let remoteEndpoint = path.remoteEndpoint,
                         case .hostPort(let host, let port) = remoteEndpoint
@@ -374,6 +476,7 @@
                     }
 
                 case .failed, .cancelled:
+                    browseState.removeResolver(connection)
                     completion(nil)
 
                 default:
@@ -385,6 +488,7 @@
 
             // Timeout for resolution
             DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                browseState.removeResolver(connection)
                 connection.cancel()
             }
         }

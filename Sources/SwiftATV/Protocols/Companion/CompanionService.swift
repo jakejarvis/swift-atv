@@ -6,7 +6,7 @@ import Foundation
 /// performing pair-verify, and initializing all protocol interfaces.
 ///
 /// Thread safety: Mutable interface references protected by `NSLock`.
-public final class CompanionService: @unchecked Sendable {
+public final class CompanionService: @unchecked Sendable, CompanionConnectionDelegate {
     /// Bonjour service type for Companion protocol.
     public static let serviceType = "_companion-link._tcp"
     /// Default port for Companion protocol.
@@ -16,6 +16,7 @@ public final class CompanionService: @unchecked Sendable {
     private let protocolHandler: CompanionProtocolHandler
     private let lock = NSLock()
     private let settings: ATVSettings
+    private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var credentials: HAPCredentials?
 
     private var _remoteControl: CompanionRemoteControl?
@@ -72,12 +73,15 @@ public final class CompanionService: @unchecked Sendable {
         host: String,
         port: Int,
         credentials: HAPCredentials? = nil,
-        settings: ATVSettings = ATVSettings()
+        settings: ATVSettings = ATVSettings(),
+        onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = CompanionConnection(host: host, port: port)
         self.protocolHandler = CompanionProtocolHandler(connection: connection)
         self.credentials = credentials
         self.settings = settings
+        self.onConnectionClosed = onConnectionClosed
+        self.connection.delegate = self
     }
 
     /// Connect and set up the Companion protocol.
@@ -119,6 +123,12 @@ public final class CompanionService: @unchecked Sendable {
     public func close() async {
         await protocolHandler.stop()
         await connection.close()
+    }
+
+    public func connectionDidReceiveFrame(_ frame: CompanionFrame) async {}
+
+    public func connectionDidClose(error: Error?) async {
+        onConnectionClosed?(error)
     }
 
     private static func utf8String(from data: Data) -> String? {

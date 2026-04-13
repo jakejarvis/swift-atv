@@ -6,8 +6,10 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 - **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS
 - **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links
+- **Credential Persistence** -- Pairing handlers expose HAP credentials directly, and connection setup can use credentials from settings or enriched services
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
-- **Metadata and Push Updates** -- Read now-playing metadata, artwork, current app, and MRP push updates
+- **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to MRP push updates
+- **Connection Events** -- Observe connection-lost and explicit-close events from the unified device facade
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
 - **Power Control** -- Turn devices on/off and monitor power state
@@ -107,11 +109,13 @@ try await handler.begin()
 try await handler.pin(userEnteredPIN)
 try await handler.finish()
 
-// Pull the HAP long-term credentials and persist them. On the next
-// connection, load them into ATVSettings so SwiftATV uses pair-verify
-// instead of pair-setup.
-if let creds = (handler as? CompanionPairingHandler)?.credentials {
-    try keychain.store(creds.serialize(), for: device.mainIdentifier)
+// Pull the HAP long-term credentials and persist them. On the next connection,
+// load them into ATVSettings (or enrich ServiceInfo.credentials) so SwiftATV
+// uses pair-verify instead of pair-setup.
+if let identifier = device.mainIdentifier,
+   let credentials = handler.serializedCredentials
+{
+    try keychain.store(credentials, for: identifier)
 }
 
 await handler.close()
@@ -120,7 +124,13 @@ await handler.close()
 Use `.mrp` instead of `.companion` to pair against the direct Media Remote
 Protocol service. Persist the returned credentials under
 `ATVSettings.protocols.mrp.credentials` by calling
-`settings.setCredentials(credentials.serialize(), for: .mrp)`.
+`settings.setCredentials(handler.serializedCredentials, for: .mrp)`.
+
+`SwiftATV.connect` tries enabled services in deterministic setup order
+(MRP, then Companion, then currently unsupported protocols) and falls back past
+failed or uncredentialed unfiltered services until one usable protocol connects.
+When both settings and a service contain credentials for the same protocol,
+`ATVSettings` wins.
 
 ### Check Feature Availability
 
@@ -161,7 +171,9 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
      (high)                          (low)
 ```
 
-**Priority order**: MRP > DMAP > Companion > AirPlay > RAOP
+**Relayer priority order**: MRP > DMAP > Companion > AirPlay > RAOP.
+Connection setup uses MRP before Companion for currently implemented protocols;
+AirPlay, RAOP, and DMAP remain discoverable but are not control backends yet.
 
 ### Protocols
 
@@ -222,7 +234,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 250 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 271 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 44 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -231,8 +243,10 @@ every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
 device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
-metadata, MRP volume/command-result handling, Bonjour pairing flag parsing,
-connect-path validation, timeout conversion, strict TLV8 auth decoding,
+metadata and active metadata refresh, MRP volume/command-result handling,
+Bonjour pairing flag parsing and identity merging, deterministic connect
+fallback/credential selection, facade device events, timeout conversion,
+strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, and `MessageDispatcher`
 actor behavior.
 

@@ -23,8 +23,9 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 ### Key Design Patterns
 
-- **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice`
+- **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > DMAP > Companion > AirPlay > RAOP)
+- **Connect setup priority**: `SwiftATV.connect` attempts implemented control protocols deterministically (MRP > Companion) and falls back across unfiltered failures
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
 
@@ -36,14 +37,14 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   - `Configuration.swift` -- `AppleTVConfiguration` and `ServiceInfo`
   - `Errors.swift` -- `ATVError` (all public API is `throws(ATVError)`)
   - `Support/` -- Binary codecs: OPACK, TLV8, ChaCha20-Poly1305
-  - `Core/` -- Relayer, Facade, Scanner (NWBrowser), MessageDispatcher
+  - `Core/` -- Relayer, Facade, Scanner (NWBrowser with identifier-first merge), MessageDispatcher
   - `Auth/`
     - `HAPCredentials.swift` -- Long-term key storage/serialization
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
-  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume; text entry and output-device mutation are not implemented yet)
-  - `Protocols/MRP/` -- Direct MRP implementation (SwiftProtobuf-generated pyatv messages, TCP framing, pair-setup/pair-verify, interfaces, player-state actor)
+  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume, connection-lost propagation; text entry and output-device mutation are not implemented yet)
+  - `Protocols/MRP/` -- Direct MRP implementation (SwiftProtobuf-generated pyatv messages, TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, connection-lost propagation)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
 
@@ -51,8 +52,8 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus, touch. Text entry and output-device mutation are not implemented yet |
-| MRP | Implemented | Direct TCP/protobuf connection, pair-setup, pair-verify, remote, metadata, push, power, audio. AirPlay tunnel/streaming not included |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus, touch, connection-lost events. Text entry and output-device mutation are not implemented yet |
+| MRP | Implemented | Direct TCP/protobuf connection, pair-setup, pair-verify, remote, actively refreshed metadata, push, power, audio, connection-lost events. AirPlay tunnel/streaming not included |
 | DMAP | Not started | Legacy protocol |
 | AirPlay | Not started | Streaming |
 | RAOP | Not started | Audio streaming |
@@ -115,14 +116,17 @@ Most tests are ported from pyatv's test suite (XCTest):
   `nonceLength` validation coverage.
 - `DeviceInfoTests` <- `tests/support/test_device_info.py`
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
-- `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing and
-  scan timeout validation.
+- `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
+  scan timeout validation, and identifier-first scan-result merging.
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
-  unsupported, and malformed-credential service setup.
+  unsupported, malformed-credential, deterministic-priority, service-credential,
+  mandatory-credential, and fallback service setup.
+- `FacadeEventTests.swift` -- facade connection-closed and connection-lost
+  event propagation.
 - `TimingTests.swift` -- shared timeout-to-nanoseconds conversion guards.
 - `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus
-  SwiftATV MRP framing/message, volume, command-result, varint overflow, and
-  pair-verify-final-response coverage.
+  SwiftATV MRP framing/message, volume, command-result, varint overflow,
+  active metadata refresh, and pair-verify-final-response coverage.
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:

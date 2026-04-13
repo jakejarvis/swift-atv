@@ -5,6 +5,32 @@ import XCTest
 /// Ported from pyatv tests/test_interface.py
 final class InterfaceTests: XCTestCase {
 
+    private struct FakePairingHandler: PairingHandler {
+        let credentials: HAPCredentials?
+
+        var deviceProvidesPin: Bool { true }
+        var hasPaired: Bool { credentials != nil }
+        var service: ServiceInfo { ServiceInfo(protocol: .mrp, port: 49152) }
+
+        func pin(_ pin: String) async throws(ATVError) {}
+        func begin() async throws(ATVError) {}
+        func finish() async throws(ATVError) {}
+        func close() async {}
+    }
+
+    func testPairingHandlerExposesSerializedCredentialsWithoutDowncast() {
+        let credentials = HAPCredentials(
+            ltpk: Data([0x01]),
+            ltsk: Data([0x02]),
+            atvIdentifier: Data([0x03]),
+            clientIdentifier: Data([0x04])
+        )
+        let handler: any PairingHandler = FakePairingHandler(credentials: credentials)
+
+        XCTAssertEqual(handler.credentials?.serialize(), "01:02:03:04")
+        XCTAssertEqual(handler.serializedCredentials, "01:02:03:04")
+    }
+
     // MARK: - Playing (test_interface.py::test_playing_*)
 
     func testPlayingMediaTypeAndPlaystate() {

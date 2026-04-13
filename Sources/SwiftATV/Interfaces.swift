@@ -377,10 +377,20 @@ public protocol PairingHandler: Sendable {
     var deviceProvidesPin: Bool { get }
     var hasPaired: Bool { get }
     var service: ServiceInfo { get }
+    /// HAP long-term credentials produced by a successful pairing flow.
+    var credentials: HAPCredentials? { get }
     func pin(_ pin: String) async throws(ATVError)
     func begin() async throws(ATVError)
     func finish() async throws(ATVError)
     func close() async
+}
+
+extension PairingHandler {
+    /// Serialized HAP credentials suitable for storing in `ATVSettings` or
+    /// `ServiceInfo.credentials`.
+    public var serializedCredentials: String? {
+        credentials?.serialize()
+    }
 }
 
 // MARK: - Device Listener

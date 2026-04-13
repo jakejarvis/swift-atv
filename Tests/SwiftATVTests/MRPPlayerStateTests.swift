@@ -27,6 +27,31 @@ private final class Accumulator<T: Sendable>: @unchecked Sendable {
     }
 }
 
+private final class FakeMRPProtocolHandler: MRPProtocolHandling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _refreshCount = 0
+    let playing: Playing
+
+    var refreshCount: Int {
+        lock.withLock { _refreshCount }
+    }
+
+    init(playing: Playing) {
+        self.playing = playing
+    }
+
+    func artwork(width: Int?, height: Int?) async throws(ATVError) -> ArtworkInfo? {
+        nil
+    }
+
+    func refreshPlaying() async throws(ATVError) -> Playing {
+        lock.withLock {
+            _refreshCount += 1
+        }
+        return playing
+    }
+}
+
 /// Ported from pyatv tests/protocols/mrp/test_player_state.py
 final class MRPPlayerStateTests: XCTestCase {
 
@@ -40,6 +65,21 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(playing.deviceState, .idle)
         XCTAssertNil(playing.title)
         XCTAssertNil(playing.artist)
+    }
+
+    func testMRPMetadataPlayingRefreshesProtocolState() async throws {
+        let refreshed = Playing(mediaType: .video, deviceState: .playing, title: "Fresh")
+        let handler = FakeMRPProtocolHandler(playing: refreshed)
+        let metadata = MRPMetadata(
+            protocol: handler,
+            playerState: MRPPlayerState(),
+            stateStore: MRPStateStore()
+        )
+
+        let playing = try await metadata.playing()
+
+        XCTAssertEqual(handler.refreshCount, 1)
+        XCTAssertEqual(playing, refreshed)
     }
 
     func testVarintRoundTrip() throws {

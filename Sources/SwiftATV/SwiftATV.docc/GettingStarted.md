@@ -45,7 +45,9 @@ for device in devices {
 ```
 
 You can narrow the scan to specific protocols or device identifiers to avoid
-paying for protocol probes you don't need:
+paying for protocol probes you don't need. Identifier filtering matches any
+identifier reported by the device's services, not just the preferred display
+identifier:
 
 ```swift
 let companionOnly = try await ATVScanner.scan(
@@ -70,20 +72,20 @@ try await handler.begin()
 try await handler.pin(userEnteredPIN)
 try await handler.finish()
 
-// Pull out the resulting HAP long-term credentials. They're only exposed
-// on the concrete CompanionPairingHandler, not the PairingHandler protocol.
-if let companion = handler as? CompanionPairingHandler,
-   let credentials = companion.credentials
+// Pull out the resulting HAP long-term credentials from the protocol-agnostic
+// PairingHandler.
+if let identifier = device.mainIdentifier,
+   let credentials = handler.serializedCredentials
 {
-    try keychain.store(credentials.serialize(), for: device.mainIdentifier)
+    try keychain.store(credentials, for: identifier)
 }
 
 await handler.close()
 ```
 
-Store the serialized credentials under the device's
-``AppleTVConfiguration/mainIdentifier`` so you can restore them on the next
-connection.
+Store the serialized credentials under one of the device's identifiers
+(``AppleTVConfiguration/mainIdentifier`` or ``AppleTVConfiguration/allIdentifiers``)
+so you can restore them on the next connection.
 
 To pair through direct MRP, request `.mrp` and store the credentials for
 `.mrp`:
@@ -95,10 +97,10 @@ try await handler.begin()
 try await handler.pin(userEnteredPIN)
 try await handler.finish()
 
-if let mrp = handler as? MRPPairingHandler,
-   let credentials = mrp.credentials
+if let identifier = device.mainIdentifier,
+   let credentials = handler.serializedCredentials
 {
-    try keychain.store(credentials.serialize(), for: device.mainIdentifier)
+    try keychain.store(credentials, for: identifier)
 }
 
 await handler.close()
@@ -130,6 +132,31 @@ try await atv.power.turnOff()
 
 // Always close the connection when you're done.
 await atv.close()
+```
+
+``SwiftATV/connect(_:protocol:settings:)`` tries enabled services in a
+deterministic order for implemented control protocols: MRP first, then
+Companion. If you do not request a specific protocol, setup falls back past
+failed or missing-credential services until one usable protocol connects. If
+you do request a specific protocol, that protocol's error is returned directly.
+
+Credentials in ``ATVSettings`` take precedence. If settings do not contain
+credentials for a protocol, SwiftATV falls back to the matching
+``ServiceInfo/credentials`` value from an enriched scan result.
+
+You can observe connection lifecycle events from the connected facade:
+
+```swift
+Task {
+    for await event in atv.deviceEvents {
+        switch event {
+        case .connectionLost(let error):
+            print("Connection lost: \(error)")
+        case .connectionClosed:
+            print("Connection closed")
+        }
+    }
+}
 ```
 
 ## Check feature availability

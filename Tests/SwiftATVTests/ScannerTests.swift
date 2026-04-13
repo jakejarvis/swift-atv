@@ -56,5 +56,62 @@
                 }
             }
         }
+
+        func testConfigurationsMergeBySharedServiceIdentifierAcrossAddresses() {
+            let services = [
+                DiscoveredService(
+                    serviceType: .mrp,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49152,
+                    txtRecord: ["UniqueIdentifier": "device-1", "model": "AppleTV6,2"]
+                ),
+                DiscoveredService(
+                    serviceType: .companion,
+                    name: "Living Room",
+                    host: "fe80::1",
+                    port: 49153,
+                    txtRecord: ["UniqueIdentifier": "device-1", "rpfl": "0x4000"]
+                ),
+                DiscoveredService(
+                    serviceType: .deviceInfo,
+                    name: "Living Room",
+                    host: "fe80::2",
+                    port: 0,
+                    txtRecord: ["deviceid": "device-1", "model": "AppleTV6,2"]
+                ),
+            ]
+
+            let configs = ATVScanner.configurations(from: services)
+
+            XCTAssertEqual(configs.count, 1)
+            XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.mrp, .companion])
+            XCTAssertEqual(configs[0].allIdentifiers, ["device-1"])
+            XCTAssertEqual(configs[0].deviceInfo.model, .gen4K)
+        }
+
+        func testConfigurationsMergeByAddressWhenIdentifiersAreMissing() {
+            let services = [
+                DiscoveredService(
+                    serviceType: .airPlay,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 7000,
+                    txtRecord: [:]
+                ),
+                DiscoveredService(
+                    serviceType: .raop,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 7000,
+                    txtRecord: [:]
+                ),
+            ]
+
+            let configs = ATVScanner.configurations(from: services)
+
+            XCTAssertEqual(configs.count, 1)
+            XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.airPlay, .raop])
+        }
     }
 #endif

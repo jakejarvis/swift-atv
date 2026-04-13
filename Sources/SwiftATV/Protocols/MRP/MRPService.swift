@@ -159,6 +159,7 @@ public final class MRPService: @unchecked Sendable {
     private let stateStore = MRPStateStore()
     private let lock = NSLock()
     private let settings: ATVSettings
+    private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var credentials: HAPCredentials?
 
     private var _remoteControl: MRPRemoteControl?
@@ -182,17 +183,25 @@ public final class MRPService: @unchecked Sendable {
     public var features: MRPFeatures? { lock.withLock { _features } }
 
     /// Create an MRP service for a host and port.
-    public init(host: String, port: Int, credentials: HAPCredentials? = nil, settings: ATVSettings) {
+    public init(
+        host: String,
+        port: Int,
+        credentials: HAPCredentials? = nil,
+        settings: ATVSettings,
+        onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
+    ) {
         let connection = MRPConnection(host: host, port: port)
         let handler = MRPProtocolHandler(
             connection: connection,
             playerState: playerState,
-            stateStore: stateStore
+            stateStore: stateStore,
+            onConnectionClosed: onConnectionClosed
         )
         self.connection = connection
         self.protocolHandler = handler
         self.credentials = credentials
         self.settings = settings
+        self.onConnectionClosed = onConnectionClosed
         self.connection.delegate = handler
     }
 
@@ -220,16 +229,23 @@ public final class MRPService: @unchecked Sendable {
     }
 }
 
-actor MRPProtocolHandler: MRPConnectionDelegate {
+actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
     private let connection: MRPConnection
     private let playerState: MRPPlayerState
     private let stateStore: MRPStateStore
+    private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var heartbeatTask: Task<Void, Never>?
 
-    init(connection: MRPConnection, playerState: MRPPlayerState, stateStore: MRPStateStore) {
+    init(
+        connection: MRPConnection,
+        playerState: MRPPlayerState,
+        stateStore: MRPStateStore,
+        onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
+    ) {
         self.connection = connection
         self.playerState = playerState
         self.stateStore = stateStore
+        self.onConnectionClosed = onConnectionClosed
     }
 
     func start(settings: ATVSettings, credentials: HAPCredentials?) async throws(ATVError) {
@@ -339,13 +355,27 @@ actor MRPProtocolHandler: MRPConnectionDelegate {
         )
     }
 
+    func refreshPlaying() async throws(ATVError) -> Playing {
+        let path = await playerState.activePlayerPath
+        let response = try await exchange(
+            MRPMessages.playbackQueueRequest(width: nil, height: nil, playerPath: path),
+            responseType: .setStateMessage
+        )
+        await playerState.process(response)
+        stateStore.update(message: response)
+        await syncMetadataSnapshot()
+        return await playerState.currentPlaying
+    }
+
     nonisolated func connectionDidReceiveMessage(_ message: ProtocolMessageMessage) async {
         await playerState.process(message)
         stateStore.update(message: message)
         await syncMetadataSnapshot()
     }
 
-    nonisolated func connectionDidClose(error: Error?) async {}
+    nonisolated func connectionDidClose(error: Error?) async {
+        onConnectionClosed?(error)
+    }
 
     private func verify(credentials: HAPCredentials) async throws(ATVError) {
         let verifier = HAPPairVerifyHandler(credentials: credentials)

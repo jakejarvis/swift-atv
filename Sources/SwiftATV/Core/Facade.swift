@@ -9,6 +9,11 @@ import Foundation
 /// Thread safety: Mutable service/event state protected by `NSLock`.
 /// Relayers have their own internal locking.
 public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
+    private typealias TerminalEventDrain = (
+        CompanionService?,
+        MRPService?,
+        AsyncStream<DeviceEvent>.Continuation?
+    )
 
     private let configuration: AppleTVConfiguration
     private let _settings: ATVSettings
@@ -31,6 +36,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     // Event stream
     private var eventContinuation: AsyncStream<DeviceEvent>.Continuation?
     private var _deviceEvents: AsyncStream<DeviceEvent>?
+    private var pendingEvents: [DeviceEvent] = []
+    private var eventStreamFinished = false
 
     public init(configuration: AppleTVConfiguration, settings: ATVSettings) {
         self.configuration = configuration
@@ -89,49 +96,137 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     public var deviceEvents: AsyncStream<DeviceEvent> {
         lock.lock()
-        defer { lock.unlock() }
-        if let existing = _deviceEvents { return existing }
+        if let existing = _deviceEvents {
+            lock.unlock()
+            return existing
+        }
+        lock.unlock()
+
         let stream = AsyncStream<DeviceEvent> { [weak self] continuation in
-            self?.lock.lock()
-            self?.eventContinuation = continuation
-            self?.lock.unlock()
+            self?.installEventContinuation(continuation)
+        }
+
+        lock.lock()
+        if let existing = _deviceEvents {
+            lock.unlock()
+            return existing
         }
         _deviceEvents = stream
+        lock.unlock()
         return stream
+    }
+
+    private func installEventContinuation(_ continuation: AsyncStream<DeviceEvent>.Continuation) {
+        let (events, shouldFinish) = lock.withLock {
+            self.eventContinuation = continuation
+            let events = self.pendingEvents
+            self.pendingEvents.removeAll()
+            return (events, self.eventStreamFinished)
+        }
+        for event in events {
+            continuation.yield(event)
+        }
+        if shouldFinish {
+            continuation.finish()
+        }
+    }
+
+    private func finishWithTerminalEvent(_ event: DeviceEvent) async {
+        let drained: TerminalEventDrain? = lock.withLock {
+            guard !eventStreamFinished else {
+                return nil
+            }
+
+            eventStreamFinished = true
+            let companion = companionService
+            let mrp = mrpService
+            companionService = nil
+            mrpService = nil
+
+            if eventContinuation == nil {
+                pendingEvents.append(event)
+            }
+
+            return (companion, mrp, eventContinuation)
+        }
+
+        guard let (companion, mrp, continuation) = drained else {
+            return
+        }
+
+        if let continuation {
+            continuation.yield(event)
+            continuation.finish()
+        }
+
+        await companion?.close()
+        await mrp?.close()
+    }
+
+    private func protocolConnectionDidClose(_ error: Error?, protocol: ATVProtocol) {
+        let event = DeviceEvent.connectionLost(
+            ATVError.connectionLost(
+                error.map { "\(`protocol`) connection closed: \(String(describing: $0))" }
+                    ?? "\(`protocol`) connection closed"
+            )
+        )
+        Task { [weak self] in
+            await self?.finishWithTerminalEvent(event)
+        }
+    }
+
+    internal func _testProtocolConnectionDidClose(error: Error?, protocol: ATVProtocol) {
+        protocolConnectionDidClose(error, protocol: `protocol`)
     }
 
     // MARK: - Setup
 
     /// Set up a protocol service for this device.
-    public func setupProtocol(_ service: ServiceInfo) async throws(ATVError) {
+    public func setupProtocol(
+        _ service: ServiceInfo,
+        credentials resolvedCredentials: HAPCredentials? = nil
+    ) async throws(ATVError) {
+        let credentials: HAPCredentials?
+        if let resolvedCredentials {
+            credentials = resolvedCredentials
+        } else {
+            credentials = try SwiftATV.resolvedCredentials(
+                for: service,
+                settings: _settings
+            )
+        }
+        if service.pairingRequirement == .mandatory, credentials == nil {
+            throw ATVError.noCredentials(
+                "\(service.protocol) service requires pairing credentials"
+            )
+        }
+
         switch service.protocol {
         case .companion:
-            try await setupCompanion(service)
+            try await setupCompanion(service, credentials: credentials)
         case .mrp:
-            try await setupMRP(service)
+            try await setupMRP(service, credentials: credentials)
         case .dmap, .airPlay, .raop:
             throw ATVError.notSupported("Connection not yet implemented for \(service.protocol)")
         }
     }
 
-    private func setupCompanion(_ service: ServiceInfo) async throws(ATVError) {
-        // Parse credentials from settings
-        var credentials: HAPCredentials?
-        if let credStr = _settings.protocols.companion.credentials {
-            do {
-                credentials = try HAPCredentials.parse(credStr)
-            } catch {
-                throw ATVError.wrap(error)
-            }
-        }
-
+    private func setupCompanion(_ service: ServiceInfo, credentials: HAPCredentials?) async throws(ATVError) {
         let companion = CompanionService(
             host: configuration.address,
             port: service.port,
             credentials: credentials,
-            settings: _settings
+            settings: _settings,
+            onConnectionClosed: { [weak self] error in
+                self?.protocolConnectionDidClose(error, protocol: .companion)
+            }
         )
-        try await companion.setup()
+        do {
+            try await companion.setup()
+        } catch {
+            await companion.close()
+            throw error
+        }
         lock.withLock {
             self.companionService = companion
         }
@@ -163,23 +258,22 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         }
     }
 
-    private func setupMRP(_ service: ServiceInfo) async throws(ATVError) {
-        var credentials: HAPCredentials?
-        if let credStr = _settings.protocols.mrp.credentials {
-            do {
-                credentials = try HAPCredentials.parse(credStr)
-            } catch {
-                throw ATVError.wrap(error)
-            }
-        }
-
+    private func setupMRP(_ service: ServiceInfo, credentials: HAPCredentials?) async throws(ATVError) {
         let mrp = MRPService(
             host: configuration.address,
             port: service.port,
             credentials: credentials,
-            settings: _settings
+            settings: _settings,
+            onConnectionClosed: { [weak self] error in
+                self?.protocolConnectionDidClose(error, protocol: .mrp)
+            }
         )
-        try await mrp.setup()
+        do {
+            try await mrp.setup()
+        } catch {
+            await mrp.close()
+            throw error
+        }
         lock.withLock {
             self.mrpService = mrp
         }
@@ -211,12 +305,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public func close() async {
-        let (companion, mrp, cont) = lock.withLock {
-            (companionService, mrpService, eventContinuation)
-        }
-        await companion?.close()
-        await mrp?.close()
-        cont?.finish()
+        await finishWithTerminalEvent(.connectionClosed)
     }
 }
 

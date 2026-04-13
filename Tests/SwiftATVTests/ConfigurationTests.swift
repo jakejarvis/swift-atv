@@ -105,6 +105,16 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertNotNil(config.mainIdentifier)
     }
 
+    func testAllIdentifiersIncludesDeviceAndServiceIdentifiers() {
+        var config = AppleTVConfiguration(address: address1, name: deviceName, identifier: "device-id")
+        config.addService(ServiceInfo(protocol: .mrp, port: port2, identifier: "mrp-id"))
+        config.addService(ServiceInfo(protocol: .companion, port: port3, identifier: "companion-id"))
+
+        XCTAssertEqual(config.allIdentifiers, ["device-id", "mrp-id", "companion-id"])
+        XCTAssertTrue(config.matchesIdentifier("companion-id"))
+        XCTAssertFalse(config.matchesIdentifier("missing-id"))
+    }
+
     // MARK: - test_add_airplay_service
 
     func testAddAirplayService() {
@@ -158,7 +168,7 @@ final class ConfigurationTests: XCTestCase {
     // MARK: - test_service_merge_password
 
     func testServiceMergePasswordFirstHas() {
-        var service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1", password: "pass1")
+        let service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1", password: "pass1")
         let service2 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id2")
 
         // Merge service2 into config containing service1

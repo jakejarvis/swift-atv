@@ -15,6 +15,24 @@ Initial pre-release. API is unstable and will change before 1.0.
 
 ### Changed during the 0.1.0 development cycle (pre-tag)
 
+- `PairingHandler` now exposes protocol-agnostic `credentials` and
+  `serializedCredentials`, so callers no longer have to downcast to
+  `CompanionPairingHandler` or `MRPPairingHandler` before persisting HAP keys.
+- `SwiftATV.connect` now uses deterministic setup order for implemented control
+  protocols (MRP before Companion), falls back past failed unfiltered services,
+  honors `ServiceInfo.credentials` when `ATVSettings` does not provide
+  credentials, and fails mandatory-pairing services with `.noCredentials`
+  before opening protocol sessions.
+- Discovery now merges scan results by service identifiers before falling back
+  to resolved address and exposes `AppleTVConfiguration.allIdentifiers` /
+  `matchesIdentifier(_:)`; `scan(identifiers:)` matches any known service
+  identifier.
+- `MRPMetadata.playing()` now actively refreshes playback state with an MRP
+  playback queue request before returning the current `Playing` value, and
+  `FacadeAppleTV.deviceEvents` now reports protocol connection loss.
+- `SwiftATV.pair` now validates service pairing state before opening a pairing
+  connection and rejects disabled, unsupported, or not-needed services with
+  typed errors.
 - Raised the supported Swift toolchain baseline to Swift 6.3. CI now runs the
   package build and tests on `macos-26` and `swift:6.3-jammy`, and runs
   `swift format lint --strict` with Swift 6.3 so formatter behavior matches the

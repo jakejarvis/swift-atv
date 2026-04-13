@@ -9,6 +9,10 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
     /// Unique identifier for this service.
     public var identifier: String?
     /// Credentials for this service (e.g. from pairing).
+    ///
+    /// `SwiftATV.connect` uses protocol credentials from `ATVSettings` first
+    /// and falls back to this value when settings do not contain credentials
+    /// for the same protocol.
     public var credentials: String?
     /// Password for this service.
     public var password: String?
@@ -119,6 +123,25 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
         if let identifier { return identifier }
         if let mrpId = service(for: .mrp)?.identifier { return mrpId }
         return services.first?.identifier
+    }
+
+    /// All known identifiers for this device configuration.
+    public var allIdentifiers: Set<String> {
+        var identifiers = Set<String>()
+        if let identifier, !identifier.isEmpty {
+            identifiers.insert(identifier)
+        }
+        for service in services {
+            if let identifier = service.identifier, !identifier.isEmpty {
+                identifiers.insert(identifier)
+            }
+        }
+        return identifiers
+    }
+
+    /// Whether this configuration has any service or device identifier matching `identifier`.
+    public func matchesIdentifier(_ identifier: String) -> Bool {
+        allIdentifiers.contains(identifier)
     }
 
     public var description: String {
