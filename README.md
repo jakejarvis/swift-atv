@@ -20,7 +20,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 ## Requirements
 
-- Swift 6.0+
+- Swift 6.3+
 - macOS 13+ / iOS 16+ / tvOS 16+
 
 ## Installation
@@ -243,9 +243,9 @@ M3 output against canned M2, error-TLV surfacing, state ordering),
 `Playing.description` edge cases, Companion auth envelopes, Companion encrypted
 frame AAD, and Companion connection race handling.
 
-CI runs the full suite on `macos-15` (Swift 6.0, 6.1) and
-`swift:6.0-jammy` / `swift:6.1-jammy` on `ubuntu-latest`, plus a
-`swift format lint --strict` job on macOS.
+CI runs the full suite on `macos-26` (Swift 6.3) and `swift:6.3-jammy`
+on `ubuntu-24.04`, plus a Swift 6.3 `swift format lint --strict` job on
+macOS.
 
 ## Credits
 

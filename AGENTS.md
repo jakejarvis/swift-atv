@@ -15,9 +15,9 @@ swift package clean  # Clean build artifacts
 swift format lint --recursive Sources Tests
 ```
 
-No special setup or environment variables needed. Requires Swift 6.0+ and macOS 13+/iOS 16+.
+No special setup or environment variables needed. Requires Swift 6.3+ and macOS 13+/iOS 16+.
 
-The package uses `swift-tools-version: 6.0` with Swift 6 language mode (`swiftLanguageModes: [.v6]`) and strict concurrency enabled. All public protocol methods in `Interfaces.swift` are typed-throws (`async throws(ATVError)`); NIO, CryptoKit, and SwiftProtobuf errors are wrapped into `ATVError` at the Companion / MRP / ChaCha20Cipher / HAPPairing boundaries. Classes that manage mutable internal state use `@unchecked Sendable` with encapsulated synchronization. The `MessageDispatcher`, `CompanionProtocolHandler`, `MRPProtocolHandler`, `CompanionPower`/`Audio`/`Keyboard`, and `MRPPlayerState` use Swift actors for safe concurrency.
+The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLanguageModes: [.v6]`) and strict concurrency enabled. All public protocol methods in `Interfaces.swift` are typed-throws (`async throws(ATVError)`); NIO, CryptoKit, and SwiftProtobuf errors are wrapped into `ATVError` at the Companion / MRP / ChaCha20Cipher / HAPPairing boundaries. Classes that manage mutable internal state use `@unchecked Sendable` with encapsulated synchronization. The `MessageDispatcher`, `CompanionProtocolHandler`, `MRPProtocolHandler`, `CompanionPower`/`Audio`/`Keyboard`, and `MRPPlayerState` use Swift actors for safe concurrency.
 
 ## Architecture
 

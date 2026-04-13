@@ -23,7 +23,11 @@ public func hkdfExpand(
 /// Implements the Secure Remote Password (SRP) protocol used during
 /// Apple TV pairing, combined with Ed25519 for signing and
 /// X25519 for key exchange during pair-verify.
-public final class SRPAuthHandler: Sendable {
+///
+/// Instances are immutable after initialization. The unchecked Sendable
+/// conformance bridges older Swift 6 toolchains where CryptoKit key types are
+/// not annotated as Sendable.
+public final class SRPAuthHandler: @unchecked Sendable {
 
     /// Ed25519 signing key pair (generated during initialize).
     private let signingKey: Curve25519.Signing.PrivateKey

@@ -13,6 +13,13 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 Initial pre-release. API is unstable and will change before 1.0.
 
+### Changed during the 0.1.0 development cycle (pre-tag)
+
+- Raised the supported Swift toolchain baseline to Swift 6.3. CI now runs the
+  package build and tests on `macos-26` and `swift:6.3-jammy`, and runs
+  `swift format lint --strict` with Swift 6.3 so formatter behavior matches the
+  supported toolchain.
+
 ### Fixed during the 0.1.0 development cycle (pre-tag)
 
 - **Companion encrypted E_OPACK frames now authenticate the correct
@@ -250,9 +257,8 @@ Supporting changes that landed with the fixes above:
   handlers use `@unchecked Sendable` with `NSLock`/`withLock` at NIO/crypto
   boundaries (documented inline).
 - Linux CI coverage. `.github/workflows/ci.yml` runs `swift build` +
-  `swift test` on `macos-15` and the `swift:6.0-jammy` / `swift:6.1-jammy`
-  containers on `ubuntu-latest` (Swift 6.0 and 6.1), plus a
-  `swift format lint --strict` job. Verified locally via Docker.
+  `swift test` on `macos-26` and the `swift:6.3-jammy` container on
+  `ubuntu-24.04`, plus a Swift 6.3 `swift format lint --strict` job.
 - DocC catalog (`Sources/SwiftATV/SwiftATV.docc/`) with a landing page and
   Getting Started article.
 - `.spi.yml` for Swift Package Index hosting.

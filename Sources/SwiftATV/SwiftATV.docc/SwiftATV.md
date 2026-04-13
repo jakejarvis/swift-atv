@@ -13,6 +13,8 @@ provides modern app, keyboard-focus, touch, power, audio-volume, and
 remote-control support. Companion text entry and output-device mutation, plus
 DMAP, AirPlay, and RAOP, are planned.
 
+SwiftATV requires Swift 6.3 or newer.
+
 All public methods are typed-throws (`async throws(ATVError)`), so you can
 catch `ATVError` exhaustively without worrying about stray NIO or CryptoKit
 errors leaking through.

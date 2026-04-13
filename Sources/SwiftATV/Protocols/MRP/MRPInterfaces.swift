@@ -263,7 +263,7 @@ public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
         if Self.alwaysAvailable.contains(feature) {
             return FeatureInfo(state: .available)
         }
-        if Self.metadataFeatures.contains(feature) {
+        if Self.metadata.contains(feature) {
             return FeatureInfo(state: .available)
         }
         return FeatureInfo(state: .unsupported)
@@ -291,7 +291,7 @@ public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
         .removeOutputDevices, .setOutputDevices,
     ]
 
-    private static let metadataFeatures: Set<FeatureName> = [
+    private static let metadata: Set<FeatureName> = [
         .title, .artist, .album, .genre, .totalTime, .position, .artwork, .app,
         .seriesName, .seasonNumber, .episodeNumber, .contentIdentifier, .iTunesStoreIdentifier,
     ]

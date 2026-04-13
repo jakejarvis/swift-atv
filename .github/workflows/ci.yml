@@ -12,17 +12,18 @@ concurrency:
 
 jobs:
   macos:
-    name: macOS (Swift ${{ matrix.swift }})
-    runs-on: macos-15
+    name: ${{ matrix.os }} (Swift ${{ matrix.swift }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        swift: ["6.0", "6.1"]
+        include:
+          - os: macos-26
+            swift: "6.3"
     steps:
-      - uses: actions/checkout@v4
-      - uses: SwiftyLab/setup-swift@latest
-        with:
-          swift-version: ${{ matrix.swift }}
+      - uses: actions/checkout@v6
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app
       - run: swift --version
       - name: Build
         run: swift build -v
@@ -31,15 +32,15 @@ jobs:
 
   linux:
     name: Linux (Swift ${{ matrix.swift }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        swift: ["6.0", "6.1"]
+        swift: ["6.3"]
     container:
       image: swift:${{ matrix.swift }}-jammy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: swift --version
       - name: Build
         run: swift build -v
@@ -48,8 +49,11 @@ jobs:
 
   lint:
     name: swift-format lint
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app
+      - run: swift --version
       - name: Lint
         run: swift format lint --recursive --strict Sources Tests
