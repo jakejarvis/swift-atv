@@ -14,9 +14,10 @@ audio-volume, and remote-control support. Connection setup is deterministic for
 implemented control protocols (MRP, then Companion), while DMAP, AirPlay, and
 RAOP remain discoverable but planned as control backends.
 
-Discovery merges Bonjour services by stable device identifiers, including
-Companion-only TXT identifiers, and can optionally return scan diagnostics for
-non-fatal browser or resolver failures.
+Discovery resolves Bonjour TXT records with each live service, merges services
+by stable device identifiers, including Companion-only TXT identifiers, and can
+optionally return scan diagnostics for non-fatal browser, resolver, or empty-TXT
+failures.
 
 SwiftATV requires Swift 6.3 or newer.
 

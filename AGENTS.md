@@ -26,7 +26,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > DMAP > Companion > AirPlay > RAOP)
 - **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (MRP > Companion) and falls back across unfiltered failures
-- **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures
+- **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
 
@@ -40,7 +40,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   - `DiscoveryIdentifiers.swift` -- Bonjour TXT identifier lookup priority
   - `Errors.swift` -- `ATVError` (all public API is `throws(ATVError)`)
   - `Support/` -- Binary codecs: OPACK, TLV8, ChaCha20-Poly1305
-  - `Core/` -- Relayer, Facade, Scanner (NWBrowser with identifier-first merge and diagnostics), MessageDispatcher
+  - `Core/` -- Relayer, Facade, Scanner (NWBrowser plus NetService TXT resolution with identifier-first merge and diagnostics), MessageDispatcher
   - `Auth/`
     - `HAPCredentials.swift` -- Long-term key storage/serialization
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
@@ -122,8 +122,8 @@ Most tests are ported from pyatv's test suite (XCTest):
   model/version metadata coverage.
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
-  Companion identifier extraction, scan timeout validation, diagnostics, and
-  identifier-first scan-result merging.
+  Companion identifier extraction, NetService TXT resolver path, scan timeout
+  validation, diagnostics, and identifier-first scan-result merging.
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
   unsupported, malformed-credential, deterministic-priority, service-credential,
   mandatory-credential, and fallback service setup.

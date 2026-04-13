@@ -69,8 +69,8 @@ let companionOnly = try await ATVClient.scan(
 ```
 
 Use ``ATVClient/scanWithDiagnostics(timeout:identifiers:protocols:)`` when the
-app needs Bonjour failure context while still keeping any devices that were
-successfully discovered:
+app needs Bonjour failure context, including services that resolved without TXT
+metadata, while still keeping any devices that were successfully discovered:
 
 ```swift
 let result = try await ATVClient.scanWithDiagnostics(timeout: 5)

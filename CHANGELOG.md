@@ -9,7 +9,18 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- `ATVScanDiagnosticKind.emptyTXTRecord` reports Bonjour services that resolve
+  without TXT metadata.
+
+### Fixed
+
+- Live Bonjour scans now resolve `.service` endpoints with `NetService` so TXT
+  records are fetched with host and port data instead of relying on
+  `NWBrowser.Result.metadata`. Companion services discovered in live scans now
+  receive `rpMRtID` / `rpAD` / `rpHN` / `rpFl` / `rpMd` / `rpVr` TXT values,
+  and `_device-info._tcp` resolution no longer opens TCP flows to port `0`.
 
 ## [0.2.1] - 2026-04-13
 

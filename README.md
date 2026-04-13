@@ -4,7 +4,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 ## Features
 
-- **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS, including Companion-only identifiers and optional scan diagnostics
+- **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS, including live TXT resolution, Companion-only identifiers, and optional scan diagnostics
 - **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links, with protocol-agnostic pairing code direction metadata
 - **Credential Persistence** -- Pairing handlers expose HAP credentials directly, and connection setup can use credentials from settings or enriched services
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
@@ -100,7 +100,8 @@ for device in devices {
 ```
 
 Use `ATVClient.scanWithDiagnostics` when a caller needs to distinguish a clean
-"no devices found" scan from non-fatal Bonjour browser or resolver failures:
+"no devices found" scan from non-fatal Bonjour browser, resolver, or empty-TXT
+failures:
 
 ```swift
 let result = try await ATVClient.scanWithDiagnostics(timeout: 5.0)
@@ -255,7 +256,7 @@ Sources/SwiftATV/
 │   ├── Relayer.swift           # Priority-based protocol routing
 │   ├── Facade.swift            # FacadeAppleTV unified implementation
 │   ├── MessageDispatcher.swift # Generic actor-based pub-sub
-│   └── Scanner.swift           # Bonjour/mDNS device discovery
+│   └── Scanner.swift           # Bonjour/mDNS device discovery + TXT resolution
 ├── Auth/
 │   ├── HAPCredentials.swift    # Credential storage/serialization
 │   ├── SRPAuth.swift           # Ed25519/X25519 + HKDF primitives
@@ -285,7 +286,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 284 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 288 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 44 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -295,8 +296,8 @@ device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
-Bonjour pairing flag parsing, Companion Bonjour identifiers and scan diagnostics,
-identity merging, deterministic connect
+Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
+resolution, scan diagnostics, identity merging, deterministic connect
 fallback/credential selection, facade device events, timeout conversion,
 strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, consumer-style module-qualified

@@ -1,4 +1,5 @@
 #if canImport(Network)
+    import Darwin
     import Foundation
     import Network
 
@@ -54,6 +55,8 @@
         case browserFailed
         /// A discovered endpoint could not be resolved.
         case resolverFailed
+        /// A service resolved successfully but did not include a TXT record.
+        case emptyTXTRecord
     }
 
     /// Non-fatal diagnostic emitted while scanning for Bonjour services.
@@ -378,14 +381,46 @@
             var diagnostics: [ATVScanDiagnostic]
         }
 
+        internal struct BonjourServiceEndpoint: Sendable {
+            let name: String
+            let type: String
+            let domain: String
+        }
+
+        internal struct ResolvedBonjourService: Sendable {
+            let host: String
+            let port: Int
+            let txtRecord: [String: String]
+        }
+
+        internal struct BonjourResolutionOutput: Sendable {
+            let service: DiscoveredService?
+            let diagnostics: [ATVScanDiagnostic]
+        }
+
+        internal protocol BonjourServiceResolving: AnyObject, Sendable {
+            func resolve(
+                completion: @escaping @Sendable (Result<ResolvedBonjourService, Error>) -> Void
+            )
+            func cancel()
+        }
+
         /// Mutable state shared across @Sendable NWBrowser callbacks.
         private final class BrowseState: @unchecked Sendable {
+            private typealias Snapshot = (
+                browser: NWBrowser?,
+                resolvers: [NWConnection],
+                serviceResolvers: [any BonjourServiceResolving],
+                output: BrowseOutput
+            )
+
             let lock = NSLock()
             var discovered: [DiscoveredService] = []
             var diagnostics: [ATVScanDiagnostic] = []
             var hasResumed = false
             var browser: NWBrowser?
             var resolvers: [ObjectIdentifier: NWConnection] = [:]
+            var serviceResolvers: [ObjectIdentifier: any BonjourServiceResolving] = [:]
 
             func setBrowser(_ browser: NWBrowser) {
                 lock.withLock {
@@ -402,6 +437,25 @@
             func removeResolver(_ connection: NWConnection) {
                 _ = lock.withLock {
                     resolvers.removeValue(forKey: ObjectIdentifier(connection))
+                }
+            }
+
+            func addResolver(_ resolver: any BonjourServiceResolving) {
+                lock.withLock {
+                    serviceResolvers[ObjectIdentifier(resolver)] = resolver
+                }
+            }
+
+            func removeResolver(_ resolver: any BonjourServiceResolving) {
+                _ = lock.withLock {
+                    serviceResolvers.removeValue(forKey: ObjectIdentifier(resolver))
+                }
+            }
+
+            func appendDiagnostic(_ diagnostic: ATVScanDiagnostic) {
+                lock.withLock {
+                    guard !hasResumed else { return }
+                    diagnostics.append(diagnostic)
                 }
             }
 
@@ -432,25 +486,34 @@
             func safeResume(_ continuation: CheckedContinuation<BrowseOutput, Error>) {
                 let snapshot = lock.withLock {
                     guard !hasResumed else {
-                        return nil as (NWBrowser?, [NWConnection], BrowseOutput)?
+                        return nil as Snapshot?
                     }
                     hasResumed = true
                     let output = BrowseOutput(services: discovered, diagnostics: diagnostics)
-                    let snapshot = (browser, Array(resolvers.values), output)
+                    let snapshot: Snapshot = (
+                        browser,
+                        Array(resolvers.values),
+                        Array(serviceResolvers.values),
+                        output
+                    )
                     browser = nil
                     resolvers.removeAll()
+                    serviceResolvers.removeAll()
                     return snapshot
                 }
 
-                guard let (browser, resolvers, output) = snapshot else {
+                guard let snapshot else {
                     return
                 }
 
-                browser?.cancel()
-                for resolver in resolvers {
+                snapshot.browser?.cancel()
+                for resolver in snapshot.resolvers {
                     resolver.cancel()
                 }
-                continuation.resume(returning: output)
+                for resolver in snapshot.serviceResolvers {
+                    resolver.cancel()
+                }
+                continuation.resume(returning: snapshot.output)
             }
         }
 
@@ -529,26 +592,103 @@
             completion: @escaping @Sendable (DiscoveredService?) -> Void
         ) {
             let endpoint = result.endpoint
-            let name: String
-            if case .service(let n, _, _, _) = endpoint {
-                name = n
-            } else {
-                name = "Unknown"
+
+            let metadataTXTRecord = txtRecord(from: result.metadata)
+            if case .service(let name, let type, let domain, _) = endpoint {
+                let serviceEndpoint = BonjourServiceEndpoint(
+                    name: name,
+                    type: type,
+                    domain: domain
+                )
+                let resolver = NetServiceBonjourResolver(endpoint: serviceEndpoint, timeout: 3)
+                browseState.addResolver(resolver)
+
+                resolveBonjourEndpoint(
+                    serviceEndpoint,
+                    serviceType: serviceType,
+                    metadataTXTRecord: metadataTXTRecord,
+                    resolver: resolver
+                ) { output in
+                    browseState.removeResolver(resolver)
+                    for diagnostic in output.diagnostics {
+                        browseState.appendDiagnostic(diagnostic)
+                    }
+                    completion(output.service)
+                }
+                return
             }
 
-            // Extract TXT record from metadata
-            let txtRecord: [String: String] = {
-                var record: [String: String] = [:]
-                if case .bonjour(let txt) = result.metadata {
-                    for key in txt.dictionary.keys {
-                        if let value = txt.dictionary[key] {
-                            record[key] = value
-                        }
-                    }
-                }
-                return record
-            }()
+            resolveNetworkEndpoint(
+                endpoint,
+                name: "Unknown",
+                serviceType: serviceType,
+                txtRecord: metadataTXTRecord,
+                browseState: browseState,
+                completion: completion
+            )
+        }
 
+        internal static func resolveBonjourEndpoint(
+            _ endpoint: BonjourServiceEndpoint,
+            serviceType: BonjourServiceType,
+            metadataTXTRecord: [String: String],
+            resolver: any BonjourServiceResolving,
+            completion: @escaping @Sendable (BonjourResolutionOutput) -> Void
+        ) {
+            resolver.resolve { result in
+                switch result {
+                case .success(let resolved):
+                    var txtRecord = resolved.txtRecord
+                    for (key, value) in metadataTXTRecord where txtRecord[key] == nil {
+                        txtRecord[key] = value
+                    }
+
+                    let service = DiscoveredService(
+                        serviceType: serviceType,
+                        name: endpoint.name,
+                        host: resolved.host,
+                        port: resolved.port,
+                        txtRecord: txtRecord
+                    )
+                    var diagnostics: [ATVScanDiagnostic] = []
+                    if txtRecord.isEmpty {
+                        diagnostics.append(
+                            ATVScanDiagnostic(
+                                serviceType: serviceType,
+                                kind: .emptyTXTRecord,
+                                message:
+                                    "Resolved \(endpoint.name) \(endpoint.type) \(endpoint.domain) with empty TXT record"
+                            )
+                        )
+                    }
+                    completion(BonjourResolutionOutput(service: service, diagnostics: diagnostics))
+
+                case .failure(let error):
+                    completion(
+                        BonjourResolutionOutput(
+                            service: nil,
+                            diagnostics: [
+                                ATVScanDiagnostic(
+                                    serviceType: serviceType,
+                                    kind: .resolverFailed,
+                                    message:
+                                        "Failed to resolve \(endpoint.name) \(endpoint.type) \(endpoint.domain): \(error)"
+                                )
+                            ]
+                        )
+                    )
+                }
+            }
+        }
+
+        private static func resolveNetworkEndpoint(
+            _ endpoint: NWEndpoint,
+            name: String,
+            serviceType: BonjourServiceType,
+            txtRecord: [String: String],
+            browseState: BrowseState,
+            completion: @escaping @Sendable (DiscoveredService?) -> Void
+        ) {
             // Create a connection to resolve the address
             let params = NWParameters.tcp
             let connection = NWConnection(to: endpoint, using: params)
@@ -617,6 +757,177 @@
             DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
                 browseState.removeResolver(connection)
                 connection.cancel()
+            }
+        }
+
+        private static func txtRecord(from metadata: NWBrowser.Result.Metadata) -> [String: String] {
+            var record: [String: String] = [:]
+            if case .bonjour(let txt) = metadata {
+                for key in txt.dictionary.keys {
+                    if let value = txt.dictionary[key] {
+                        record[key] = value
+                    }
+                }
+            }
+            return record
+        }
+
+        private final class NetServiceBonjourResolver: NSObject, BonjourServiceResolving,
+            @unchecked Sendable, NetServiceDelegate
+        {
+            private let endpoint: BonjourServiceEndpoint
+            private let timeout: TimeInterval
+            private let lock = NSLock()
+            private var service: NetService?
+            private var completion: (@Sendable (Result<ResolvedBonjourService, Error>) -> Void)?
+            private var didFinish = false
+
+            init(endpoint: BonjourServiceEndpoint, timeout: TimeInterval) {
+                self.endpoint = endpoint
+                self.timeout = timeout
+            }
+
+            func resolve(
+                completion: @escaping @Sendable (Result<ResolvedBonjourService, Error>) -> Void
+            ) {
+                lock.withLock {
+                    self.completion = completion
+                }
+
+                DispatchQueue.main.async {
+                    let service = NetService(
+                        domain: Self.normalizedDomain(self.endpoint.domain),
+                        type: Self.normalizedType(self.endpoint.type),
+                        name: self.endpoint.name
+                    )
+                    service.delegate = self
+                    service.schedule(in: .main, forMode: .default)
+                    self.lock.withLock {
+                        guard !self.didFinish else { return }
+                        self.service = service
+                    }
+                    service.resolve(withTimeout: self.timeout)
+                }
+            }
+
+            func cancel() {
+                let service = lock.withLock {
+                    didFinish = true
+                    completion = nil
+                    let service = self.service
+                    self.service = nil
+                    return service
+                }
+
+                DispatchQueue.main.async {
+                    service?.stop()
+                    service?.remove(from: .main, forMode: .default)
+                    service?.delegate = nil
+                }
+            }
+
+            func netServiceDidResolveAddress(_ sender: NetService) {
+                let host = Self.host(from: sender.addresses) ?? sender.hostName ?? endpoint.name
+                let resolved = ResolvedBonjourService(
+                    host: Self.trimTrailingDot(host),
+                    port: sender.port,
+                    txtRecord: Self.txtRecord(from: sender)
+                )
+                finish(.success(resolved), service: sender)
+            }
+
+            func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
+                finish(
+                    .failure(NetServiceResolutionError(errorDict: errorDict)),
+                    service: sender
+                )
+            }
+
+            private func finish(
+                _ result: Result<ResolvedBonjourService, Error>,
+                service: NetService
+            ) {
+                let completion = lock.withLock {
+                    guard !didFinish else {
+                        return nil as (@Sendable (Result<ResolvedBonjourService, Error>) -> Void)?
+                    }
+                    didFinish = true
+                    let completion = self.completion
+                    self.completion = nil
+                    self.service = nil
+                    return completion
+                }
+
+                service.stop()
+                service.remove(from: .main, forMode: .default)
+                service.delegate = nil
+                completion?(result)
+            }
+
+            private static func normalizedDomain(_ domain: String) -> String {
+                domain.hasSuffix(".") ? domain : "\(domain)."
+            }
+
+            private static func normalizedType(_ type: String) -> String {
+                type.hasSuffix(".") ? type : "\(type)."
+            }
+
+            private static func txtRecord(from service: NetService) -> [String: String] {
+                guard let data = service.txtRecordData() else {
+                    return [:]
+                }
+
+                var record: [String: String] = [:]
+                for (key, value) in NetService.dictionary(fromTXTRecord: data) {
+                    record[key] = String(data: value, encoding: .utf8) ?? ""
+                }
+                return record
+            }
+
+            private static func host(from addresses: [Data]?) -> String? {
+                guard let addresses else { return nil }
+                for address in addresses {
+                    if let host = host(from: address) {
+                        return host
+                    }
+                }
+                return nil
+            }
+
+            private static func host(from address: Data) -> String? {
+                address.withUnsafeBytes { buffer in
+                    guard let baseAddress = buffer.baseAddress else {
+                        return nil
+                    }
+                    let sockaddrPointer = baseAddress.assumingMemoryBound(to: sockaddr.self)
+                    var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    let result = getnameinfo(
+                        sockaddrPointer,
+                        socklen_t(address.count),
+                        &host,
+                        socklen_t(host.count),
+                        nil,
+                        0,
+                        NI_NUMERICHOST
+                    )
+                    guard result == 0 else {
+                        return nil
+                    }
+                    let bytes = host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+            }
+
+            private static func trimTrailingDot(_ host: String) -> String {
+                host.hasSuffix(".") ? String(host.dropLast()) : host
+            }
+        }
+
+        private struct NetServiceResolutionError: Error, CustomStringConvertible {
+            let errorDict: [String: NSNumber]
+
+            var description: String {
+                errorDict.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ", ")
             }
         }
     }

@@ -251,6 +251,91 @@
             XCTAssertEqual(result.diagnostics, [diagnostic])
         }
 
+        func testBonjourResolverSuppliesTXTWhenBrowserMetadataIsEmpty() async throws {
+            let output = await resolveBonjourEndpoint(
+                result: .success(
+                    ATVScanner.ResolvedBonjourService(
+                        host: "fe80::1234%en0",
+                        port: 54872,
+                        txtRecord: [
+                            "rpMRtID": "AE83CCCA-18A3-46E0-A0FF-19734889F37B",
+                            "rpAD": "8df5532cf728",
+                            "rpFl": "0x36782",
+                            "rpMd": "AppleTV11,1",
+                            "rpVr": "715.2",
+                        ]
+                    )
+                )
+            )
+
+            let service = try XCTUnwrap(output.service)
+            let config = try XCTUnwrap(ATVScanner.configurations(from: [service]).first)
+
+            XCTAssertEqual(output.diagnostics, [])
+            XCTAssertEqual(service.txtRecord["rpMRtID"], "AE83CCCA-18A3-46E0-A0FF-19734889F37B")
+            XCTAssertEqual(service.txtRecord["rpFl"], "0x36782")
+            XCTAssertEqual(config.mainIdentifier, "AE83CCCA-18A3-46E0-A0FF-19734889F37B")
+            XCTAssertEqual(config.service(for: .companion)?.pairingRequirement, .mandatory)
+            XCTAssertEqual(config.deviceInfo.model, .gen4K2)
+            XCTAssertEqual(config.deviceInfo.version, "715.2")
+        }
+
+        func testBonjourResolverMergesMetadataTXTWithResolvedTXT() async throws {
+            let output = await resolveBonjourEndpoint(
+                metadataTXTRecord: ["UniqueIdentifier": "metadata-id"],
+                result: .success(
+                    ATVScanner.ResolvedBonjourService(
+                        host: "192.168.1.10",
+                        port: 49153,
+                        txtRecord: ["rpHN": "158599555ae3"]
+                    )
+                )
+            )
+
+            let service = try XCTUnwrap(output.service)
+
+            XCTAssertEqual(service.txtRecord["UniqueIdentifier"], "metadata-id")
+            XCTAssertEqual(service.txtRecord["rpHN"], "158599555ae3")
+        }
+
+        func testBonjourResolverReportsEmptyTXTRecordWithServiceContext() async throws {
+            let output = await resolveBonjourEndpoint(
+                result: .success(
+                    ATVScanner.ResolvedBonjourService(
+                        host: "fe80::1234%en0",
+                        port: 54872,
+                        txtRecord: [:]
+                    )
+                )
+            )
+
+            let service = try XCTUnwrap(output.service)
+            let diagnostic = try XCTUnwrap(output.diagnostics.first)
+
+            XCTAssertTrue(service.txtRecord.isEmpty)
+            XCTAssertEqual(output.diagnostics.count, 1)
+            XCTAssertEqual(diagnostic.serviceType, .companion)
+            XCTAssertEqual(diagnostic.kind, .emptyTXTRecord)
+            XCTAssertTrue(diagnostic.message.contains("Living Room"))
+            XCTAssertTrue(diagnostic.message.contains("_companion-link._tcp"))
+        }
+
+        func testBonjourResolverFailureReportsServiceContext() async throws {
+            let output = await resolveBonjourEndpoint(
+                result: .failure(FakeBonjourError())
+            )
+
+            let diagnostic = try XCTUnwrap(output.diagnostics.first)
+
+            XCTAssertNil(output.service)
+            XCTAssertEqual(output.diagnostics.count, 1)
+            XCTAssertEqual(diagnostic.serviceType, .companion)
+            XCTAssertEqual(diagnostic.kind, .resolverFailed)
+            XCTAssertTrue(diagnostic.message.contains("Living Room"))
+            XCTAssertTrue(diagnostic.message.contains("_companion-link._tcp"))
+            XCTAssertTrue(diagnostic.message.contains("fake resolver failure"))
+        }
+
         func testConfigurationsMergeByAddressWhenIdentifiersAreMissing() {
             let services = [
                 DiscoveredService(
@@ -274,5 +359,46 @@
             XCTAssertEqual(configs.count, 1)
             XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.airPlay, .raop])
         }
+
+        private func resolveBonjourEndpoint(
+            metadataTXTRecord: [String: String] = [:],
+            result: Result<ATVScanner.ResolvedBonjourService, Error>
+        ) async -> ATVScanner.BonjourResolutionOutput {
+            await withCheckedContinuation { continuation in
+                ATVScanner.resolveBonjourEndpoint(
+                    ATVScanner.BonjourServiceEndpoint(
+                        name: "Living Room",
+                        type: "_companion-link._tcp",
+                        domain: "local."
+                    ),
+                    serviceType: .companion,
+                    metadataTXTRecord: metadataTXTRecord,
+                    resolver: FakeBonjourResolver(result: result)
+                ) { output in
+                    continuation.resume(returning: output)
+                }
+            }
+        }
+    }
+
+    private final class FakeBonjourResolver: ATVScanner.BonjourServiceResolving, @unchecked Sendable {
+        typealias Completion =
+            @Sendable (Result<ATVScanner.ResolvedBonjourService, Error>) -> Void
+
+        let result: Result<ATVScanner.ResolvedBonjourService, Error>
+
+        init(result: Result<ATVScanner.ResolvedBonjourService, Error>) {
+            self.result = result
+        }
+
+        func resolve(completion: @escaping Completion) {
+            completion(result)
+        }
+
+        func cancel() {}
+    }
+
+    private struct FakeBonjourError: Error, CustomStringConvertible {
+        let description = "fake resolver failure"
     }
 #endif
