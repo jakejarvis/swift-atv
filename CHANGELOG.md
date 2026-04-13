@@ -9,6 +9,10 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.2.1] - 2026-04-13
+
 ### Added
 
 - `ATVClient.scanWithDiagnostics` / `ATVScanner.scanWithDiagnostics` return
@@ -360,6 +364,7 @@ Supporting changes that landed with the fixes above:
   Companion are functional for control-oriented workflows. AirPlay/RAOP
   streaming and legacy DMAP are future work.
 
-[Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/jakejarvis/swift-atv/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/jakejarvis/swift-atv/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/jakejarvis/swift-atv/releases/tag/0.1.0

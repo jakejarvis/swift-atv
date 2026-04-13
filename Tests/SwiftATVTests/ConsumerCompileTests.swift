@@ -16,7 +16,7 @@ final class ConsumerCompileTests: XCTestCase {
         )
         let settings = SwiftATV.ATVSettings()
 
-        XCTAssertEqual(ATVClient.version, "0.2.0")
+        XCTAssertEqual(ATVClient.version, "0.2.1")
         XCTAssertEqual(config.service(for: protocolName)?.port, SwiftATV.ServiceInfo.defaultMRPPort)
         XCTAssertNil(settings.credentials(for: protocolName))
     }

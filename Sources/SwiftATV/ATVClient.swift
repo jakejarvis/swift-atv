@@ -8,7 +8,7 @@ import Foundation
 public enum ATVClient {
 
     /// Library version.
-    public static let version = "0.2.0"
+    public static let version = "0.2.1"
 
     fileprivate static let connectProtocolPriority: [ATVProtocol] = [
         .mrp, .companion, .airPlay, .raop, .dmap,

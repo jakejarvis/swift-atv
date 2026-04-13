@@ -15,7 +15,7 @@ Using SwiftATV is a three-step flow:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jakejarvis/swift-atv.git", from: "0.2.0")
+    .package(url: "https://github.com/jakejarvis/swift-atv.git", from: "0.2.1")
 ],
 targets: [
     .target(
