@@ -49,6 +49,7 @@ import SwiftATV
 let devices = try await ATVClient.scan(timeout: 5)
 for device in devices {
     print("\(device.name) at \(device.address)")
+    print("  Identifier: \(device.mainIdentifier ?? "unknown")")
     print("  Model: \(device.deviceInfo.model)")
     print("  Services: \(device.services.map(\.protocol))")
 }
@@ -57,13 +58,25 @@ for device in devices {
 You can narrow the scan to specific protocols or device identifiers to avoid
 paying for protocol probes you don't need. Identifier filtering matches any
 identifier reported by the device's services, not just the preferred display
-identifier:
+identifier. Companion-only discoveries use the stable Companion TXT identifiers
+reported by `_companion-link._tcp`:
 
 ```swift
 let companionOnly = try await ATVClient.scan(
     timeout: 3,
     protocols: [.companion]
 )
+```
+
+Use ``ATVClient/scanWithDiagnostics(timeout:identifiers:protocols:)`` when the
+app needs Bonjour failure context while still keeping any devices that were
+successfully discovered:
+
+```swift
+let result = try await ATVClient.scanWithDiagnostics(timeout: 5)
+for diagnostic in result.diagnostics {
+    print("\(diagnostic.serviceType): \(diagnostic.message)")
+}
 ```
 
 ## Pair with a device

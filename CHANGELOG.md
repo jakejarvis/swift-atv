@@ -9,7 +9,19 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- `ATVClient.scanWithDiagnostics` / `ATVScanner.scanWithDiagnostics` return
+  discovered devices together with non-fatal Bonjour browser and resolver
+  diagnostics.
+
+### Fixed
+
+- Companion-only Bonjour discoveries now use `rpMRtID`, `rpAD`, `rpHN`, and
+  `rpHI` TXT values as device/service identifiers, so
+  `AppleTVConfiguration.mainIdentifier` is populated for `_companion-link._tcp`
+  services. Companion `rpMd` and `rpVr` TXT metadata now populate device model
+  and version information when no higher-priority metadata is present.
 
 ## [0.2.0] - 2026-04-13
 

@@ -4,7 +4,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 ## Features
 
-- **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS
+- **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS, including Companion-only identifiers and optional scan diagnostics
 - **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links, with protocol-agnostic pairing code direction metadata
 - **Credential Persistence** -- Pairing handlers expose HAP credentials directly, and connection setup can use credentials from settings or enriched services
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
@@ -93,8 +93,19 @@ let devices = try await ATVClient.scan(timeout: 5.0)
 
 for device in devices {
     print("\(device.name) at \(device.address)")
+    print("  Identifier: \(device.mainIdentifier ?? "unknown")")
     print("  Model: \(device.deviceInfo.model)")
     print("  Services: \(device.services.map(\.protocol))")
+}
+```
+
+Use `ATVClient.scanWithDiagnostics` when a caller needs to distinguish a clean
+"no devices found" scan from non-fatal Bonjour browser or resolver failures:
+
+```swift
+let result = try await ATVClient.scanWithDiagnostics(timeout: 5.0)
+for diagnostic in result.diagnostics {
+    print("\(diagnostic.serviceType): \(diagnostic.message)")
 }
 ```
 
@@ -227,13 +238,14 @@ AirPlay, RAOP, and DMAP remain discoverable but are not control backends yet.
 
 ```
 Sources/SwiftATV/
-├── ATVClient.swift              # Public API: scan(), connect(), pair()
+├── ATVClient.swift              # Public API: scan(), scanWithDiagnostics(), connect(), pair()
 ├── Constants.swift              # All enums (ATVProtocol, FeatureName, etc.)
 ├── Errors.swift                 # ATVError + wrap() factory
 ├── Interfaces.swift             # Swift protocols (all throws(ATVError))
 ├── Configuration.swift          # AppleTVConfiguration, ServiceInfo
 ├── Settings.swift               # Per-protocol settings (Codable)
 ├── DeviceInfo.swift             # Device model/OS lookup tables
+├── DiscoveryIdentifiers.swift   # Bonjour TXT identifier lookup priority
 ├── SwiftATV.docc/               # DocC catalog
 ├── Support/
 │   ├── OPACK.swift             # OPACK binary serialization codec
@@ -273,7 +285,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 276 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 284 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 44 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -283,7 +295,8 @@ device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
-Bonjour pairing flag parsing and identity merging, deterministic connect
+Bonjour pairing flag parsing, Companion Bonjour identifiers and scan diagnostics,
+identity merging, deterministic connect
 fallback/credential selection, facade device events, timeout conversion,
 strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, consumer-style module-qualified

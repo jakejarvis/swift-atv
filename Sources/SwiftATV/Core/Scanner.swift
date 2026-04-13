@@ -46,6 +46,56 @@
         let txtRecord: [String: String]
     }
 
+    /// Diagnostic category for Bonjour scan issues.
+    public enum ATVScanDiagnosticKind: Sendable, Hashable {
+        /// A browser moved into a waiting state and may recover.
+        case browserWaiting
+        /// A browser failed for a Bonjour service type.
+        case browserFailed
+        /// A discovered endpoint could not be resolved.
+        case resolverFailed
+    }
+
+    /// Non-fatal diagnostic emitted while scanning for Bonjour services.
+    public struct ATVScanDiagnostic: Sendable, Hashable, CustomStringConvertible {
+        /// Bonjour service type that produced the diagnostic.
+        public let serviceType: BonjourServiceType
+        /// Kind of scan issue observed.
+        public let kind: ATVScanDiagnosticKind
+        /// Human-readable diagnostic details.
+        public let message: String
+
+        public init(
+            serviceType: BonjourServiceType,
+            kind: ATVScanDiagnosticKind,
+            message: String
+        ) {
+            self.serviceType = serviceType
+            self.kind = kind
+            self.message = message
+        }
+
+        public var description: String {
+            "\(serviceType.rawValue): \(kind) - \(message)"
+        }
+    }
+
+    /// Result from a diagnostic Bonjour scan.
+    public struct ATVScanResult: Sendable, Hashable {
+        /// Discovered device configurations.
+        public let devices: [AppleTVConfiguration]
+        /// Non-fatal scan diagnostics, if any.
+        public let diagnostics: [ATVScanDiagnostic]
+
+        public init(
+            devices: [AppleTVConfiguration],
+            diagnostics: [ATVScanDiagnostic] = []
+        ) {
+            self.devices = devices
+            self.diagnostics = diagnostics
+        }
+    }
+
     /// Scans the local network for Apple TV devices using Bonjour/mDNS.
     public actor ATVScanner {
 
@@ -65,6 +115,24 @@
             identifiers: Set<String>? = nil,
             protocols: Set<ATVProtocol>? = nil
         ) async throws(ATVError) -> [AppleTVConfiguration] {
+            try await scanWithDiagnostics(
+                timeout: timeout,
+                identifiers: identifiers,
+                protocols: protocols
+            ).devices
+        }
+
+        /// Scan the local network for Apple TV devices and return non-fatal diagnostics.
+        /// - Parameters:
+        ///   - timeout: How long to scan in seconds. Default is 5.
+        ///   - identifiers: Optional set of device identifiers to filter by.
+        ///   - protocols: Optional set of protocols to filter by.
+        /// - Returns: Discovered device configurations plus browse diagnostics.
+        public static func scanWithDiagnostics(
+            timeout: TimeInterval = 5.0,
+            identifiers: Set<String>? = nil,
+            protocols: Set<ATVProtocol>? = nil
+        ) async throws(ATVError) -> ATVScanResult {
             let scanner = ATVScanner()
             return try await scanner.performScan(
                 timeout: timeout,
@@ -79,7 +147,7 @@
             timeout: TimeInterval,
             identifiers: Set<String>?,
             protocols: Set<ATVProtocol>?
-        ) async throws(ATVError) -> [AppleTVConfiguration] {
+        ) async throws(ATVError) -> ATVScanResult {
             _ = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
 
             // Determine which service types to scan based on protocol filter
@@ -97,10 +165,10 @@
             let allTypes = serviceTypes + [.deviceInfo]
 
             // Browse for each service type concurrently
-            let services: [DiscoveredService]
+            let browseOutput: BrowseOutput
             do {
-                services = try await withThrowingTaskGroup(
-                    of: [DiscoveredService].self
+                browseOutput = try await withThrowingTaskGroup(
+                    of: BrowseOutput.self
                 ) { group in
                     for serviceType in allTypes {
                         group.addTask {
@@ -109,10 +177,12 @@
                     }
 
                     var allServices: [DiscoveredService] = []
+                    var allDiagnostics: [ATVScanDiagnostic] = []
                     for try await result in group {
-                        allServices.append(contentsOf: result)
+                        allServices.append(contentsOf: result.services)
+                        allDiagnostics.append(contentsOf: result.diagnostics)
                     }
-                    return allServices
+                    return BrowseOutput(services: allServices, diagnostics: allDiagnostics)
                 }
             } catch let err as ATVError {
                 throw err
@@ -120,16 +190,11 @@
                 throw ATVError.wrap(error)
             }
 
-            var results = Self.configurations(from: services)
-
-            // Filter by identifiers if specified
-            if let identifiers {
-                results = results.filter { config in
-                    !config.allIdentifiers.isDisjoint(with: identifiers)
-                }
-            }
-
-            return results
+            return Self.scanResult(
+                from: browseOutput.services,
+                diagnostics: browseOutput.diagnostics,
+                identifiers: identifiers
+            )
         }
 
         internal static func configurations(from services: [DiscoveredService]) -> [AppleTVConfiguration] {
@@ -140,6 +205,22 @@
             }
 
             return configs
+        }
+
+        internal static func scanResult(
+            from services: [DiscoveredService],
+            diagnostics: [ATVScanDiagnostic],
+            identifiers: Set<String>? = nil
+        ) -> ATVScanResult {
+            var results = Self.configurations(from: services)
+
+            if let identifiers {
+                results = results.filter { config in
+                    !config.allIdentifiers.isDisjoint(with: identifiers)
+                }
+            }
+
+            return ATVScanResult(devices: results, diagnostics: diagnostics)
         }
 
         internal static func pairingRequirement(
@@ -177,6 +258,7 @@
             into configs: inout [AppleTVConfiguration]
         ) {
             let identifiers = serviceIdentifiers(from: service.txtRecord)
+            let preferredIdentifier = preferredIdentifier(from: service.txtRecord)
             let matchingIndices = configs.indices.filter { index in
                 let config = configs[index]
                 let hasSharedIdentifier =
@@ -198,7 +280,7 @@
                     AppleTVConfiguration(
                         address: service.host,
                         name: service.name,
-                        identifier: identifiers.sorted().first
+                        identifier: preferredIdentifier
                     )
                 )
                 targetIndex = configs.index(before: configs.endIndex)
@@ -229,7 +311,7 @@
             identifiers: Set<String>
         ) {
             if config.identifier == nil {
-                config.identifier = identifiers.sorted().first
+                config.identifier = preferredIdentifier(from: service.txtRecord)
             }
 
             if service.serviceType == .deviceInfo {
@@ -258,20 +340,11 @@
         }
 
         private static func serviceIdentifiers(from properties: [String: String]) -> Set<String> {
-            Set(
-                ["UniqueIdentifier", "deviceid", "DACP-ID", "hg", "gid"].compactMap { key in
-                    property(properties, keys: [key])
-                }.filter { !$0.isEmpty }
-            )
+            DiscoveryIdentifiers.all(from: properties)
         }
 
         private static func preferredIdentifier(from properties: [String: String]) -> String? {
-            for key in ["UniqueIdentifier", "deviceid", "DACP-ID", "hg", "gid"] {
-                if let value = property(properties, keys: [key]), !value.isEmpty {
-                    return value
-                }
-            }
-            return nil
+            DiscoveryIdentifiers.preferred(from: properties)
         }
 
         private static func property(_ properties: [String: String], keys: [String]) -> String? {
@@ -300,10 +373,16 @@
             return Int(trimmed) ?? Int(trimmed, radix: 16)
         }
 
+        private struct BrowseOutput: Sendable {
+            var services: [DiscoveredService]
+            var diagnostics: [ATVScanDiagnostic]
+        }
+
         /// Mutable state shared across @Sendable NWBrowser callbacks.
         private final class BrowseState: @unchecked Sendable {
             let lock = NSLock()
             var discovered: [DiscoveredService] = []
+            var diagnostics: [ATVScanDiagnostic] = []
             var hasResumed = false
             var browser: NWBrowser?
             var resolvers: [ObjectIdentifier: NWConnection] = [:]
@@ -326,6 +405,23 @@
                 }
             }
 
+            func appendDiagnostic(
+                serviceType: BonjourServiceType,
+                kind: ATVScanDiagnosticKind,
+                message: String
+            ) {
+                lock.withLock {
+                    guard !hasResumed else { return }
+                    diagnostics.append(
+                        ATVScanDiagnostic(
+                            serviceType: serviceType,
+                            kind: kind,
+                            message: message
+                        )
+                    )
+                }
+            }
+
             func append(_ service: DiscoveredService?) {
                 lock.withLock {
                     guard let service, !hasResumed else { return }
@@ -333,19 +429,20 @@
                 }
             }
 
-            func safeResume(_ continuation: CheckedContinuation<[DiscoveredService], Error>) {
+            func safeResume(_ continuation: CheckedContinuation<BrowseOutput, Error>) {
                 let snapshot = lock.withLock {
                     guard !hasResumed else {
-                        return nil as (NWBrowser?, [NWConnection], [DiscoveredService])?
+                        return nil as (NWBrowser?, [NWConnection], BrowseOutput)?
                     }
                     hasResumed = true
-                    let snapshot = (browser, Array(resolvers.values), discovered)
+                    let output = BrowseOutput(services: discovered, diagnostics: diagnostics)
+                    let snapshot = (browser, Array(resolvers.values), output)
                     browser = nil
                     resolvers.removeAll()
                     return snapshot
                 }
 
-                guard let (browser, resolvers, discovered) = snapshot else {
+                guard let (browser, resolvers, output) = snapshot else {
                     return
                 }
 
@@ -353,7 +450,7 @@
                 for resolver in resolvers {
                     resolver.cancel()
                 }
-                continuation.resume(returning: discovered)
+                continuation.resume(returning: output)
             }
         }
 
@@ -361,7 +458,7 @@
         private static func browse(
             serviceType: BonjourServiceType,
             timeout: TimeInterval
-        ) async throws -> [DiscoveredService] {
+        ) async throws -> BrowseOutput {
             let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
 
             return try await withCheckedThrowingContinuation { continuation in
@@ -382,9 +479,25 @@
                 }
 
                 browser.stateUpdateHandler = { browserState in
-                    if case .failed = browserState {
+                    switch browserState {
+                    case .waiting(let error):
+                        state.appendDiagnostic(
+                            serviceType: serviceType,
+                            kind: .browserWaiting,
+                            message: String(describing: error)
+                        )
+
+                    case .failed(let error):
+                        state.appendDiagnostic(
+                            serviceType: serviceType,
+                            kind: .browserFailed,
+                            message: String(describing: error)
+                        )
                         timeoutTask.cancel()
                         state.safeResume(continuation)
+
+                    default:
+                        break
                     }
                 }
 
@@ -471,11 +584,25 @@
                         connection.cancel()
                         completion(service)
                     } else {
+                        browseState.appendDiagnostic(
+                            serviceType: serviceType,
+                            kind: .resolverFailed,
+                            message: "Resolved \(endpoint) without a host and port"
+                        )
                         connection.cancel()
                         completion(nil)
                     }
 
-                case .failed, .cancelled:
+                case .failed(let error):
+                    browseState.appendDiagnostic(
+                        serviceType: serviceType,
+                        kind: .resolverFailed,
+                        message: "Failed to resolve \(endpoint): \(error)"
+                    )
+                    browseState.removeResolver(connection)
+                    completion(nil)
+
+                case .cancelled:
                     browseState.removeResolver(connection)
                     completion(nil)
 

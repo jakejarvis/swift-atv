@@ -96,6 +96,9 @@ extension DeviceInfo {
     }
 
     /// Create DeviceInfo from mDNS TXT record properties.
+    ///
+    /// Recognizes common AirPlay/MRP/device-info keys and Companion `rpMd` /
+    /// `rpVr` metadata.
     public static func fromProperties(_ properties: [String: String]) -> DeviceInfo {
         var info = DeviceInfo()
 
@@ -108,8 +111,20 @@ extension DeviceInfo {
             info.model = lookupModel(internalName: internalName)
         }
 
+        if let companionModel = properties["rpMd"], !companionModel.isEmpty {
+            let model = lookupModel(identifier: companionModel)
+            if info.modelString == nil || (info.model == .unknown && model != .unknown) {
+                info.modelString = companionModel
+            }
+            if info.model == .unknown {
+                info.model = model
+            }
+        }
+
         if let osStr = properties["osvers"] ?? properties["OSVersion"] {
             info.version = osStr
+        } else if let companionVersion = properties["rpVr"], !companionVersion.isEmpty {
+            info.version = companionVersion
         }
 
         if let buildStr = properties["srcvers"] ?? properties["SystemBuildVersion"] {

@@ -46,8 +46,23 @@ final class ConsumerCompileTests: XCTestCase {
                     Set<String>?,
                     Set<SwiftATV.ATVProtocol>?
                 ) async throws(SwiftATV.ATVError) -> [SwiftATV.AppleTVConfiguration] = ATVClient.scan
+            let scanWithDiagnostics:
+                (
+                    TimeInterval,
+                    Set<String>?,
+                    Set<SwiftATV.ATVProtocol>?
+                ) async throws(SwiftATV.ATVError) -> SwiftATV.ATVScanResult =
+                    ATVClient.scanWithDiagnostics
+            let diagnostic = SwiftATV.ATVScanDiagnostic(
+                serviceType: .companion,
+                kind: .browserFailed,
+                message: "example"
+            )
+            let result = SwiftATV.ATVScanResult(devices: [], diagnostics: [diagnostic])
 
             _ = scan
+            _ = scanWithDiagnostics
+            XCTAssertEqual(result.diagnostics.first?.kind, .browserFailed)
         }
     #endif
 }

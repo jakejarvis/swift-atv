@@ -26,19 +26,21 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > DMAP > Companion > AirPlay > RAOP)
 - **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (MRP > Companion) and falls back across unfiltered failures
+- **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
 
 ### Module Layout
 
 - `Sources/SwiftATV/` -- Library source
-  - `ATVClient.swift` -- Public facade API: `scan`, `connect`, and `pair`
+  - `ATVClient.swift` -- Public facade API: `scan`, `scanWithDiagnostics`, `connect`, and `pair`
   - `Constants.swift` -- All enums (`ATVProtocol`, `FeatureName`, `DeviceState`, etc.)
   - `Interfaces.swift` -- Swift protocol definitions (`RemoteControl`, `AppleTVDevice`, etc.)
   - `Configuration.swift` -- `AppleTVConfiguration` and `ServiceInfo`
+  - `DiscoveryIdentifiers.swift` -- Bonjour TXT identifier lookup priority
   - `Errors.swift` -- `ATVError` (all public API is `throws(ATVError)`)
   - `Support/` -- Binary codecs: OPACK, TLV8, ChaCha20-Poly1305
-  - `Core/` -- Relayer, Facade, Scanner (NWBrowser with identifier-first merge), MessageDispatcher
+  - `Core/` -- Relayer, Facade, Scanner (NWBrowser with identifier-first merge and diagnostics), MessageDispatcher
   - `Auth/`
     - `HAPCredentials.swift` -- Long-term key storage/serialization
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
@@ -53,7 +55,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus, touch, connection-lost events. Text entry and output-device mutation are not implemented yet |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus, touch, connection-lost events, Bonjour identifiers/metadata. Text entry and output-device mutation are not implemented yet |
 | MRP | Implemented | Direct TCP/protobuf connection, pair-setup, pair-verify, remote, actively refreshed metadata, push, power, audio, connection-lost events. AirPlay tunnel/streaming not included |
 | DMAP | Not started | Legacy protocol |
 | AirPlay | Not started | Streaming |
@@ -116,10 +118,12 @@ Most tests are ported from pyatv's test suite (XCTest):
   malformed-input regression coverage.
 - `ChaCha20Tests` <- `tests/support/test_chacha20.py` plus generic
   `nonceLength` validation coverage.
-- `DeviceInfoTests` <- `tests/support/test_device_info.py`
+- `DeviceInfoTests` <- `tests/support/test_device_info.py` plus Companion TXT
+  model/version metadata coverage.
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
-  scan timeout validation, and identifier-first scan-result merging.
+  Companion identifier extraction, scan timeout validation, diagnostics, and
+  identifier-first scan-result merging.
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
   unsupported, malformed-credential, deterministic-priority, service-credential,
   mandatory-credential, and fallback service setup.
@@ -130,8 +134,8 @@ Most tests are ported from pyatv's test suite (XCTest):
   SwiftATV MRP framing/message, volume, command-result, varint overflow,
   active metadata refresh, and pair-verify-final-response coverage.
 - `ConsumerCompileTests.swift` -- consumer-style imports proving
-  module-qualified types such as `SwiftATV.ATVProtocol` compile alongside
-  `ATVClient` facade calls.
+  module-qualified types such as `SwiftATV.ATVProtocol` and scan diagnostics
+  compile alongside `ATVClient` facade calls.
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:

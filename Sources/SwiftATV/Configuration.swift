@@ -119,22 +119,38 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
     }
 
     /// The main identifier, preferring the explicit identifier, then MRP, then any service.
+    ///
+    /// Service TXT records are used as a fallback when a service was decoded
+    /// from Bonjour metadata but does not store a preferred identifier.
     public var mainIdentifier: String? {
-        if let identifier { return identifier }
-        if let mrpId = service(for: .mrp)?.identifier { return mrpId }
-        return services.first?.identifier
+        if let identifier = nonEmptyIdentifier(identifier) { return identifier }
+        if let mrpService = service(for: .mrp),
+            let mrpId = preferredIdentifier(from: mrpService)
+        {
+            return mrpId
+        }
+        for service in services {
+            if let identifier = preferredIdentifier(from: service) {
+                return identifier
+            }
+        }
+        return nil
     }
 
     /// All known identifiers for this device configuration.
+    ///
+    /// Includes the configuration identifier, service identifiers, and
+    /// recognized Bonjour TXT identifiers from each service.
     public var allIdentifiers: Set<String> {
         var identifiers = Set<String>()
-        if let identifier, !identifier.isEmpty {
+        if let identifier = nonEmptyIdentifier(identifier) {
             identifiers.insert(identifier)
         }
         for service in services {
-            if let identifier = service.identifier, !identifier.isEmpty {
+            if let identifier = nonEmptyIdentifier(service.identifier) {
                 identifiers.insert(identifier)
             }
+            identifiers.formUnion(DiscoveryIdentifiers.all(from: service.properties))
         }
         return identifiers
     }
@@ -147,5 +163,18 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
     public var description: String {
         let serviceList = services.map(\.description).joined(separator: ", ")
         return "\(name) (\(address)) [\(serviceList)]"
+    }
+
+    private func preferredIdentifier(from service: ServiceInfo) -> String? {
+        if let identifier = nonEmptyIdentifier(service.identifier) {
+            return identifier
+        }
+        return DiscoveryIdentifiers.preferred(from: service.properties)
+    }
+
+    private func nonEmptyIdentifier(_ identifier: String?) -> String? {
+        guard let identifier else { return nil }
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

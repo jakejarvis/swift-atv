@@ -76,6 +76,30 @@ public enum ATVClient {
                 protocols: protocols
             )
         }
+
+        /// Scan the local network for Apple TV devices and return non-fatal diagnostics.
+        ///
+        /// This method preserves discovered devices even when one Bonjour
+        /// browser or resolver reports a recoverable failure. Use
+        /// ``scan(timeout:identifiers:protocols:)`` when you only need device
+        /// configurations.
+        ///
+        /// - Parameters:
+        ///   - timeout: Maximum time to scan in seconds. Default is 5.
+        ///   - identifiers: Optional set of device identifiers to filter by.
+        ///   - protocols: Optional set of protocols to scan for.
+        /// - Returns: Discovered device configurations plus scan diagnostics.
+        public static func scanWithDiagnostics(
+            timeout: TimeInterval = 5.0,
+            identifiers: Set<String>? = nil,
+            protocols: Set<ATVProtocol>? = nil
+        ) async throws(ATVError) -> ATVScanResult {
+            try await ATVScanner.scanWithDiagnostics(
+                timeout: timeout,
+                identifiers: identifiers,
+                protocols: protocols
+            )
+        }
     #endif
 
     /// Connect to an Apple TV device.

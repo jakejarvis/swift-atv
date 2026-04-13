@@ -124,6 +124,30 @@ final class DeviceInfoTests: XCTestCase {
         XCTAssertEqual(info.operatingSystem, .tvOS)
     }
 
+    func testFromPropertiesCompanionModelAndVersion() {
+        let props = [
+            "rpMd": "AppleTV11,1",
+            "rpVr": "715.2",
+        ]
+
+        let info = DeviceInfo.fromProperties(props)
+
+        XCTAssertEqual(info.model, .gen4K2)
+        XCTAssertEqual(info.modelString, "AppleTV11,1")
+        XCTAssertEqual(info.version, "715.2")
+    }
+
+    func testFromPropertiesKeepsBetterVersionOverCompanionVersion() {
+        let props = [
+            "osvers": "17.0",
+            "rpVr": "715.2",
+        ]
+
+        let info = DeviceInfo.fromProperties(props)
+
+        XCTAssertEqual(info.version, "17.0")
+    }
+
     func testFromPropertiesInternalNameFallback() {
         let props = [
             "internalName": "J42dAP"

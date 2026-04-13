@@ -14,6 +14,10 @@ audio-volume, and remote-control support. Connection setup is deterministic for
 implemented control protocols (MRP, then Companion), while DMAP, AirPlay, and
 RAOP remain discoverable but planned as control backends.
 
+Discovery merges Bonjour services by stable device identifiers, including
+Companion-only TXT identifiers, and can optionally return scan diagnostics for
+non-fatal browser or resolver failures.
+
 SwiftATV requires Swift 6.3 or newer.
 
 All public methods are typed-throws (`async throws(ATVError)`), so you can
@@ -47,6 +51,9 @@ await atv.close()
 ### Discovery
 
 - ``ATVScanner``
+- ``ATVScanResult``
+- ``ATVScanDiagnostic``
+- ``ATVScanDiagnosticKind``
 - ``AppleTVConfiguration``
 - ``ServiceInfo``
 - ``DeviceInfo``

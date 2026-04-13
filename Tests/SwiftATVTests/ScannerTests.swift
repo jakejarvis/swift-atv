@@ -57,6 +57,94 @@
             }
         }
 
+        func testCompanionOnlyRpMRtIDProducesMainIdentifier() {
+            let services = [
+                DiscoveredService(
+                    serviceType: .companion,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49153,
+                    txtRecord: ["rpMRtID": "AE83CCCA-18A3-46E0-A0FF-19734889F37B"]
+                )
+            ]
+
+            let configs = ATVScanner.configurations(from: services)
+
+            XCTAssertEqual(configs.count, 1)
+            XCTAssertEqual(
+                configs[0].identifier,
+                "AE83CCCA-18A3-46E0-A0FF-19734889F37B"
+            )
+            XCTAssertEqual(
+                configs[0].mainIdentifier,
+                "AE83CCCA-18A3-46E0-A0FF-19734889F37B"
+            )
+            XCTAssertEqual(
+                configs[0].service(for: .companion)?.identifier,
+                "AE83CCCA-18A3-46E0-A0FF-19734889F37B"
+            )
+            XCTAssertEqual(
+                configs[0].allIdentifiers,
+                ["AE83CCCA-18A3-46E0-A0FF-19734889F37B"]
+            )
+        }
+
+        func testCompanionOnlyIdentifiersFallBackToRpADOrRpHN() throws {
+            let rpADServices = [
+                DiscoveredService(
+                    serviceType: .companion,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49153,
+                    txtRecord: [
+                        "rpMRtID": "",
+                        "rpAD": "8df5532cf728",
+                        "rpHN": "158599555ae3",
+                    ]
+                )
+            ]
+            let rpHNServices = [
+                DiscoveredService(
+                    serviceType: .companion,
+                    name: "Master Bedroom",
+                    host: "192.168.1.11",
+                    port: 49153,
+                    txtRecord: [
+                        "rpAD": " ",
+                        "rpHN": "158599555ae3",
+                    ]
+                )
+            ]
+
+            let rpADConfig = try XCTUnwrap(ATVScanner.configurations(from: rpADServices).first)
+            let rpHNConfig = try XCTUnwrap(ATVScanner.configurations(from: rpHNServices).first)
+
+            XCTAssertEqual(rpADConfig.mainIdentifier, "8df5532cf728")
+            XCTAssertEqual(rpADConfig.service(for: .companion)?.identifier, "8df5532cf728")
+            XCTAssertEqual(rpADConfig.allIdentifiers, ["8df5532cf728", "158599555ae3"])
+            XCTAssertEqual(rpHNConfig.mainIdentifier, "158599555ae3")
+            XCTAssertEqual(rpHNConfig.service(for: .companion)?.identifier, "158599555ae3")
+        }
+
+        func testCompanionIdentifierLookupIsCaseInsensitive() throws {
+            let services = [
+                DiscoveredService(
+                    serviceType: .companion,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49153,
+                    txtRecord: ["rpmrtid": "AE83CCCA-18A3-46E0-A0FF-19734889F37B"]
+                )
+            ]
+
+            let config = try XCTUnwrap(ATVScanner.configurations(from: services).first)
+
+            XCTAssertEqual(
+                config.mainIdentifier,
+                "AE83CCCA-18A3-46E0-A0FF-19734889F37B"
+            )
+        }
+
         func testConfigurationsMergeBySharedServiceIdentifierAcrossAddresses() {
             let services = [
                 DiscoveredService(
@@ -88,6 +176,79 @@
             XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.mrp, .companion])
             XCTAssertEqual(configs[0].allIdentifiers, ["device-1"])
             XCTAssertEqual(configs[0].deviceInfo.model, .gen4K)
+        }
+
+        func testConfigurationsMergeBySharedCompanionIdentifierAcrossAddresses() {
+            let services = [
+                DiscoveredService(
+                    serviceType: .mrp,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49152,
+                    txtRecord: ["UniqueIdentifier": "8df5532cf728"]
+                ),
+                DiscoveredService(
+                    serviceType: .companion,
+                    name: "Living Room",
+                    host: "fe80::1",
+                    port: 49153,
+                    txtRecord: [
+                        "rpMRtID": "AE83CCCA-18A3-46E0-A0FF-19734889F37B",
+                        "rpAD": "8df5532cf728",
+                    ]
+                ),
+            ]
+
+            let configs = ATVScanner.configurations(from: services)
+
+            XCTAssertEqual(configs.count, 1)
+            XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.mrp, .companion])
+            XCTAssertEqual(
+                configs[0].allIdentifiers,
+                ["8df5532cf728", "AE83CCCA-18A3-46E0-A0FF-19734889F37B"]
+            )
+        }
+
+        func testExistingMRPAndAirPlayIdentifierBehaviorDoesNotRegress() throws {
+            let services = [
+                DiscoveredService(
+                    serviceType: .mrp,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49152,
+                    txtRecord: ["UniqueIdentifier": "mrp-id"]
+                ),
+                DiscoveredService(
+                    serviceType: .airPlay,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 7000,
+                    txtRecord: ["deviceid": "AA:BB:CC:DD:EE:FF"]
+                ),
+            ]
+
+            let config = try XCTUnwrap(ATVScanner.configurations(from: services).first)
+
+            XCTAssertEqual(config.service(for: .mrp)?.identifier, "mrp-id")
+            XCTAssertEqual(config.service(for: .airPlay)?.identifier, "AA:BB:CC:DD:EE:FF")
+            XCTAssertEqual(config.mainIdentifier, "mrp-id")
+            XCTAssertEqual(config.allIdentifiers, ["mrp-id", "AA:BB:CC:DD:EE:FF"])
+        }
+
+        func testScanResultPreservesDiagnosticsWhenNoDevicesWereFound() {
+            let diagnostic = ATVScanDiagnostic(
+                serviceType: .companion,
+                kind: .browserFailed,
+                message: "NoAuth"
+            )
+
+            let result = ATVScanner.scanResult(
+                from: [],
+                diagnostics: [diagnostic]
+            )
+
+            XCTAssertTrue(result.devices.isEmpty)
+            XCTAssertEqual(result.diagnostics, [diagnostic])
         }
 
         func testConfigurationsMergeByAddressWhenIdentifiersAreMissing() {
