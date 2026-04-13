@@ -4,8 +4,12 @@
 // would hurt readability and spec-traceability.
 
 import BigInt
-import Crypto
 import Foundation
+#if canImport(CryptoKit)
+    import CryptoKit
+#else
+    import Crypto
+#endif
 
 /// SRP-6a client implementation for HAP pair-setup.
 ///

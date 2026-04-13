@@ -9,6 +9,41 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- `PairingCodeDirection` and `PairingHandler.pairingCodeDirection`, with
+  derived `deviceProvidesPin` and `clientPin` helpers, so pairing UI can
+  distinguish device-displayed PIN flows from future client-displayed PIN
+  flows without protocol-specific guesses.
+- Consumer compile coverage proving `import SwiftATV` consumers can write
+  module-qualified type references such as `SwiftATV.ATVProtocol` while using
+  the renamed facade.
+
+### Changed
+
+- **Breaking:** Renamed the public facade enum from `SwiftATV` to `ATVClient`.
+  This removes the type/module name collision that prevented consumers from
+  qualifying public types as `SwiftATV.ATVProtocol`,
+  `SwiftATV.AppleTVConfiguration`, and similar names. Facade calls are now
+  `ATVClient.scan`, `ATVClient.connect`, and `ATVClient.pair`.
+- Checked in the generated MRP protobuf Swift sources under
+  `Sources/SwiftATV/Protocols/MRP/Generated/` and removed
+  `SwiftProtobufPlugin` from the SwiftATV target. Xcode consumers no longer
+  need `-skipPackagePluginValidation` for SwiftATV itself.
+- Tightened package dependencies: Apple-platform builds use system
+  `CryptoKit`; SwiftCrypto's `Crypto` product is now Linux-only,
+  `_CryptoExtras` is removed, and the SwiftATV target depends only on the NIO
+  products it imports (`NIOCore` and `NIOPosix`).
+- Audited Xcode dependency-scan warnings from SwiftNIO. Remaining warnings come
+  from SwiftNIO's own package graph in Xcode builds, not from SwiftATV linking
+  redundant umbrella NIO products.
+
+### Fixed
+
+- Xcode app consumers no longer need a DerivedData symlink workaround for a
+  missing `Crypto_..._PackageProduct.framework` executable. SwiftATV does not
+  link SwiftCrypto's `Crypto` product on Apple platforms.
+
 ## [0.1.0] - 2026-04-13
 
 Initial 0.1.0 release. SwiftATV remains pre-1.0, so API changes may still land

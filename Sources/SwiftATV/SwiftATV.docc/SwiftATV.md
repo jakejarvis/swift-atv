@@ -23,10 +23,10 @@ errors leaking through.
 ```swift
 import SwiftATV
 
-let devices = try await SwiftATV.scan(timeout: 5)
+let devices = try await ATVClient.scan(timeout: 5)
 guard let device = devices.first else { return }
 
-let atv = try await SwiftATV.connect(device)
+let atv = try await ATVClient.connect(device)
 try await atv.remoteControl.home()
 try await atv.remoteControl.play()
 await atv.close()
@@ -41,6 +41,7 @@ await atv.close()
 
 ### Getting started
 
+- ``ATVClient``
 - <doc:GettingStarted>
 
 ### Discovery
@@ -68,6 +69,7 @@ await atv.close()
 ### Pairing and authentication
 
 - ``PairingHandler``
+- ``PairingCodeDirection``
 - ``CompanionPairingHandler``
 - ``CompanionPairVerifyHandler``
 - ``MRPPairingHandler``

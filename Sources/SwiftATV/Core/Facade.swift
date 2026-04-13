@@ -190,7 +190,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         if let resolvedCredentials {
             credentials = resolvedCredentials
         } else {
-            credentials = try SwiftATV.resolvedCredentials(
+            credentials = try ATVClient.resolvedCredentials(
                 for: service,
                 settings: _settings
             )

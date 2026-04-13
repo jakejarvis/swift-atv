@@ -372,9 +372,47 @@ extension FeatureProvider {
 
 // MARK: - Pairing Handler Protocol
 
+/// Direction and value for the PIN used during a pairing flow.
+public enum PairingCodeDirection: Sendable, Hashable, CustomStringConvertible {
+    /// The Apple TV displays the PIN and the client must submit it with `PairingHandler.pin(_:)`.
+    case deviceProvided
+    /// The client displays the generated PIN and the Apple TV asks the user to enter it.
+    case clientProvided(pin: String)
+
+    /// Whether the Apple TV displays the PIN.
+    public var deviceProvidesPin: Bool {
+        switch self {
+        case .deviceProvided:
+            return true
+        case .clientProvided:
+            return false
+        }
+    }
+
+    /// The client-generated PIN to display, when this is a client-provided flow.
+    public var clientPin: String? {
+        switch self {
+        case .deviceProvided:
+            return nil
+        case .clientProvided(let pin):
+            return pin
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .deviceProvided:
+            return "Device-provided PIN"
+        case .clientProvided:
+            return "Client-provided PIN"
+        }
+    }
+}
+
 /// Interface for device pairing procedures.
 public protocol PairingHandler: Sendable {
-    var deviceProvidesPin: Bool { get }
+    /// Describes where the pairing PIN is shown and whether the client should display one.
+    var pairingCodeDirection: PairingCodeDirection { get }
     var hasPaired: Bool { get }
     var service: ServiceInfo { get }
     /// HAP long-term credentials produced by a successful pairing flow.
@@ -386,6 +424,16 @@ public protocol PairingHandler: Sendable {
 }
 
 extension PairingHandler {
+    /// Whether the Apple TV displays the PIN.
+    public var deviceProvidesPin: Bool {
+        pairingCodeDirection.deviceProvidesPin
+    }
+
+    /// The client-generated PIN to display, when the pairing flow uses one.
+    public var clientPin: String? {
+        pairingCodeDirection.clientPin
+    }
+
     /// Serialized HAP credentials suitable for storing in `ATVSettings` or
     /// `ServiceInfo.credentials`.
     public var serializedCredentials: String? {

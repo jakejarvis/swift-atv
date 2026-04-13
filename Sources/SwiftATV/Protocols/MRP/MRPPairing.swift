@@ -14,7 +14,7 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
     private var m2ResponseData: Data?
 
     public var service: ServiceInfo { _service }
-    public var deviceProvidesPin: Bool { true }
+    public var pairingCodeDirection: PairingCodeDirection { .deviceProvided }
     public var hasPaired: Bool { lock.withLock { _hasPaired } }
 
     /// The credentials produced by successful MRP pair-setup.

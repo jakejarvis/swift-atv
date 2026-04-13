@@ -1,6 +1,9 @@
-import Crypto
 import Foundation
-import _CryptoExtras
+#if canImport(CryptoKit)
+    import CryptoKit
+#else
+    import Crypto
+#endif
 
 /// HKDF-SHA512 key derivation.
 public func hkdfExpand(

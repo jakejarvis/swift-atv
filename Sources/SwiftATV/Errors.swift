@@ -56,9 +56,9 @@ public enum ATVError: Error, LocalizedError, Sendable {
     /// Back-off requested; retry later.
     case backOff(String)
 
-    /// Wrapping case for non-ATVError errors bubbled up from NIO, Crypto, or
-    /// other lower-level frameworks. Used at boundaries to preserve typed
-    /// `throws(ATVError)` contracts on public APIs.
+    /// Wrapping case for non-ATVError errors bubbled up from NIO, CryptoKit,
+    /// SwiftProtobuf, or other lower-level frameworks. Used at boundaries to
+    /// preserve typed `throws(ATVError)` contracts on public APIs.
     case internalError(String)
 
     public var errorDescription: String? {

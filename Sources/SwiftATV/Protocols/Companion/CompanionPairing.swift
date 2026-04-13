@@ -1,4 +1,3 @@
-import Crypto
 import Foundation
 
 // MARK: - Shared OPACK envelope helpers (pair-setup and pair-verify)
@@ -114,7 +113,7 @@ public final class CompanionPairVerifyHandler: @unchecked Sendable {
 
 /// Handles Companion protocol pairing (pair-setup + pair-verify).
 ///
-/// Implements the `PairingHandler` protocol for use with `SwiftATV.pair()`.
+/// Implements the `PairingHandler` protocol for use with `ATVClient.pair()`.
 ///
 /// Drives a `HAPPairSetupHandler` state machine and wraps each TLV message
 /// in the OPACK envelope `{_pd: <tlv>, _pwTy: 1}` that the Companion protocol
@@ -136,7 +135,7 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
     private var m2ResponseData: Data?  // raw inner TLV from the M2 response
 
     public var service: ServiceInfo { _service }
-    public var deviceProvidesPin: Bool { true }
+    public var pairingCodeDirection: PairingCodeDirection { .deviceProvided }
     public var hasPaired: Bool {
         lock.withLock { _hasPaired }
     }

@@ -3,7 +3,6 @@
 // notation in SRP.swift, RFC 5054, and pyatv's hap_srp.py.
 
 import BigInt
-import Crypto
 import Foundation
 import Testing
 

@@ -27,16 +27,26 @@ targets: [
 ]
 ```
 
+For Xcode app targets, add `https://github.com/jakejarvis/swift-atv.git` in
+**Package Dependencies** and link the `SwiftATV` product to the app target and
+any test target that imports it. SwiftATV checks in its generated MRP protobuf
+Swift sources, so Xcode consumers do not need `-skipPackagePluginValidation`
+for SwiftATV itself.
+
+```bash
+xcodebuild -project YourApp.xcodeproj -scheme YourScheme -destination 'platform=macOS' test
+```
+
 ## Discover devices
 
-``ATVScanner/scan(timeout:identifiers:protocols:)`` performs Bonjour/mDNS
+``ATVClient/scan(timeout:identifiers:protocols:)`` performs Bonjour/mDNS
 discovery and returns an array of ``AppleTVConfiguration`` values, one per
 device found on the local network.
 
 ```swift
 import SwiftATV
 
-let devices = try await ATVScanner.scan(timeout: 5)
+let devices = try await ATVClient.scan(timeout: 5)
 for device in devices {
     print("\(device.name) at \(device.address)")
     print("  Model: \(device.deviceInfo.model)")
@@ -50,7 +60,7 @@ identifier reported by the device's services, not just the preferred display
 identifier:
 
 ```swift
-let companionOnly = try await ATVScanner.scan(
+let companionOnly = try await ATVClient.scan(
     timeout: 3,
     protocols: [.companion]
 )
@@ -64,12 +74,20 @@ back to complete the handshake. SwiftATV runs the full HAP SRP-6a pair-setup
 handshake for you; all you need is the `begin` → `pin` → `finish` flow.
 
 ```swift
-let handler = try await SwiftATV.pair(device, protocol: .companion)
+let handler = try await ATVClient.pair(device, protocol: .companion)
 
-// begin() starts the handshake. The Apple TV now displays a 4-digit PIN
-// on screen. Ask the user to enter it.
+// begin() starts the handshake. Current Companion and MRP flows display a
+// 4-digit PIN on the Apple TV screen.
 try await handler.begin()
-try await handler.pin(userEnteredPIN)
+
+switch handler.pairingCodeDirection {
+case .deviceProvided:
+    print("Enter the PIN shown on \(device.name).")
+    try await handler.pin(userEnteredPIN)
+case .clientProvided(let pin):
+    print("Enter this PIN on \(device.name): \(pin)")
+}
+
 try await handler.finish()
 
 // Pull out the resulting HAP long-term credentials from the protocol-agnostic
@@ -91,7 +109,7 @@ To pair through direct MRP, request `.mrp` and store the credentials for
 `.mrp`:
 
 ```swift
-let handler = try await SwiftATV.pair(device, protocol: .mrp)
+let handler = try await ATVClient.pair(device, protocol: .mrp)
 
 try await handler.begin()
 try await handler.pin(userEnteredPIN)
@@ -109,14 +127,14 @@ await handler.close()
 ## Connect and issue commands
 
 Once paired, connect by loading the stored credentials into
-``ATVSettings`` and calling ``SwiftATV/connect(_:protocol:settings:)``:
+``ATVSettings`` and calling ``ATVClient/connect(_:protocol:settings:)``:
 
 ```swift
 var settings = ATVSettings()
 settings.setCredentials(storedCredentialsString, for: .companion)
 // Use `.mrp` here when you stored credentials from MRPPairingHandler.
 
-let atv = try await SwiftATV.connect(device, settings: settings)
+let atv = try await ATVClient.connect(device, settings: settings)
 
 // Remote control
 try await atv.remoteControl.home()
@@ -134,7 +152,7 @@ try await atv.power.turnOff()
 await atv.close()
 ```
 
-``SwiftATV/connect(_:protocol:settings:)`` tries enabled services in a
+``ATVClient/connect(_:protocol:settings:)`` tries enabled services in a
 deterministic order for implemented control protocols: MRP first, then
 Companion. If you do not request a specific protocol, setup falls back past
 failed or missing-credential services until one usable protocol connects. If

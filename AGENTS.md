@@ -25,13 +25,14 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > DMAP > Companion > AirPlay > RAOP)
-- **Connect setup priority**: `SwiftATV.connect` attempts implemented control protocols deterministically (MRP > Companion) and falls back across unfiltered failures
+- **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (MRP > Companion) and falls back across unfiltered failures
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
 
 ### Module Layout
 
 - `Sources/SwiftATV/` -- Library source
+  - `ATVClient.swift` -- Public facade API: `scan`, `connect`, and `pair`
   - `Constants.swift` -- All enums (`ATVProtocol`, `FeatureName`, `DeviceState`, etc.)
   - `Interfaces.swift` -- Swift protocol definitions (`RemoteControl`, `AppleTVDevice`, etc.)
   - `Configuration.swift` -- `AppleTVConfiguration` and `ServiceInfo`
@@ -44,7 +45,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
   - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume, connection-lost propagation; text entry and output-device mutation are not implemented yet)
-  - `Protocols/MRP/` -- Direct MRP implementation (SwiftProtobuf-generated pyatv messages, TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, connection-lost propagation)
+  - `Protocols/MRP/` -- Direct MRP implementation (checked-in SwiftProtobuf-generated pyatv messages in `Generated/`, source `.proto` files in `Protobuf/`, TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, connection-lost propagation)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
 
@@ -62,6 +63,8 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 - Swift protocols map to Python ABCs (e.g., `RemoteControl`, `AppleTVDevice`)
 - `ATVProtocol` avoids collision with Swift's `Protocol` keyword
+- The public facade is `ATVClient`; do not add a public type named `SwiftATV`,
+  because consumers use `SwiftATV` as the module qualifier.
 - All public types conform to `Sendable`
 - Enum raw values match pyatv's `const.py` exactly (important for wire compatibility)
 - `Codable` on all settings/config types for JSON persistence
@@ -69,10 +72,10 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 ## Dependencies
 
-- `apple/swift-nio` -- TCP/UDP for protocol connections
-- `apple/swift-nio-ssl` -- TLS support
-- `apple/swift-crypto` -- Ed25519, X25519, ChaCha20-Poly1305, HKDF
-- `apple/swift-protobuf` -- Generates and serializes MRP protobuf messages from pyatv `.proto` files
+- `apple/swift-nio` -- `NIOCore` and `NIOPosix` for TCP protocol connections
+- `CryptoKit` -- Ed25519, X25519, ChaCha20-Poly1305, HKDF on Apple platforms
+- `apple/swift-crypto` -- Linux-only fallback for CryptoKit-compatible primitives
+- `apple/swift-protobuf` -- Runtime serialization for checked-in MRP protobuf Swift sources. `SwiftProtobufPlugin` is not used by consumers.
 - `attaswift/BigInt` -- 3072-bit modular exponentiation for SRP-6a pair-setup
 
 ## Docs stay in sync with the code (required)
@@ -126,6 +129,9 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus
   SwiftATV MRP framing/message, volume, command-result, varint overflow,
   active metadata refresh, and pair-verify-final-response coverage.
+- `ConsumerCompileTests.swift` -- consumer-style imports proving
+  module-qualified types such as `SwiftATV.ATVProtocol` compile alongside
+  `ATVClient` facade calls.
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:

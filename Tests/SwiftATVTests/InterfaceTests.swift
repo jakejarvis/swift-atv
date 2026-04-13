@@ -7,8 +7,8 @@ final class InterfaceTests: XCTestCase {
 
     private struct FakePairingHandler: PairingHandler {
         let credentials: HAPCredentials?
+        var pairingCodeDirection: PairingCodeDirection = .deviceProvided
 
-        var deviceProvidesPin: Bool { true }
         var hasPaired: Bool { credentials != nil }
         var service: ServiceInfo { ServiceInfo(protocol: .mrp, port: 49152) }
 
@@ -29,6 +29,25 @@ final class InterfaceTests: XCTestCase {
 
         XCTAssertEqual(handler.credentials?.serialize(), "01:02:03:04")
         XCTAssertEqual(handler.serializedCredentials, "01:02:03:04")
+    }
+
+    func testPairingHandlerExposesDeviceProvidedPinDirection() {
+        let handler: any PairingHandler = FakePairingHandler(credentials: nil)
+
+        XCTAssertEqual(handler.pairingCodeDirection, .deviceProvided)
+        XCTAssertTrue(handler.deviceProvidesPin)
+        XCTAssertNil(handler.clientPin)
+    }
+
+    func testPairingHandlerExposesClientProvidedPinDirection() {
+        let handler: any PairingHandler = FakePairingHandler(
+            credentials: nil,
+            pairingCodeDirection: .clientProvided(pin: "1234")
+        )
+
+        XCTAssertEqual(handler.pairingCodeDirection, .clientProvided(pin: "1234"))
+        XCTAssertFalse(handler.deviceProvidesPin)
+        XCTAssertEqual(handler.clientPin, "1234")
     }
 
     // MARK: - Playing (test_interface.py::test_playing_*)

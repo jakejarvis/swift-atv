@@ -1,5 +1,9 @@
-import Crypto
 import Foundation
+#if canImport(CryptoKit)
+    import CryptoKit
+#else
+    import Crypto
+#endif
 
 /// ChaCha20-Poly1305 cipher with auto-incrementing nonce for encrypted communication.
 ///

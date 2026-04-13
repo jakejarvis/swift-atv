@@ -10,7 +10,7 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
     public var identifier: String?
     /// Credentials for this service (e.g. from pairing).
     ///
-    /// `SwiftATV.connect` uses protocol credentials from `ATVSettings` first
+    /// `ATVClient.connect` uses protocol credentials from `ATVSettings` first
     /// and falls back to this value when settings do not contain credentials
     /// for the same protocol.
     public var credentials: String?

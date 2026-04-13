@@ -1,6 +1,10 @@
 import BigInt
-import Crypto
 import Foundation
+#if canImport(CryptoKit)
+    import CryptoKit
+#else
+    import Crypto
+#endif
 
 // MARK: - Shared HAP helpers (used by both pair-setup and pair-verify)
 

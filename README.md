@@ -5,7 +5,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 ## Features
 
 - **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS
-- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links
+- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links, with protocol-agnostic pairing code direction metadata
 - **Credential Persistence** -- Pairing handlers expose HAP credentials directly, and connection setup can use credentials from settings or enriched services
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
 - **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to MRP push updates
@@ -51,6 +51,37 @@ Then add it as a dependency to your target:
 ),
 ```
 
+### Xcode App Consumers
+
+Xcode apps can add SwiftATV through **Package Dependencies** or use the same
+package URL from an Xcode-managed project. SwiftATV checks in the generated MRP
+protobuf Swift sources, so app consumers do not need to approve or skip the
+SwiftProtobuf package plugin for SwiftATV itself.
+
+```bash
+xcodebuild -project YourApp.xcodeproj -scheme YourScheme -destination 'platform=macOS' test
+```
+
+No `Crypto_..._PackageProduct` DerivedData symlink workaround is expected on
+Apple platforms: SwiftATV uses system `CryptoKit` there and only depends on
+SwiftCrypto's `Crypto` product for Linux builds.
+
+Some Xcode versions still emit dependency-scan warnings from SwiftNIO targets
+such as `NIOCore`, `NIOPosix`, `Atomics`, and related internal helper modules.
+SwiftATV's manifest only links the NIO products it imports directly, so those
+warnings are upstream package graph noise rather than a SwiftATV dependency on
+unused umbrella products.
+
+The top-level facade is `ATVClient`, so module-qualified type references remain
+available in consumers:
+
+```swift
+import SwiftATV
+
+let protocolName: SwiftATV.ATVProtocol = .mrp
+let devices = try await ATVClient.scan(protocols: [protocolName])
+```
+
 ## Quick Start
 
 ### Discover Devices
@@ -58,7 +89,7 @@ Then add it as a dependency to your target:
 ```swift
 import SwiftATV
 
-let devices = try await SwiftATV.scan(timeout: 5.0)
+let devices = try await ATVClient.scan(timeout: 5.0)
 
 for device in devices {
     print("\(device.name) at \(device.address)")
@@ -71,7 +102,7 @@ for device in devices {
 
 ```swift
 // Connect to a discovered device
-let atv = try await SwiftATV.connect(device)
+let atv = try await ATVClient.connect(device)
 
 // Remote control
 try await atv.remoteControl.home()
@@ -99,13 +130,21 @@ await atv.close()
 ### Pair with a Device
 
 ```swift
-let handler = try await SwiftATV.pair(device, protocol: .companion)
+let handler = try await ATVClient.pair(device, protocol: .companion)
 
-// Start the handshake. The Apple TV now displays a 4-digit PIN on screen.
+// Start the handshake. Current Companion and MRP flows display a PIN on screen.
 try await handler.begin()
 
-// Prompt the user for the PIN, then complete pair-setup:
-try await handler.pin(userEnteredPIN)
+// Build the right UI from the protocol-agnostic pairing direction.
+switch handler.pairingCodeDirection {
+case .deviceProvided:
+    print("Enter the PIN shown on \(device.name).")
+    try await handler.pin(userEnteredPIN)
+case .clientProvided(let pin):
+    print("Enter this PIN on \(device.name): \(pin)")
+}
+
+// Complete pair-setup:
 try await handler.finish()
 
 // Pull the HAP long-term credentials and persist them. On the next connection,
@@ -125,7 +164,7 @@ Protocol service. Persist the returned credentials under
 `ATVSettings.protocols.mrp.credentials` by calling
 `settings.setCredentials(handler.serializedCredentials, for: .mrp)`.
 
-`SwiftATV.connect` tries enabled services in deterministic setup order
+`ATVClient.connect` tries enabled services in deterministic setup order
 (MRP, then Companion, then currently unsupported protocols) and falls back past
 failed or uncredentialed unfiltered services until one usable protocol connects.
 When both settings and a service contain credentials for the same protocol,
@@ -188,14 +227,14 @@ AirPlay, RAOP, and DMAP remain discoverable but are not control backends yet.
 
 ```
 Sources/SwiftATV/
-├── SwiftATV.swift              # Public API: scan(), connect(), pair()
-├── Constants.swift             # All enums (ATVProtocol, FeatureName, etc.)
-├── Errors.swift                # ATVError + wrap() factory
-├── Interfaces.swift            # Swift protocols (all throws(ATVError))
-├── Configuration.swift         # AppleTVConfiguration, ServiceInfo
-├── Settings.swift              # Per-protocol settings (Codable)
-├── DeviceInfo.swift            # Device model/OS lookup tables
-├── SwiftATV.docc/              # DocC catalog
+├── ATVClient.swift              # Public API: scan(), connect(), pair()
+├── Constants.swift              # All enums (ATVProtocol, FeatureName, etc.)
+├── Errors.swift                 # ATVError + wrap() factory
+├── Interfaces.swift             # Swift protocols (all throws(ATVError))
+├── Configuration.swift          # AppleTVConfiguration, ServiceInfo
+├── Settings.swift               # Per-protocol settings (Codable)
+├── DeviceInfo.swift             # Device model/OS lookup tables
+├── SwiftATV.docc/               # DocC catalog
 ├── Support/
 │   ├── OPACK.swift             # OPACK binary serialization codec
 │   ├── TLV8.swift              # TLV8 encoding for HAP auth
@@ -218,13 +257,14 @@ Sources/SwiftATV/
     │   ├── CompanionInterfaces.swift
     │   └── CompanionService.swift
     └── MRP/
-        ├── Protobuf/           # pyatv MRP .proto definitions
-        ├── MRPProtocol.swift   # TCP framing, protobuf dispatch, encryption
-        ├── MRPMessages.swift   # Outbound MRP message builders
+        ├── Protobuf/           # pyatv MRP .proto definitions, excluded from compilation
+        ├── Generated/          # checked-in SwiftProtobuf output
+        ├── MRPProtocol.swift    # TCP framing, protobuf dispatch, encryption
+        ├── MRPMessages.swift    # Outbound MRP message builders
         ├── MRPPlayerState.swift # Now-playing state actor
-        ├── MRPInterfaces.swift # Remote, metadata, push, power, audio, features
-        ├── MRPPairing.swift    # MRP HAP pair-setup flow
-        └── MRPService.swift    # Direct-MRP lifecycle and facade registration
+        ├── MRPInterfaces.swift  # Remote, metadata, push, power, audio, features
+        ├── MRPPairing.swift     # MRP HAP pair-setup flow
+        └── MRPService.swift     # Direct-MRP lifecycle and facade registration
 ```
 
 ## Testing
@@ -233,7 +273,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 271 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 276 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 44 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -246,8 +286,8 @@ metadata and active metadata refresh, MRP volume/command-result handling,
 Bonjour pairing flag parsing and identity merging, deterministic connect
 fallback/credential selection, facade device events, timeout conversion,
 strict TLV8 auth decoding,
-OPACK object-reference/malformed-data handling, and `MessageDispatcher`
-actor behavior.
+OPACK object-reference/malformed-data handling, consumer-style module-qualified
+imports, pairing code direction, and `MessageDispatcher` actor behavior.
 
 **SwiftATV additions** (Swift Testing) — SRP-6a client verified against a
 canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,

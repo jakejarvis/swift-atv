@@ -1,11 +1,11 @@
 import Foundation
 
-/// SwiftATV - Swift library for controlling Apple TV devices.
+/// High-level client entry points for discovering, pairing, and connecting to Apple TV devices.
 ///
 /// Port of the Python pyatv library to idiomatic Swift.
 /// Supports device discovery, pairing, and remote control via
 /// MRP, DMAP, AirPlay, Companion, and RAOP protocols.
-public enum SwiftATV {
+public enum ATVClient {
 
     /// Library version.
     public static let version = "0.1.0"
@@ -60,7 +60,7 @@ public enum SwiftATV {
         /// - Returns: Array of discovered device configurations.
         ///
         /// ```swift
-        /// let devices = try await SwiftATV.scan()
+        /// let devices = try await ATVClient.scan()
         /// for device in devices {
         ///     print("\(device.name) at \(device.address)")
         /// }
@@ -92,6 +92,7 @@ public enum SwiftATV {
     /// - Parameters:
     ///   - config: Device configuration obtained from scanning or manually created.
     ///   - protocol: Optional protocol to use. If nil, the best available is chosen.
+    ///   - settings: Optional settings containing saved protocol credentials.
     /// - Returns: A connected device instance.
     public static func connect(
         _ config: AppleTVConfiguration,
@@ -276,7 +277,7 @@ public enum SwiftATV {
 
 extension ATVProtocol {
     fileprivate var connectPriority: Int {
-        SwiftATV.connectProtocolPriority.firstIndex(of: self) ?? Int.max
+        ATVClient.connectProtocolPriority.firstIndex(of: self) ?? Int.max
     }
 
     fileprivate var isConnectSupported: Bool {
