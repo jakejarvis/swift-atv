@@ -81,9 +81,8 @@ Any change that touches public API, adds a feature, adds/removes a
 dependency, or shifts build requirements **must** be reflected in all of the
 following in the same change:
 
-- `CHANGELOG.md` — add a bullet under the appropriate heading. 0.1.0 is
-  unreleased, so new work goes into `## [0.1.0] - unreleased` until it's
-  tagged; after that it goes under `## [Unreleased]`.
+- `CHANGELOG.md` — add a bullet under the appropriate heading. New work goes
+  under `## [Unreleased]` until the next release section is cut.
 - `README.md` — update the Features list, Requirements, Installation
   snippet, Quick Start examples, Protocol status table, Project Structure
   tree, and Testing section as applicable.

@@ -37,9 +37,8 @@ dependencies: [
 ]
 ```
 
-> SwiftATV is pre-1.0. The first tagged release is `0.1.0`; until then,
-> pin to `branch: "main"`. API may change in minor releases — review the
-> [CHANGELOG](CHANGELOG.md) before upgrading.
+> SwiftATV is pre-1.0; API may change in minor releases. Pin a release version
+> or exact revision and review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 Then add it as a dependency to your target:
 

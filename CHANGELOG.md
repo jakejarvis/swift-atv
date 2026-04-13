@@ -9,11 +9,12 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-04-13
 
-Initial pre-release. API is unstable and will change before 1.0.
+Initial 0.1.0 release. SwiftATV remains pre-1.0, so API changes may still land
+before 1.0.
 
-### Changed during the 0.1.0 development cycle (pre-tag)
+### Changed
 
 - `PairingHandler` now exposes protocol-agnostic `credentials` and
   `serializedCredentials`, so callers no longer have to downcast to
@@ -38,7 +39,7 @@ Initial pre-release. API is unstable and will change before 1.0.
   `swift format lint --strict` with Swift 6.3 so formatter behavior matches the
   supported toolchain.
 
-### Fixed during the 0.1.0 development cycle (pre-tag)
+### Fixed
 
 - **Companion encrypted E_OPACK frames now authenticate the correct
   header.** The 3-byte frame length in the ChaCha20-Poly1305 AAD must

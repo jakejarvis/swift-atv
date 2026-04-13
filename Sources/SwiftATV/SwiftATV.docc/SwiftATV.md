@@ -32,8 +32,8 @@ try await atv.remoteControl.play()
 await atv.close()
 ```
 
-> Important: SwiftATV is pre-1.0. The API will change as DMAP, AirPlay, and
-> RAOP protocols come online. Pin to a specific minor version in
+> Important: SwiftATV is pre-1.0. The API may change as DMAP, AirPlay, and
+> RAOP protocols come online. Pin a release version or exact revision in
 > your `Package.swift` and review the [CHANGELOG](https://github.com/jakejarvis/swift-atv/blob/main/CHANGELOG.md)
 > before upgrading.
 
