@@ -62,6 +62,9 @@ Pre-1.0: minor version bumps may contain breaking changes.
   trapping while building now-playing metadata.
 - Companion touch timestamps now use a monotonic clock, and swipe coordinates
   are clamped before integer conversion to avoid public-input traps.
+- Malformed Companion session identifiers, huge MRP push initial delays, and
+  invalid MRP message timestamp inputs now fail or clamp instead of trapping on
+  integer conversion/overflow.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.

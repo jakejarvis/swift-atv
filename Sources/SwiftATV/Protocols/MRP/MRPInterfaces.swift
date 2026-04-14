@@ -188,7 +188,8 @@ public final class MRPPushUpdater: @unchecked Sendable, PushUpdater {
 
     public func start(initialDelay: Int) async throws(ATVError) {
         if initialDelay > 0 {
-            try? await Task.sleep(nanoseconds: UInt64(initialDelay) * 1_000_000_000)
+            let delay = try timeoutNanoseconds(from: TimeInterval(initialDelay), parameterName: "initialDelay")
+            try? await Task.sleep(nanoseconds: delay)
         }
         lock.withLock { _isActive = true }
     }

@@ -169,6 +169,22 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionTouch.interpolatedCoordinate(start: 0, end: 1000, progress: 0.25), 250)
     }
 
+    func testCompanionSessionIdentifierCombinesRemoteAndLocalSID() throws {
+        let sessionID = try CompanionProtocolHandler.sessionIdentifier(localSID: 0x1234_5678, remoteSID: 0x90AB_CDEF)
+
+        XCTAssertEqual(sessionID, 0x90AB_CDEF_1234_5678)
+    }
+
+    func testCompanionSessionIdentifierRejectsNegativeRemoteSID() {
+        XCTAssertThrowsError(try CompanionProtocolHandler.sessionIdentifier(localSID: 1, remoteSID: -1))
+    }
+
+    func testCompanionSessionIdentifierRejectsOutOfRangeRemoteSID() {
+        XCTAssertThrowsError(
+            try CompanionProtocolHandler.sessionIdentifier(localSID: 1, remoteSID: Int64(UInt32.max) + 1)
+        )
+    }
+
     func testCompanionCapabilitiesReflectObservedState() {
         let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
         let capabilities = CompanionCapabilities(stateStore: stateStore)

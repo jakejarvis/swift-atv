@@ -82,6 +82,31 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(playing, refreshed)
     }
 
+    func testPushUpdaterRejectsTooLargeInitialDelayWithoutOverflow() async {
+        let updater = MRPPushUpdater(playerState: MRPPlayerState())
+
+        do {
+            try await updater.start(initialDelay: Int.max)
+            XCTFail("Expected invalidConfig")
+        } catch {
+            guard case .invalidConfig = error else {
+                XCTFail("Expected invalidConfig, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testMRPMessageTimestampConvertsSecondsToMicros() {
+        XCTAssertEqual(MRPMessages.timestampMicros(from: 1.5), 1_500_000)
+    }
+
+    func testMRPMessageTimestampClampsInvalidWallClockValues() {
+        XCTAssertEqual(MRPMessages.timestampMicros(from: -1), 0)
+        XCTAssertEqual(MRPMessages.timestampMicros(from: Double.nan), 0)
+        XCTAssertEqual(MRPMessages.timestampMicros(from: Double.infinity), 0)
+        XCTAssertEqual(MRPMessages.timestampMicros(from: Double.greatestFiniteMagnitude), UInt64.max)
+    }
+
     func testVarintRoundTrip() throws {
         let values = [0, 1, 127, 128, 300, 16_384, Int(UInt32.max)]
 

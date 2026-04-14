@@ -5,8 +5,21 @@ enum MRPMessages {
         var message = ProtocolMessageMessage()
         message.type = type
         message.identifier = UUID().uuidString
-        message.timestamp = UInt64(Date().timeIntervalSince1970 * 1_000_000)
+        message.timestamp = timestampMicros()
         return message
+    }
+
+    internal static func timestampMicros(
+        from secondsSince1970: TimeInterval = Date().timeIntervalSince1970
+    ) -> UInt64 {
+        guard secondsSince1970.isFinite, secondsSince1970 > 0 else {
+            return 0
+        }
+        let micros = secondsSince1970 * 1_000_000
+        guard micros <= Double(Int64.max) else {
+            return UInt64.max
+        }
+        return UInt64(micros)
     }
 
     static func deviceInformation(settings: ATVSettings) -> ProtocolMessageMessage {
