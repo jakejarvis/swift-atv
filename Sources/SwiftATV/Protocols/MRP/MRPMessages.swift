@@ -169,6 +169,9 @@ enum MRPMessages {
     ) -> ProtocolMessageMessage {
         var inner = ModifyOutputContextRequestMessage()
         inner.type = .sharedAudioPresentation
+        inner.addingDevices = adding
+        inner.removingDevices = removing
+        inner.settingDevices = setting
         inner.clusterAwareAddingDevices = adding
         inner.clusterAwareRemovingDevices = removing
         inner.clusterAwareSettingDevices = setting

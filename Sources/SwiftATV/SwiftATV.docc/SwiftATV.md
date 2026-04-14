@@ -8,20 +8,22 @@ AirPlay devices.
 SwiftATV is a Swift port of [pyatv](https://github.com/postlund/pyatv). It
 exposes a unified ``AppleTVDevice`` interface that routes each command to the
 highest-priority protocol that supports it. MRP provides protobuf-based direct
-remote control, actively refreshed metadata, push updates, power, audio, and
-HAP pairing; AirPlay 2 can pair with HAP and tunnel MRP remote-control traffic
-when direct MRP is unavailable; Companion provides modern app, keyboard text
-input/focus, best-effort touch, power, audio-volume, and remote-control
-support. Connection setup is deterministic for implemented control protocols
-(direct MRP, then AirPlay-tunneled MRP, then Companion) and returns as soon as
-one usable protocol connects.
+remote control, actively refreshed metadata, push updates, power, audio,
+output-device mutation, and HAP pairing; AirPlay 2 can pair with HAP and tunnel
+MRP traffic, including output-device mutation, when direct MRP is unavailable;
+Companion provides modern app, keyboard text input/focus, best-effort touch,
+power, audio-volume, and remote-control support. Connection setup is
+deterministic for implemented control protocols (direct MRP, then
+AirPlay-tunneled MRP, then Companion) and returns as soon as one usable protocol
+connects.
 
 The facade tracks lifecycle per protocol. Closing or failing a non-primary
 secondary protocol unregisters only that protocol; the device emits
 `connectionLost` when the primary or last active protocol closes. Feature
 availability is state-backed, so optional Companion and MRP surfaces are
 reported unavailable until setup, events, or successful requests prove them
-usable.
+usable. Output-device list and mutation features become available when direct
+MRP or AirPlay-tunneled MRP reports route state.
 
 ``ATVSettings/clientIdentity`` describes the local controller or app identity
 sent during pairing and protocol setup. It must not be copied from the target

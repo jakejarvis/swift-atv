@@ -140,6 +140,21 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.pushUpdates).state, .unsupported)
         XCTAssertEqual(features.featureInfo(.playUrl).state, .unsupported)
         XCTAssertEqual(features.featureInfo(.streamFile).state, .unsupported)
+        XCTAssertEqual(features.featureInfo(.outputDevices).state, .unsupported)
+        XCTAssertEqual(features.featureInfo(.addOutputDevices).state, .unsupported)
+        XCTAssertEqual(features.featureInfo(.removeOutputDevices).state, .unsupported)
+        XCTAssertEqual(features.featureInfo(.setOutputDevices).state, .unsupported)
+    }
+
+    func testCompanionAudioDoesNotSupportOutputDeviceMutation() async {
+        let connection = CompanionConnection(host: "127.0.0.1", port: 0)
+        let handler = CompanionProtocolHandler(connection: connection)
+        let audio = CompanionAudio(protocol: handler)
+
+        await assertNotSupported(try await audio.addOutputDevices(["speaker"]))
+        await assertNotSupported(try await audio.removeOutputDevices(["speaker"]))
+        await assertNotSupported(try await audio.setOutputDevices(["speaker"]))
+        await connection.close()
     }
 
     func testCompanionFeaturesReflectObservedState() {
@@ -169,6 +184,22 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.accountList).state, .available)
         XCTAssertEqual(features.featureInfo(.textFocusState).state, .available)
         XCTAssertEqual(features.featureInfo(.textGet).state, .available)
+    }
+
+    private func assertNotSupported(
+        _ expression: @autoclosure () async throws(ATVError) -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        do {
+            try await expression()
+            XCTFail("Expected notSupported", file: file, line: line)
+        } catch {
+            guard case .notSupported = error else {
+                XCTFail("Expected notSupported, got \(error)", file: file, line: line)
+                return
+            }
+        }
     }
 
     func testCompanionFeaturesDisconnected() {

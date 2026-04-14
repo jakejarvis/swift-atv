@@ -9,6 +9,7 @@ final class MRPStateStore: @unchecked Sendable {
     private var _artworkID = ""
     private var _hasVolumeState = false
     private var _hasOutputDevicesState = false
+    private var _outputDevicesRevision = 0
     private var _hasPlayingSnapshot = false
     private var _clientUpdatesConfigured = false
     private var featureOverrides: [FeatureName: FeatureInfo] = [:]
@@ -24,6 +25,7 @@ final class MRPStateStore: @unchecked Sendable {
     var artworkID: String { lock.withLock { _artworkID } }
     var hasVolumeState: Bool { lock.withLock { _hasVolumeState } }
     var hasOutputDevicesState: Bool { lock.withLock { _hasOutputDevicesState } }
+    var outputDevicesRevision: Int { lock.withLock { _outputDevicesRevision } }
     var hasPlayingSnapshot: Bool { lock.withLock { _hasPlayingSnapshot } }
     var clientUpdatesConfigured: Bool { lock.withLock { _clientUpdatesConfigured } }
 
@@ -34,9 +36,15 @@ final class MRPStateStore: @unchecked Sendable {
         case .getVolumeResultMessage:
             setVolume(message.getVolumeResultMessage.volume)
         case .updateOutputDeviceMessage:
-            setOutputDevices(message.updateOutputDeviceMessage.outputDevices)
+            let update = message.updateOutputDeviceMessage
+            let descriptors =
+                update.clusterAwareOutputDevices.isEmpty
+                ? update.outputDevices
+                : update.clusterAwareOutputDevices
+            setOutputDevices(descriptors)
         case .deviceInfoMessage, .deviceInfoUpdateMessage:
             setPower(.on)
+            setOutputDevices(message.deviceInfoMessage)
         case .setStateMessage:
             lock.withLock { _hasPlayingSnapshot = true }
             updateCommandFeatures(message.setStateMessage.supportedCommands)
@@ -148,6 +156,41 @@ final class MRPStateStore: @unchecked Sendable {
         let continuations = lock.withLock {
             _outputDevices = devices
             _hasOutputDevicesState = true
+            _outputDevicesRevision += 1
+            return Array(outputContinuations.values)
+        }
+        for continuation in continuations {
+            continuation.yield(devices)
+        }
+    }
+
+    private func setOutputDevices(_ deviceInfo: DeviceInfoMessage) {
+        var devices: [OutputDevice] = []
+        if deviceInfo.isGroupLeader, !deviceInfo.isProxyGroupPlayer, !deviceInfo.uniqueIdentifier.isEmpty {
+            devices.append(
+                OutputDevice(
+                    identifier: deviceInfo.uniqueIdentifier,
+                    name: deviceInfo.hasName ? deviceInfo.name : nil
+                )
+            )
+        }
+        for groupedDevice in deviceInfo.groupedDevices where !groupedDevice.deviceUid.isEmpty {
+            devices.append(
+                OutputDevice(
+                    identifier: groupedDevice.deviceUid,
+                    name: groupedDevice.hasName ? groupedDevice.name : nil
+                )
+            )
+        }
+
+        guard !devices.isEmpty || deviceInfo.isGroupLeader || !deviceInfo.groupedDevices.isEmpty else {
+            return
+        }
+
+        let continuations = lock.withLock {
+            _outputDevices = devices
+            _hasOutputDevicesState = true
+            _outputDevicesRevision += 1
             return Array(outputContinuations.values)
         }
         for continuation in continuations {

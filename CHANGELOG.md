@@ -9,6 +9,13 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- MRP output-device mutation now mirrors pyatv by sending both legacy and
+  cluster-aware output-context fields, uses AirPlay-tunneled MRP the same as
+  direct MRP, and derives output-device feature state from both output-device
+  updates and device-info group state.
+
 ## [0.3.0] - 2026-04-14
 
 ### Added

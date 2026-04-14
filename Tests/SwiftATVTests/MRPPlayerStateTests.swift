@@ -153,6 +153,48 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(MRPMessages.setVolume(125, deviceID: nil).setVolumeMessage.volume, 1)
     }
 
+    func testAddOutputDevicesUsesLegacyAndClusterAwareFields() {
+        let message = MRPMessages.modifyOutputContext(adding: ["speaker-1", "speaker-2"])
+        let inner = message.modifyOutputContextRequestMessage
+
+        XCTAssertEqual(message.type, .modifyOutputContextRequestMessage)
+        XCTAssertEqual(inner.type, .sharedAudioPresentation)
+        XCTAssertEqual(inner.addingDevices, ["speaker-1", "speaker-2"])
+        XCTAssertEqual(inner.clusterAwareAddingDevices, ["speaker-1", "speaker-2"])
+        XCTAssertEqual(inner.removingDevices, [])
+        XCTAssertEqual(inner.settingDevices, [])
+        XCTAssertEqual(inner.clusterAwareRemovingDevices, [])
+        XCTAssertEqual(inner.clusterAwareSettingDevices, [])
+    }
+
+    func testRemoveOutputDevicesUsesLegacyAndClusterAwareFields() {
+        let message = MRPMessages.modifyOutputContext(removing: ["speaker-1", "speaker-2"])
+        let inner = message.modifyOutputContextRequestMessage
+
+        XCTAssertEqual(message.type, .modifyOutputContextRequestMessage)
+        XCTAssertEqual(inner.type, .sharedAudioPresentation)
+        XCTAssertEqual(inner.removingDevices, ["speaker-1", "speaker-2"])
+        XCTAssertEqual(inner.clusterAwareRemovingDevices, ["speaker-1", "speaker-2"])
+        XCTAssertEqual(inner.addingDevices, [])
+        XCTAssertEqual(inner.settingDevices, [])
+        XCTAssertEqual(inner.clusterAwareAddingDevices, [])
+        XCTAssertEqual(inner.clusterAwareSettingDevices, [])
+    }
+
+    func testSetOutputDevicesUsesLegacyAndClusterAwareFields() {
+        let message = MRPMessages.modifyOutputContext(setting: ["speaker-1", "speaker-2"])
+        let inner = message.modifyOutputContextRequestMessage
+
+        XCTAssertEqual(message.type, .modifyOutputContextRequestMessage)
+        XCTAssertEqual(inner.type, .sharedAudioPresentation)
+        XCTAssertEqual(inner.settingDevices, ["speaker-1", "speaker-2"])
+        XCTAssertEqual(inner.clusterAwareSettingDevices, ["speaker-1", "speaker-2"])
+        XCTAssertEqual(inner.addingDevices, [])
+        XCTAssertEqual(inner.removingDevices, [])
+        XCTAssertEqual(inner.clusterAwareAddingDevices, [])
+        XCTAssertEqual(inner.clusterAwareRemovingDevices, [])
+    }
+
     func testValidateCommandResultThrowsOnSendError() {
         var result = SendCommandResultMessage()
         result.sendError = .notSupported
@@ -381,6 +423,84 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
     }
 
+    func testMRPStateStorePrefersClusterAwareOutputDeviceUpdates() {
+        let stateStore = MRPStateStore()
+        let features = MRPFeatures(stateStore: stateStore)
+
+        stateStore.update(
+            message: Self.updateOutputDevicesMessage(
+                outputDevices: [Self.outputDeviceDescriptor(identifier: "legacy", name: "Legacy", volume: 0.2)],
+                clusterAwareOutputDevices: [
+                    Self.outputDeviceDescriptor(identifier: "cluster", name: "Cluster", volume: 0.35)
+                ]
+            )
+        )
+
+        XCTAssertEqual(
+            stateStore.outputDevices,
+            [OutputDevice(identifier: "cluster", name: "Cluster", volume: 35)]
+        )
+        XCTAssertEqual(features.featureInfo(.outputDevices).state, .available)
+        XCTAssertEqual(features.featureInfo(.addOutputDevices).state, .available)
+        XCTAssertEqual(features.featureInfo(.removeOutputDevices).state, .available)
+        XCTAssertEqual(features.featureInfo(.setOutputDevices).state, .available)
+    }
+
+    func testMRPStateStoreFallsBackToLegacyOutputDeviceUpdates() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(
+            message: Self.updateOutputDevicesMessage(
+                outputDevices: [Self.outputDeviceDescriptor(identifier: "legacy", name: "Legacy", volume: 0.2)],
+                clusterAwareOutputDevices: []
+            )
+        )
+
+        XCTAssertEqual(
+            stateStore.outputDevices,
+            [OutputDevice(identifier: "legacy", name: "Legacy", volume: 20)]
+        )
+    }
+
+    func testMRPStateStoreDerivesOutputDevicesFromDeviceInfo() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(
+            message: Self.deviceInfoMessage(
+                localIdentifier: "local",
+                localName: "Apple TV",
+                groupedDevices: [Self.groupedDeviceInfo(identifier: "homepod", name: "HomePod")]
+            )
+        )
+
+        XCTAssertEqual(
+            stateStore.outputDevices,
+            [
+                OutputDevice(identifier: "local", name: "Apple TV"),
+                OutputDevice(identifier: "homepod", name: "HomePod"),
+            ]
+        )
+    }
+
+    func testMRPStateStoreSkipsOutputDevicesWithEmptyIdentifiers() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(
+            message: Self.updateOutputDevicesMessage(
+                outputDevices: [
+                    Self.outputDeviceDescriptor(identifier: "", name: "Missing ID", volume: 0.5),
+                    Self.outputDeviceDescriptor(identifier: "speaker", name: "Speaker", volume: 0.5),
+                ],
+                clusterAwareOutputDevices: []
+            )
+        )
+
+        XCTAssertEqual(
+            stateStore.outputDevices,
+            [OutputDevice(identifier: "speaker", name: "Speaker", volume: 50)]
+        )
+    }
+
     func testMRPFeaturesExposeOptionalSetupDiagnostics() {
         let stateStore = MRPStateStore()
         let features = MRPFeatures(stateStore: stateStore)
@@ -438,6 +558,57 @@ final class MRPPlayerStateTests: XCTestCase {
         var message = ProtocolMessageMessage()
         message.type = .setStateMessage
         message.setStateMessage = inner
+        return message
+    }
+
+    private static func outputDeviceDescriptor(
+        identifier: String,
+        name: String,
+        volume: Float
+    ) -> AVOutputDeviceDescriptor {
+        var descriptor = AVOutputDeviceDescriptor()
+        descriptor.uniqueIdentifier = identifier
+        descriptor.name = name
+        descriptor.volume = volume
+        return descriptor
+    }
+
+    private static func updateOutputDevicesMessage(
+        outputDevices: [AVOutputDeviceDescriptor],
+        clusterAwareOutputDevices: [AVOutputDeviceDescriptor]
+    ) -> ProtocolMessageMessage {
+        var update = UpdateOutputDeviceMessage()
+        update.outputDevices = outputDevices
+        update.clusterAwareOutputDevices = clusterAwareOutputDevices
+
+        var message = ProtocolMessageMessage()
+        message.type = .updateOutputDeviceMessage
+        message.updateOutputDeviceMessage = update
+        return message
+    }
+
+    private static func groupedDeviceInfo(identifier: String, name: String) -> DeviceInfoMessage {
+        var info = DeviceInfoMessage()
+        info.deviceUid = identifier
+        info.name = name
+        return info
+    }
+
+    private static func deviceInfoMessage(
+        localIdentifier: String,
+        localName: String,
+        groupedDevices: [DeviceInfoMessage]
+    ) -> ProtocolMessageMessage {
+        var info = DeviceInfoMessage()
+        info.uniqueIdentifier = localIdentifier
+        info.name = localName
+        info.isGroupLeader = true
+        info.isProxyGroupPlayer = false
+        info.groupedDevices = groupedDevices
+
+        var message = ProtocolMessageMessage()
+        message.type = .deviceInfoMessage
+        message.deviceInfoMessage = info
         return message
     }
 }

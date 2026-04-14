@@ -13,7 +13,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
 - **Power Control** -- Turn devices on/off and monitor power state
-- **Audio Control** -- Adjust volume when protocol state confirms volume control, and manage output devices over direct MRP
+- **Audio Control** -- Adjust volume when protocol state confirms volume control, and manage output devices over direct or AirPlay-tunneled MRP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures when Companion touch setup is available
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
@@ -211,7 +211,8 @@ Not every protocol implements every feature. Availability can change after
 protocol events or a successful request. Companion media controls, volume,
 power, apps, accounts, and keyboard focus start unavailable until the Apple TV
 reports or proves that state; Companion touch can also be unavailable even when
-the rest of Companion setup succeeds.
+the rest of Companion setup succeeds. Output-device list and mutation features
+become available when MRP or AirPlay-tunneled MRP reports route state.
 
 ```swift
 if atv.features.isAvailable(.textSet) {
@@ -221,6 +222,11 @@ if atv.features.isAvailable(.textSet) {
 // Check multiple features at once
 if atv.features.inState([.available], features: .play, .pause, .next) {
     // Full playback control is available
+}
+
+if atv.features.isAvailable(.setOutputDevices) {
+    let speakers = await atv.audio.outputDevices
+    try await atv.audio.setOutputDevices(speakers.map(\.identifier))
 }
 ```
 
@@ -261,9 +267,9 @@ protocol close still emits `connectionLost`.
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
-| **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
+| **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio, output-device mutation | Implemented |
 | **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
-| **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel | Tunnel implemented |
+| **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel, including MRP output-device mutation | Tunnel implemented |
 
 ## Project Structure
 
@@ -313,7 +319,7 @@ Sources/SwiftATV/
         ├── Protobuf/           # pyatv MRP .proto definitions, excluded from compilation
         ├── Generated/          # checked-in SwiftProtobuf output
         ├── MRPProtocol.swift    # Transport abstraction, TCP framing, protobuf dispatch
-        ├── MRPMessages.swift    # Outbound MRP message builders
+        ├── MRPMessages.swift    # Outbound MRP message builders, including output context changes
         ├── MRPPlayerState.swift # Now-playing state actor
         ├── MRPInterfaces.swift  # Remote, metadata, push, power, audio, features
         ├── MRPPairing.swift     # MRP HAP pair-setup flow
@@ -326,7 +332,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 297 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 305 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -336,7 +342,7 @@ device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
-MRP optional setup diagnostics and feature gating,
+MRP output-device mutation/state updates, MRP optional setup diagnostics and feature gating,
 Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
 resolution, scan diagnostics, identity merging, deterministic first-usable
 connect, aggregate connection errors, credential selection including AirPlay

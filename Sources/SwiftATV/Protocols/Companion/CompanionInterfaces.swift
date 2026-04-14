@@ -516,7 +516,8 @@ public actor CompanionPower: PowerController {
 // MARK: - Audio
 
 /// Companion protocol implementation of AudioController backed by observed
-/// Companion media-control and volume events.
+/// Companion media-control and volume events. Output-device mutation is handled
+/// by MRP or AirPlay-tunneled MRP, not Companion.
 public actor CompanionAudio: AudioController {
     private let handler: CompanionProtocolHandler
     private let stateStore: CompanionStateStore
@@ -561,15 +562,15 @@ public actor CompanionAudio: AudioController {
     }
 
     public func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
-        throw ATVError.notSupported("addOutputDevices not yet implemented for Companion")
+        throw ATVError.notSupported("Output-device mutation is only supported over MRP or AirPlay-tunneled MRP")
     }
 
     public func removeOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
-        throw ATVError.notSupported("removeOutputDevices not yet implemented for Companion")
+        throw ATVError.notSupported("Output-device mutation is only supported over MRP or AirPlay-tunneled MRP")
     }
 
     public func setOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
-        throw ATVError.notSupported("setOutputDevices not yet implemented for Companion")
+        throw ATVError.notSupported("Output-device mutation is only supported over MRP or AirPlay-tunneled MRP")
     }
 
     private func sendVolumeButton(_ command: HIDCommand) async throws(ATVError) {

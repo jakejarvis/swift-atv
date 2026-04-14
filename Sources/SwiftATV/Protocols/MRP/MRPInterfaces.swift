@@ -214,7 +214,7 @@ public final class MRPPower: @unchecked Sendable, PowerController {
     }
 }
 
-/// Audio controller backed by direct MRP volume and output-context messages.
+/// Audio controller backed by MRP volume and output-context messages.
 public final class MRPAudio: @unchecked Sendable, AudioController {
     private let `protocol`: MRPProtocolHandler
     private let stateStore: MRPStateStore
@@ -242,15 +242,31 @@ public final class MRPAudio: @unchecked Sendable, AudioController {
     }
 
     public func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
+        let revision = stateStore.outputDevicesRevision
         try await `protocol`.send(MRPMessages.modifyOutputContext(adding: deviceIDs))
+        await waitForOutputDevicesUpdate(after: revision)
     }
 
     public func removeOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
+        let revision = stateStore.outputDevicesRevision
         try await `protocol`.send(MRPMessages.modifyOutputContext(removing: deviceIDs))
+        await waitForOutputDevicesUpdate(after: revision)
     }
 
     public func setOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
+        let revision = stateStore.outputDevicesRevision
         try await `protocol`.send(MRPMessages.modifyOutputContext(setting: deviceIDs))
+        await waitForOutputDevicesUpdate(after: revision)
+    }
+
+    private func waitForOutputDevicesUpdate(after revision: Int, timeout: TimeInterval = 5) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while stateStore.outputDevicesRevision <= revision {
+            if Date() >= deadline {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 }
 
