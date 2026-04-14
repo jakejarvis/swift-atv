@@ -22,9 +22,11 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private let touchStartTimeout: TimeInterval
+    private let keepAliveInterval: TimeInterval
     private let stateStore = CompanionStateStore()
     private var credentials: HAPCredentials?
     private var eventTask: Task<Void, Never>?
+    private var keepAliveTask: Task<Void, Never>?
 
     private var _remoteControl: CompanionRemoteControl?
     private var _apps: CompanionApps?
@@ -109,6 +111,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings(),
         touchStartTimeout: TimeInterval,
+        keepAliveInterval: TimeInterval = 30,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = CompanionConnection(host: host, port: port)
@@ -116,6 +119,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         self.credentials = credentials
         self.settings = settings
         self.touchStartTimeout = touchStartTimeout
+        self.keepAliveInterval = keepAliveInterval
         self.onConnectionClosed = onConnectionClosed
         self.connection.delegate = self
     }
@@ -156,6 +160,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             try? await protocolHandler.subscribeEvents([optionalEvent])
         }
         await initializeState()
+        startKeepAlive()
 
         lock.withLock {
             _remoteControl = CompanionRemoteControl(protocol: protocolHandler)
@@ -172,6 +177,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
 
     /// Close the Companion protocol connection.
     public func close() async {
+        keepAliveTask?.cancel()
+        keepAliveTask = nil
         eventTask?.cancel()
         eventTask = nil
         stateStore.setConnected(false)
@@ -237,6 +244,35 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             for await (identifier, message) in stream {
                 if Task.isCancelled { break }
                 await handleEvent(identifier: identifier, message: message)
+            }
+        }
+    }
+
+    private func startKeepAlive() {
+        keepAliveTask?.cancel()
+        guard
+            let intervalNs = try? timeoutNanoseconds(
+                from: keepAliveInterval,
+                parameterName: "keepAliveInterval"
+            ),
+            intervalNs > 0
+        else {
+            keepAliveTask = nil
+            return
+        }
+
+        keepAliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                do {
+                    try await Task.sleep(nanoseconds: intervalNs)
+                    try await connection.send(type: .noOp)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    await connection.close()
+                    return
+                }
             }
         }
     }

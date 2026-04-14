@@ -118,7 +118,7 @@ enum MRPMessages {
         data.append(UInt8(usage & 0xFF))
         data.append(down ? 0x00 : 0x00)
         data.append(down ? 0x01 : 0x00)
-        data.append(contentsOf: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+        data.append(contentsOf: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
         data.append(contentsOf: [0x01, 0x00, 0x00, 0x00])
 
         var inner = SendHIDEventMessage()
@@ -135,6 +135,7 @@ enum MRPMessages {
         request.location = 0
         request.length = 1
         request.requestID = UUID().uuidString
+        request.returnContentItemAssetsInUserCompletion = true
         if let width {
             request.artworkWidth = Double(width)
         }

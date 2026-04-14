@@ -55,6 +55,7 @@ internal enum AirPlaySupport {
     static let userAgent = "AirPlay/550.10"
     static let sourceVersion = "550.10"
     static let dataStreamClientTypeUUID = "1910A70F-DBC0-4242-AF95-115DB30604E1"
+    static let companionDerivedServiceProperty = "_swiftatvCompanionDerivedAirPlay"
 
     static let pairingRequiredMask: UInt64 = 0x208
     static let accessControlCurrentUser = "2"
@@ -91,24 +92,35 @@ internal enum AirPlaySupport {
         guard credentials != nil else {
             return false
         }
-        let version = protocolVersion(
-            service: service,
-            preferred: settings.protocols.airplay.airPlayVersion
-        )
-        guard version == .v2 else {
-            return false
+        let isCompanionDerived = isCompanionDerivedService(service)
+        if !isCompanionDerived {
+            let version = protocolVersion(
+                service: service,
+                preferred: settings.protocols.airplay.airPlayVersion
+            )
+            guard version == .v2 else {
+                return false
+            }
         }
 
-        let model = property(service.properties, keys: ["model"]) ?? ""
-        guard model.hasPrefix("AppleTV") else {
+        guard isAppleTVService(service) else {
             return false
         }
         let majorVersion =
-            property(service.properties, keys: ["osvers"])
+            property(service.properties, keys: ["osvers", "rpVr"])
             .flatMap { $0.split(separator: ".", maxSplits: 1).first }
             .flatMap { Double($0) }
             ?? 0
-        return majorVersion >= 13
+        return isCompanionDerived || majorVersion >= 13
+    }
+
+    static func isCompanionDerivedService(_ service: ServiceInfo) -> Bool {
+        property(service.properties, keys: [companionDerivedServiceProperty]) == "true"
+    }
+
+    static func isAppleTVService(_ service: ServiceInfo) -> Bool {
+        let model = property(service.properties, keys: ["model", "am", "rpMd"]) ?? ""
+        return model.hasPrefix("AppleTV")
     }
 
     static func pairingRequirement(from properties: [String: String]) -> PairingRequirement {

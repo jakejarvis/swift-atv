@@ -153,6 +153,28 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(MRPMessages.setVolume(125, deviceID: nil).setVolumeMessage.volume, 1)
     }
 
+    func testHIDEventPayloadMatchesPyatvLayout() {
+        let message = MRPMessages.hidEvent(usagePage: 0x000C, usage: 0x00E2, down: true)
+        let bytes = [UInt8](message.sendHideventMessage.hidEventData)
+
+        XCTAssertEqual(bytes.count, 60)
+        XCTAssertEqual(Array(bytes[43..<49]), [0x00, 0x0C, 0x00, 0xE2, 0x00, 0x01])
+        XCTAssertEqual(Array(bytes.suffix(11)), [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0])
+    }
+
+    func testPlaybackQueueRequestAsksForContentItemAssets() {
+        let request = MRPMessages.playbackQueueRequest(
+            width: 600,
+            height: 400,
+            playerPath: nil
+        ).playbackQueueRequestMessage
+
+        XCTAssertTrue(request.includeMetadata)
+        XCTAssertTrue(request.returnContentItemAssetsInUserCompletion)
+        XCTAssertEqual(request.artworkWidth, 600)
+        XCTAssertEqual(request.artworkHeight, 400)
+    }
+
     func testAddOutputDevicesUsesLegacyAndClusterAwareFields() {
         let message = MRPMessages.modifyOutputContext(adding: ["speaker-1", "speaker-2"])
         let inner = message.modifyOutputContextRequestMessage

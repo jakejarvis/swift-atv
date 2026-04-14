@@ -272,6 +272,68 @@ final class SwiftATVConnectTests: XCTestCase {
         XCTAssertEqual(recorder.credentials(for: .airPlay), companionCredentials)
     }
 
+    func testConnectSynthesizesAirPlayTunnelFromCompanionOnlyService() async throws {
+        let companionCredentials = "01:02:03:04"
+        var config = AppleTVConfiguration(
+            address: "127.0.0.1",
+            name: "Test",
+            deviceInfo: DeviceInfo(version: "18.4", model: .gen4K2, modelString: "AppleTV11,1")
+        )
+        config.addService(
+            ServiceInfo(
+                protocol: .companion,
+                port: 49153,
+                credentials: companionCredentials,
+                properties: ["rpMd": "AppleTV11,1", "rpVr": "18.4"],
+                pairingRequirement: .mandatory
+            ))
+        let recorder = AttemptRecorder()
+
+        let result = try await ATVClient.withProtocolSetupOverride(
+            { facade, service, credentials in
+                XCTAssertEqual(service.protocol, .airPlay)
+                XCTAssertEqual(service.port, ServiceInfo.defaultAirPlayPort)
+                XCTAssertEqual(service.properties[AirPlaySupport.companionDerivedServiceProperty], "true")
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
+            },
+            operation: {
+                try await ATVClient.connect(config, options: ConnectOptions(protocols: [.airPlay]))
+            }
+        )
+
+        XCTAssertEqual(recorder.protocols, [.airPlay])
+        XCTAssertEqual(recorder.credentials(for: .airPlay), companionCredentials)
+        XCTAssertEqual(result.primaryProtocol, .airPlay)
+        XCTAssertEqual(result.activeProtocols, [.airPlay])
+    }
+
+    func testConnectabilityIncludesCompanionDerivedAirPlayTunnel() {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(
+            ServiceInfo(
+                protocol: .companion,
+                port: 49153,
+                credentials: "01:02:03:04",
+                properties: ["rpMd": "AppleTV11,1", "rpVr": "18.4"],
+                pairingRequirement: .mandatory
+            ))
+
+        let connectability = config.connectability()
+        let airPlay = connectability.first { $0.service.protocol == .airPlay }
+
+        XCTAssertEqual(
+            config.connectableProtocols().sorted { $0.description < $1.description },
+            [.airPlay, .companion]
+        )
+        XCTAssertEqual(airPlay?.status, .connectable)
+        XCTAssertEqual(airPlay?.service.port, ServiceInfo.defaultAirPlayPort)
+    }
+
     func testConnectRequestedProtocolDoesNotFallBack() async {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
         config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))

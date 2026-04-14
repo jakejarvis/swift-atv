@@ -23,7 +23,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **State-backed Capabilities** -- Typed capability availability reflects protocol state and diagnostics instead of assuming every connected interface is ready
 - **Broad Media Commands** -- Query and send supported MediaRemote commands through `mediaCommands`
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching, including structured timeout context
-- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion
+- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion, including Companion-derived AirPlay tunnel attempts for Apple TV discoveries with only Companion advertised
 
 ## Requirements
 
@@ -200,6 +200,9 @@ order is direct MRP, then the AirPlay 2 MRP tunnel, then Companion. Pass
 `ConnectOptions(strategy: .allAllowed)` when you want SwiftATV to attach every
 usable allowed protocol before returning. The tunnel uses AirPlay credentials
 first, then Companion credentials when AirPlay credentials are absent.
+When discovery only returns Companion but reusable HAP credentials are
+available, SwiftATV can still try the AirPlay MRP tunnel on the default AirPlay
+port.
 Companion always requires credentials. When both settings and a service contain
 credentials for the same protocol, `ATVSettings` wins. When auto-connect
 exhausts all options, the thrown `ATVError.connectionFailed` contains
@@ -275,7 +278,9 @@ Connection setup is driven by `ConnectOptions`: by default it returns after
 the first usable protocol connects, trying direct MRP first,
 AirPlay-tunneled MRP next, then Companion. `ConnectStrategy.allAllowed`
 continues attaching lower-priority protocols and returns metadata for every
-attempt. If a non-primary protocol later closes or fails optional setup, the
+attempt. Companion-only discoveries with reusable HAP credentials can still
+attempt AirPlay-tunneled MRP on the default AirPlay port. If a non-primary
+protocol later closes or fails optional setup, the
 facade unregisters that protocol without emitting a terminal device-close
 event. A primary or last-active protocol close still emits `connectionLost`.
 
@@ -284,7 +289,7 @@ event. A primary or last-active protocol close still emits `connectionLost`.
 | Protocol | Purpose | Status |
 |----------|---------|--------|
 | **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio, output-device mutation | Implemented |
-| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
+| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch, and NoOp keepalive. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
 | **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel, including timeout-bounded HTTP/RTSP setup and MRP output-device mutation | Tunnel implemented |
 
 ## Project Structure

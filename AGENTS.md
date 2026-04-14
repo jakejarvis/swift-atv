@@ -26,7 +26,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Per-protocol lifecycle**: The facade tracks active and primary protocols separately. Secondary protocol setup/close failures unregister only that protocol; primary or last-active closes emit terminal device events.
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > AirPlay > Companion)
-- **Connect setup priority**: `ATVClient.connect` takes `ConnectOptions`, attempts implemented control protocols deterministically by option order (default direct MRP > AirPlay-tunneled MRP > Companion), returns `ConnectResult` with primary/active protocols and attempts, and aggregates per-protocol errors if none connect. Single-protocol options stay strict; `ConnectStrategy.allAllowed` attaches every usable allowed protocol.
+- **Connect setup priority**: `ATVClient.connect` takes `ConnectOptions`, attempts implemented control protocols deterministically by option order (default direct MRP > AirPlay-tunneled MRP > Companion), can derive an AirPlay tunnel attempt on port 7000 from a Companion-only discovery when reusable HAP credentials exist, returns `ConnectResult` with primary/active protocols and attempts, and aggregates per-protocol errors if none connect. Single-protocol options stay strict; `ConnectStrategy.allAllowed` attaches every usable allowed protocol.
 - **Pairing/settings persistence**: `PairingHandler.finish()` returns `PairingResult`; `ATVSettings.apply(_:)` copies the paired service identifier and credentials into the correct protocol bucket.
 - **Preflight policy helpers**: `AppleTVConfiguration.connectability(settings:)`, `connectableProtocols(settings:)`, `preferredPairingService(...)`, and `ServiceInfo.effectivePairingStatus(settings:)` expose local pairing/connectability policy for apps before opening network sessions.
 - **State-backed capabilities**: Companion and MRP capability providers report unavailable until setup, protocol events, or successful requests prove optional/stateful surfaces are usable. MRP output-device list and mutation capabilities become available after route state arrives from direct MRP or AirPlay-tunneled MRP. Optional setup failures are exposed with capability diagnostics when a public capability is affected. Relayed state prefers `.available` over `.unavailable` across protocols.
@@ -63,7 +63,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, selected media commands, event-backed power/audio/media-control/keyboard state, best-effort touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is intentionally MRP/AirPlay-tunneled MRP only |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, NoOp keepalive, remote, apps, users, selected media commands, event-backed power/audio/media-control/keyboard state, best-effort touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is intentionally MRP/AirPlay-tunneled MRP only |
 | MRP | Implemented | Direct TCP/protobuf connection plus AirPlay 2 DataStream tunnel transport, pair-setup, pair-verify for direct MRP, remote, broad MediaRemote command query/send, actively refreshed metadata, push, power, audio, output-device state/mutation, optional setup diagnostics, connection-lost events |
 | AirPlay | Implemented | AirPlay 2 HAP pair-setup, pair-verify, encrypted control/event/data channels, timeout-bounded HTTP/RTSP setup, and MRP tunneling including output-device mutation |
 
@@ -133,8 +133,9 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `DeviceInfoTests` <- `tests/support/test_device_info.py` plus Companion TXT
   model/version metadata coverage.
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
-- `CompanionServiceTests.swift` -- Companion setup resilience when `_touchStart`
-  times out after credentialed pair-verify and required setup succeeds.
+- `CompanionServiceTests.swift` -- Companion setup resilience when optional
+  `_sessionStart` / `_touchStart` requests time out after credentialed
+  pair-verify and required setup succeeds, plus Companion NoOp keepalive.
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
   Companion identifier extraction, NetService TXT resolver path, scan timeout
   validation, diagnostics, sleep-proxy deep-sleep discovery, and
@@ -142,7 +143,8 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
   malformed-credential, deterministic first-usable priority, service-credential,
   mandatory-credential, Companion credential requirements, all-allowed strategy,
-  connect-result metadata, aggregate failures, and client-identity collision checks.
+  Companion-derived AirPlay tunnel attempts, connect-result metadata, aggregate
+  failures, and client-identity collision checks.
 - `FacadeEventTests.swift` -- facade connection-closed, connection-lost, and
   per-protocol primary/secondary close behavior plus unsupported metadata
   errors.

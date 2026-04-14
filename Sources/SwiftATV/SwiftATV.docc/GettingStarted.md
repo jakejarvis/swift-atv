@@ -221,7 +221,9 @@ Credentials in ``ATVSettings`` take precedence. If settings do not contain
 credentials for a protocol, SwiftATV falls back to the matching
 ``ServiceInfo/credentials`` value from an enriched scan result. The AirPlay MRP
 tunnel tries AirPlay credentials first, then Companion credentials when AirPlay
-credentials are absent. Companion connections always require credentials.
+credentials are absent. When discovery only returns Companion but reusable HAP
+credentials are available, SwiftATV can still try the AirPlay MRP tunnel on the
+default AirPlay port. Companion connections always require credentials.
 
 Use ``AppleTVConfiguration/connectableProtocols(settings:)``,
 ``AppleTVConfiguration/preferredPairingService(settings:protocols:)``, and

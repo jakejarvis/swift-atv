@@ -83,6 +83,29 @@
             XCTAssertEqual(requests.filter { $0 == "_hidC" }.count, 2)
         }
 
+        func testCompanionSendsNoOpKeepAliveAfterSetup() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(pairVerify: pairVerify.responder)
+            defer { server.stop() }
+
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                touchStartTimeout: 0.05,
+                keepAliveInterval: 0.01
+            )
+
+            try await service.setup()
+
+            let sentKeepAlive = await eventually(timeoutNanoseconds: 500_000_000) {
+                server.noOpCount > 0
+            }
+            await service.close()
+
+            XCTAssertTrue(sentKeepAlive)
+        }
+
         func testSystemInfoUsesRapportIdentifier() async throws {
             let pairVerify = FakePairVerifyFixture()
             let server = try await FakeCompanionServer.start(pairVerify: pairVerify.responder)
@@ -126,6 +149,7 @@
         private var cipher: ChaCha20Cipher?
         private var _requests: [String] = []
         private var _requestContents: [String: OPACK.Value] = [:]
+        private var _noOpCount = 0
 
         var port: Int {
             Int(listener.port!.rawValue)
@@ -133,6 +157,10 @@
 
         var requests: [String] {
             lock.withLock { _requests }
+        }
+
+        var noOpCount: Int {
+            lock.withLock { _noOpCount }
         }
 
         func requestContent(for identifier: String) -> OPACK.Value? {
@@ -247,6 +275,10 @@
                 handlePairVerifyNext(payload, connection: connection)
             case .eOPACK:
                 handleOPACKPayload(payload, connection: connection)
+            case .noOp:
+                lock.withLock {
+                    _noOpCount += 1
+                }
             default:
                 break
             }
@@ -351,6 +383,22 @@
 
             connection.send(content: header + wirePayload, completion: .contentProcessed { _ in })
         }
+    }
+
+    private func eventually(
+        timeoutNanoseconds: UInt64,
+        condition: () -> Bool
+    ) async -> Bool {
+        let interval: UInt64 = 10_000_000
+        var elapsed: UInt64 = 0
+        while elapsed < timeoutNanoseconds {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: interval)
+            elapsed += interval
+        }
+        return condition()
     }
 
     private struct FakePairVerifyFixture {

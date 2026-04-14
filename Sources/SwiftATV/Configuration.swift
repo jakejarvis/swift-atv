@@ -231,8 +231,19 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
     }
 
     /// Local service connectability policy after applying saved settings.
+    ///
+    /// Companion-only Apple TV discoveries with reusable HAP credentials may
+    /// include a derived AirPlay MRP tunnel service on the default AirPlay port.
     public func connectability(settings: ATVSettings = ATVSettings()) -> [ServiceConnectability] {
-        services.map { service in
+        var preflightServices = services
+        if let derivedAirPlay = ATVClient.companionDerivedAirPlayServiceIfAvailable(
+            from: self,
+            requestedProtocols: ConnectOptions.defaultProtocolOrder,
+            settings: settings
+        ) {
+            preflightServices.append(derivedAirPlay)
+        }
+        return preflightServices.map { service in
             connectability(for: service, settings: settings)
         }
     }

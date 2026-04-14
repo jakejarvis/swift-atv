@@ -190,7 +190,9 @@ public enum ATVClient {
     /// ``ConnectStrategy/firstUsable`` the method returns after the first
     /// successful protocol. With ``ConnectStrategy/allAllowed`` it continues
     /// attaching lower-priority protocols and returns if at least one protocol
-    /// connects. If all attempts fail, the thrown `.connectionFailed` contains
+    /// connects. When only Companion is discovered but reusable HAP credentials
+    /// exist, the AirPlay MRP tunnel may be attempted on the default AirPlay
+    /// port. If all attempts fail, the thrown `.connectionFailed` contains
     /// the failed protocols and their underlying errors. A strict
     /// single-protocol request throws that protocol's underlying setup error
     /// directly.
@@ -212,7 +214,11 @@ public enum ATVClient {
             throw ATVError.invalidConfig("options.protocols must contain at least one protocol")
         }
 
-        let availableServices = config.services.filter(\.enabled)
+        let availableServices = enabledServicesForConnect(
+            from: config,
+            requestedProtocols: requestedProtocols,
+            settings: deviceSettings
+        )
 
         guard !availableServices.isEmpty else {
             throw ATVError.noService("No enabled services in configuration")
@@ -502,6 +508,95 @@ public enum ATVClient {
             throw firstParseError
         }
         throw ATVError.noCredentials("AirPlay MRP tunnel requires AirPlay or Companion HAP credentials")
+    }
+
+    internal static func enabledServicesForConnect(
+        from configuration: AppleTVConfiguration,
+        requestedProtocols: [ATVProtocol],
+        settings: ATVSettings
+    ) -> [ServiceInfo] {
+        var services = configuration.services.filter(\.enabled)
+        if let derivedAirPlay = companionDerivedAirPlayServiceIfAvailable(
+            from: configuration,
+            requestedProtocols: requestedProtocols,
+            settings: settings
+        ) {
+            services.append(derivedAirPlay)
+        }
+        return services
+    }
+
+    internal static func companionDerivedAirPlayServiceIfAvailable(
+        from configuration: AppleTVConfiguration,
+        requestedProtocols: [ATVProtocol],
+        settings: ATVSettings
+    ) -> ServiceInfo? {
+        let enabledServices = configuration.services.filter(\.enabled)
+        guard
+            requestedProtocols.contains(.airPlay),
+            settings.protocols.airplay.mrpTunnelMode != .disable,
+            !configuration.services.contains(where: { $0.protocol == .airPlay }),
+            let companion = enabledServices.first(where: { $0.protocol == .companion }),
+            hasAirPlayTunnelCredentialCandidate(settings: settings, companionService: companion)
+        else {
+            return nil
+        }
+
+        let derivedAirPlay = companionDerivedAirPlayService(
+            from: companion,
+            configuration: configuration
+        )
+        guard
+            settings.protocols.airplay.mrpTunnelMode == .force
+                || AirPlaySupport.isAppleTVService(derivedAirPlay)
+        else {
+            return nil
+        }
+
+        return derivedAirPlay
+    }
+
+    private static func companionDerivedAirPlayService(
+        from companion: ServiceInfo,
+        configuration: AppleTVConfiguration
+    ) -> ServiceInfo {
+        var properties = companion.properties
+        properties[AirPlaySupport.companionDerivedServiceProperty] = "true"
+
+        if AirPlaySupport.property(properties, keys: ["model", "am", "rpMd"]) == nil,
+            let model = configuration.deviceInfo.modelString
+        {
+            properties["model"] = model
+        }
+        if AirPlaySupport.property(properties, keys: ["osvers", "rpVr"]) == nil,
+            let version = configuration.deviceInfo.version
+        {
+            properties["osvers"] = version
+        }
+
+        return ServiceInfo(
+            protocol: .airPlay,
+            port: ServiceInfo.defaultAirPlayPort,
+            identifier: companion.identifier ?? configuration.mainIdentifier,
+            credentials: companion.credentials,
+            enabled: true,
+            properties: properties,
+            pairingRequirement: .notNeeded
+        )
+    }
+
+    private static func hasAirPlayTunnelCredentialCandidate(
+        settings: ATVSettings,
+        companionService: ServiceInfo
+    ) -> Bool {
+        [
+            settings.protocols.airplay.credentials,
+            settings.protocols.companion.credentials,
+            companionService.credentials,
+        ].contains { candidate in
+            guard let candidate else { return false }
+            return !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     internal static func validateClientIdentity(

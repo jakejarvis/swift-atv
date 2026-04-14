@@ -74,6 +74,14 @@ Pre-1.0: minor version bumps may contain breaking changes.
   connections when handler creation or repeated AirPlay `begin()` calls fail.
 - AirPlay MRP tunnel setup now closes partially opened control/event/data
   channels when setup fails before the tunnel is fully registered.
+- Companion-only discoveries with reusable HAP credentials can now attempt the
+  AirPlay MRP tunnel on the default AirPlay port, matching Apple TVs that only
+  advertise `_companion-link._tcp` but still accept AirPlay control traffic.
+- Companion connections now send periodic NoOp keepalive frames after setup.
+- MRP HID event payloads now match pyatv's 60-byte layout for hardware-level
+  key events such as mute.
+- MRP playback queue requests now ask for content item assets so artwork can be
+  returned with now-playing updates.
 - MRP push streams now cancel their player-state bridge task when the consumer
   terminates the stream.
 

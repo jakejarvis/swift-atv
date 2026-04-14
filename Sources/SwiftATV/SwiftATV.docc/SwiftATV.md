@@ -15,7 +15,9 @@ Companion provides modern app, keyboard text input/focus, best-effort touch,
 power, audio-volume, and remote-control support. Connection setup is
 deterministic for implemented control protocols (direct MRP, then
 AirPlay-tunneled MRP, then Companion) and returns as soon as one usable protocol
-connects unless ``ConnectStrategy/allAllowed`` is requested. The result
+connects unless ``ConnectStrategy/allAllowed`` is requested. Companion-only
+discoveries with reusable HAP credentials can still attempt AirPlay-tunneled MRP
+on the default AirPlay port. The result
 describes the primary protocol, active protocols, setup attempts, and optional
 setup diagnostics.
 
