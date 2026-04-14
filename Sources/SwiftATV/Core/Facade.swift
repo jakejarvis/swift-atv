@@ -186,6 +186,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         _ service: ServiceInfo,
         credentials resolvedCredentials: HAPCredentials? = nil
     ) async throws(ATVError) {
+        try ATVClient.validateClientIdentity(settings: _settings, for: configuration)
+
         if service.protocol == .airPlay {
             let candidates =
                 if let resolvedCredentials {
@@ -209,6 +211,9 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
                 for: service,
                 settings: _settings
             )
+        }
+        if service.protocol == .companion, credentials == nil {
+            throw ATVError.noCredentials("Companion requires pairing credentials")
         }
         if service.pairingRequirement == .mandatory, credentials == nil {
             throw ATVError.noCredentials(
@@ -277,6 +282,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         _ service: ServiceInfo,
         credentialCandidates: [HAPCredentials]
     ) async throws(ATVError) {
+        try ATVClient.validateClientIdentity(settings: _settings, for: configuration)
+
         guard _settings.protocols.airplay.mrpTunnelMode != .disable else {
             throw ATVError.notSupported("AirPlay MRP tunnel is disabled by settings")
         }

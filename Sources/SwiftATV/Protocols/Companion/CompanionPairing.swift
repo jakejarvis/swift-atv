@@ -129,6 +129,7 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
     private let _service: ServiceInfo
     private let connection: CompanionConnection
     private let setup: HAPPairSetupHandler
+    private let settings: ATVSettings
     private let lock = NSLock()
     private var _pin: String?
     private var _hasPaired = false
@@ -146,21 +147,38 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
         setup.credentials
     }
 
-    private init(config: AppleTVConfiguration, service: ServiceInfo, connection: CompanionConnection) {
+    private init(
+        config: AppleTVConfiguration,
+        service: ServiceInfo,
+        connection: CompanionConnection,
+        settings: ATVSettings
+    ) {
         self.config = config
         self._service = service
         self.connection = connection
-        self.setup = HAPPairSetupHandler()
+        self.settings = settings
+        self.setup = HAPPairSetupHandler(
+            clientIdentifier: Data(settings.clientIdentity.pairingIdentifier.utf8)
+        )
     }
 
     /// Create a pairing handler for the Companion protocol.
+    ///
+    /// `settings.clientIdentity` supplies the local controller pairing
+    /// identifier and display name sent during HAP pair-setup.
     public static func create(
         config: AppleTVConfiguration,
-        service: ServiceInfo
+        service: ServiceInfo,
+        settings: ATVSettings = ATVSettings()
     ) async throws(ATVError) -> CompanionPairingHandler {
         let connection = CompanionConnection(host: config.address, port: service.port)
         try await connection.connect()
-        return CompanionPairingHandler(config: config, service: service, connection: connection)
+        return CompanionPairingHandler(
+            config: config,
+            service: service,
+            connection: connection,
+            settings: settings
+        )
     }
 
     /// Set the PIN displayed on the Apple TV.
@@ -196,7 +214,7 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
         let m4Response = try await exchangeAuth(.psNext, innerTLV: m3TLV)
 
         // M5: encrypted controller identity. Device responds with M6 on psNext.
-        let m5TLV = try setup.m5(fromResponse: m4Response)
+        let m5TLV = try setup.m5(fromResponse: m4Response, displayName: settings.clientIdentity.name)
         let m6Response = try await exchangeAuth(.psNext, innerTLV: m5TLV)
 
         // M6: decrypt accessory identity, verify signature, store credentials.

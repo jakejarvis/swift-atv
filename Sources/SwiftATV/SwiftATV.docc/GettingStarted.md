@@ -91,7 +91,14 @@ SRP-6a pair-setup handshake for you; all you need is the `begin` → `pin` →
 `finish` flow.
 
 ```swift
-let handler = try await ATVClient.pair(device, protocol: .companion)
+var settings = ATVSettings()
+settings.clientIdentity.name = "Clicker"
+
+let handler = try await ATVClient.pair(
+    device,
+    protocol: .companion,
+    settings: settings
+)
 
 // begin() starts the handshake. Current Companion and MRP flows display a
 // 4-digit PIN on the Apple TV screen.
@@ -146,6 +153,7 @@ credentials for `.airPlay`:
 
 ```swift
 var settings = ATVSettings()
+settings.clientIdentity.name = "Clicker"
 settings.protocols.airplay.airPlayVersion = .v2
 
 let handler = try await ATVClient.pair(
@@ -169,6 +177,7 @@ Once paired, connect by loading the stored credentials into
 
 ```swift
 var settings = ATVSettings()
+settings.clientIdentity.name = "Clicker"
 settings.setCredentials(storedCredentialsString, for: .companion)
 // Use `.mrp` here when you stored credentials from MRPPairingHandler.
 
@@ -196,18 +205,21 @@ await atv.close()
 ```
 
 ``ATVClient/connect(_:protocol:settings:)`` tries enabled services in a
-deterministic order for implemented control protocols: direct MRP first, then
-AirPlay 2 MRP tunnel when direct MRP is unavailable or fails, then Companion.
-If you do not request a specific protocol, setup falls back past failed or
-missing-credential services until one usable protocol connects. If you request
-`.mrp`, SwiftATV only uses direct MRP. If you request `.airPlay`, SwiftATV opens
-the AirPlay MRP tunnel.
+deterministic order for implemented control protocols and returns when the
+first usable protocol connects: direct MRP first, then the AirPlay 2 MRP
+tunnel, then Companion. If you request `.mrp`, SwiftATV only uses direct MRP.
+If you request `.airPlay`, SwiftATV opens the AirPlay MRP tunnel.
 
 Credentials in ``ATVSettings`` take precedence. If settings do not contain
 credentials for a protocol, SwiftATV falls back to the matching
 ``ServiceInfo/credentials`` value from an enriched scan result. The AirPlay MRP
 tunnel tries AirPlay credentials first, then Companion credentials when AirPlay
-credentials are absent.
+credentials are absent. Companion connections always require credentials.
+
+``ATVSettings/clientIdentity`` describes your local app or controller. Do not
+copy identifiers from the scanned Apple TV into this field; SwiftATV validates
+that the local client identity does not match the target device before pairing
+or connecting.
 
 You can observe connection lifecycle events from the connected facade:
 

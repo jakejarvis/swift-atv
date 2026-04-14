@@ -85,7 +85,7 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
                 return .failure(ATVError.connectionLost("Connection has been closed"))
             }
             guard let channel = self.channel else {
-                return .failure(ATVError.connectionFailed("Not connected"))
+                return .failure(ATVError.connectionFailed(message: "Not connected"))
             }
             if let hapSession {
                 do {

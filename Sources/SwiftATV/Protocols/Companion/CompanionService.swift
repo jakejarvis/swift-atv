@@ -112,22 +112,25 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     /// subscription are required. Touch setup is optional: a `_touchStart`
     /// timeout leaves touch unavailable but does not fail the connection.
     public func setup() async throws(ATVError) {
+        guard let credentials else {
+            throw ATVError.noCredentials("Companion requires pairing credentials")
+        }
+
         try await connection.connect()
         await protocolHandler.startReceiving()
 
-        if let credentials {
-            let verifier = CompanionPairVerifyHandler(
-                connection: connection,
-                credentials: credentials
-            )
-            try await verifier.verify()
-        }
+        let verifier = CompanionPairVerifyHandler(
+            connection: connection,
+            credentials: credentials
+        )
+        try await verifier.verify()
 
         try await protocolHandler.sendSystemInfo(
-            name: settings.info.name ?? "SwiftATV",
-            remotePairingID: settings.info.remotePairingID,
-            clientID: credentials.map(\.clientIdentifier).flatMap(Self.utf8String),
-            deviceID: settings.info.deviceID ?? settings.info.macAddress
+            name: settings.clientIdentity.name,
+            model: settings.clientIdentity.model,
+            pairingIdentifier: settings.clientIdentity.pairingIdentifier,
+            clientID: Self.utf8String(from: credentials.clientIdentifier),
+            deviceID: settings.clientIdentity.deviceID
         )
         let touchAvailable = try await startTouchIfAvailable()
         try await protocolHandler.startSession()

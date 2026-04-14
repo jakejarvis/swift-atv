@@ -183,7 +183,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
             if closed {
                 throw ATVError.connectionLost("Connection has been closed")
             }
-            throw ATVError.connectionFailed("AirPlay MRP tunnel is not connected")
+            throw ATVError.connectionFailed(message: "AirPlay MRP tunnel is not connected")
         }
         try await channel.sendProtobuf(message)
     }

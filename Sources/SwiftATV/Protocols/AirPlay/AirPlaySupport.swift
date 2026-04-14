@@ -130,14 +130,14 @@ internal enum AirPlaySupport {
             "isRemoteControlOnly": true,
             "qualifier": ["txtAirPlay"],
             "timingProtocol": "None",
-            "name": settings.info.name ?? "SwiftATV",
-            "deviceID": settings.info.deviceID ?? settings.info.macAddress ?? "FF:70:79:61:74:76",
-            "macAddress": settings.info.macAddress ?? "02:73:77:69:66:74",
-            "model": "iPhone10,6",
+            "name": settings.clientIdentity.name,
+            "deviceID": settings.clientIdentity.deviceID,
+            "macAddress": settings.clientIdentity.macAddress,
+            "model": settings.clientIdentity.model,
             "sourceVersion": sourceVersion,
-            "osName": "iPhone OS",
-            "osVersion": "14.7.1",
-            "osBuildVersion": "18G82",
+            "osName": settings.clientIdentity.operatingSystemName,
+            "osVersion": settings.clientIdentity.operatingSystemVersion,
+            "osBuildVersion": settings.clientIdentity.operatingSystemBuild,
         ]
     }
 

@@ -11,6 +11,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Added
 
+- `ConnectionAttemptError` records every protocol attempted by auto-connect
+  when no usable protocol connects.
 - AirPlay 2 HAP pair-setup is now available via `ATVClient.pair(...,
   protocol: .airPlay, settings:)`, and AirPlay 2 MRP tunneling can carry MRP
   remote control, metadata, push, power, and audio over the AirPlay data
@@ -29,6 +31,15 @@ Pre-1.0: minor version bumps may contain breaking changes.
   release bumps only update `ATVClient.version` and changelog metadata.
 - Documentation now describes AirPlay support as the implemented AirPlay 2 MRP
   tunnel instead of as a broader AirPlay media surface.
+- `ATVSettings.info` was replaced by `ATVSettings.clientIdentity`, which now
+  has stable local controller defaults and is validated so callers do not send
+  the Apple TV's own identifiers back as the controller identity.
+- `ATVClient.connect` now returns after the first usable protocol connects
+  instead of waiting for secondary protocol setup. If all automatic attempts
+  fail, the final `connectionFailed` error includes every attempted protocol
+  and its underlying error.
+- Companion connections now fail fast with `noCredentials` when credentials
+  are missing; Companion no longer attempts unauthenticated setup.
 
 ### Fixed
 

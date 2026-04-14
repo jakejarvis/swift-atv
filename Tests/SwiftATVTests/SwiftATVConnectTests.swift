@@ -90,24 +90,26 @@ final class SwiftATVConnectTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(recorder.protocols, [.mrp, .companion])
+        XCTAssertEqual(recorder.protocols, [.mrp])
     }
 
     func testConnectFallsBackAfterSupportedProtocolFailure() async throws {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
         config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
         config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "01:02:03:04"
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
             { _, service, credentials in
                 recorder.append(service, credentials: credentials)
                 if service.protocol == .mrp {
-                    throw ATVError.connectionFailed("MRP failed")
+                    throw ATVError.connectionFailed(message: "MRP failed")
                 }
             },
             operation: {
-                try await ATVClient.connect(config)
+                try await ATVClient.connect(config, settings: settings)
             }
         )
 
@@ -133,7 +135,7 @@ final class SwiftATVConnectTests: XCTestCase {
             { _, service, credentials in
                 recorder.append(service, credentials: credentials)
                 if service.protocol == .mrp {
-                    throw ATVError.connectionFailed("MRP failed")
+                    throw ATVError.connectionFailed(message: "MRP failed")
                 }
             },
             operation: {
@@ -141,7 +143,7 @@ final class SwiftATVConnectTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(recorder.protocols, [.mrp, .airPlay, .companion])
+        XCTAssertEqual(recorder.protocols, [.mrp, .airPlay])
         XCTAssertEqual(recorder.credentials(for: .airPlay), credentials)
     }
 
@@ -168,7 +170,7 @@ final class SwiftATVConnectTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(recorder.protocols, [.mrp, .companion])
+        XCTAssertEqual(recorder.protocols, [.mrp])
     }
 
     func testExplicitAirPlayUsesCompanionCredentialFallback() async throws {
@@ -212,7 +214,7 @@ final class SwiftATVConnectTests: XCTestCase {
             _ = try await ATVClient.withProtocolSetupOverride(
                 { _, service, credentials in
                     recorder.append(service, credentials: credentials)
-                    throw ATVError.connectionFailed("requested protocol failed")
+                    throw ATVError.connectionFailed(message: "requested protocol failed")
                 },
                 operation: {
                     try await ATVClient.connect(config, protocol: .mrp)
@@ -227,6 +229,72 @@ final class SwiftATVConnectTests: XCTestCase {
         }
 
         XCTAssertEqual(recorder.protocols, [.mrp])
+    }
+
+    func testAutoConnectAggregatesProtocolFailures() async {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        let recorder = AttemptRecorder()
+
+        do {
+            _ = try await ATVClient.withProtocolSetupOverride(
+                { _, service, credentials in
+                    recorder.append(service, credentials: credentials)
+                    throw ATVError.connectionFailed(message: "\(service.protocol) failed")
+                },
+                operation: {
+                    try await ATVClient.connect(config)
+                }
+            )
+            XCTFail("Expected connect to throw")
+        } catch let error as ATVError {
+            guard case ATVError.connectionFailed(let message, let attempts) = error else {
+                XCTFail("Expected aggregate connectionFailed, got \(error)")
+                return
+            }
+            XCTAssertEqual(message, "No usable protocol connected")
+            XCTAssertEqual(attempts.map(\.protocol), [ATVProtocol.mrp, .companion])
+            guard case .connectionFailed = attempts[0].error else {
+                XCTFail("Expected MRP connectionFailed, got \(attempts[0].error)")
+                return
+            }
+            guard case .noCredentials = attempts[1].error else {
+                XCTFail("Expected Companion noCredentials, got \(attempts[1].error)")
+                return
+            }
+            XCTAssertTrue(error.localizedDescription.contains("MRP"))
+            XCTAssertTrue(error.localizedDescription.contains("Companion"))
+        } catch {
+            XCTFail("Expected ATVError, got \(error)")
+        }
+
+        XCTAssertEqual(recorder.protocols, [.mrp])
+    }
+
+    func testConnectCompanionWithoutCredentialsFailsBeforeSetup() async {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        let recorder = AttemptRecorder()
+
+        do {
+            _ = try await ATVClient.withProtocolSetupOverride(
+                { _, service, credentials in
+                    recorder.append(service, credentials: credentials)
+                },
+                operation: {
+                    try await ATVClient.connect(config, protocol: .companion)
+                }
+            )
+            XCTFail("Expected connect to throw")
+        } catch let error {
+            guard case ATVError.noCredentials = error else {
+                XCTFail("Expected noCredentials, got \(error)")
+                return
+            }
+        }
+
+        XCTAssertEqual(recorder.protocols, [])
     }
 
     func testConnectUsesServiceCredentialsWhenSettingsAreMissing() async throws {
@@ -321,6 +389,71 @@ final class SwiftATVConnectTests: XCTestCase {
         } catch let error {
             guard case ATVError.invalidCredentials = error else {
                 XCTFail("Expected invalidCredentials, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testConnectRejectsTargetIdentityAsClientIdentity() async {
+        var config = AppleTVConfiguration(
+            address: "127.0.0.1",
+            name: "Test",
+            identifier: "target-device"
+        )
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.clientIdentity.deviceID = "target-device"
+
+        do {
+            _ = try await ATVClient.connect(config, protocol: .mrp, settings: settings)
+            XCTFail("Expected connect to throw")
+        } catch let error {
+            guard case ATVError.settingsError = error else {
+                XCTFail("Expected settingsError, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testConnectRejectsMacLikeTargetIdentityCaseInsensitively() async {
+        let config = AppleTVConfiguration(
+            address: "127.0.0.1",
+            name: "Test",
+            services: [
+                ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional)
+            ],
+            deviceInfo: DeviceInfo(macAddress: "AA:BB:CC:DD:EE:FF")
+        )
+        var settings = ATVSettings()
+        settings.clientIdentity.macAddress = "aa-bb-cc-dd-ee-ff"
+
+        do {
+            _ = try await ATVClient.connect(config, protocol: .mrp, settings: settings)
+            XCTFail("Expected connect to throw")
+        } catch let error {
+            guard case ATVError.settingsError = error else {
+                XCTFail("Expected settingsError, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testPairRejectsTargetIdentityAsClientIdentity() async {
+        var config = AppleTVConfiguration(
+            address: "127.0.0.1",
+            name: "Test",
+            identifier: "target-device"
+        )
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.clientIdentity.pairingIdentifier = "target-device"
+
+        do {
+            _ = try await ATVClient.pair(config, protocol: .mrp, settings: settings)
+            XCTFail("Expected pair to throw")
+        } catch let error {
+            guard case ATVError.settingsError = error else {
+                XCTFail("Expected settingsError, got \(error)")
                 return
             }
         }

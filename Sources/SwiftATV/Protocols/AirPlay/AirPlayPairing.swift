@@ -5,7 +5,7 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
     private let config: AppleTVConfiguration
     private let _service: ServiceInfo
     private let settings: ATVSettings
-    private let setup = HAPPairSetupHandler()
+    private let setup: HAPPairSetupHandler
     private let lock = NSLock()
 
     private var connection: AirPlayControlConnection?
@@ -22,6 +22,9 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
         self.config = config
         self._service = service
         self.settings = settings
+        self.setup = HAPPairSetupHandler(
+            clientIdentifier: Data(settings.clientIdentity.pairingIdentifier.utf8)
+        )
     }
 
     /// Create an AirPlay 2 pairing handler.
@@ -76,7 +79,7 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
 
         let m3 = try setup.m3(fromResponse: m2Data, pin: pin)
         let m4 = try await control.pairSetupExchange(m3)
-        let m5 = try setup.m5(fromResponse: m4, displayName: settings.info.name)
+        let m5 = try setup.m5(fromResponse: m4, displayName: settings.clientIdentity.name)
         let m6 = try await control.pairSetupExchange(m5)
         try setup.finish(fromResponse: m6)
 

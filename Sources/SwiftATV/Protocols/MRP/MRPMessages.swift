@@ -11,7 +11,6 @@ enum MRPMessages {
 
     static func deviceInformation(settings: ATVSettings) -> ProtocolMessageMessage {
         var info = DeviceInfoMessage()
-        let remoteID = settings.info.remotePairingID ?? UUID().uuidString
         info.allowsPairing = true
         info.applicationBundleIdentifier = "com.apple.TVRemote"
         info.applicationBundleVersion = "344.28"
@@ -19,7 +18,7 @@ enum MRPMessages {
         info.lastSupportedMessageType = 108
         info.localizedModelName = "iPhone"
         info.logicalDeviceCount = 1
-        info.name = settings.info.name ?? "SwiftATV"
+        info.name = settings.clientIdentity.name
         info.protocolVersion = 1
         info.sharedQueueVersion = 2
         info.supportsAcl = true
@@ -28,7 +27,7 @@ enum MRPMessages {
         info.supportsSystemPairing = true
         info.systemBuildVersion = "20A362"
         info.systemMediaApplication = "com.apple.TVMusic"
-        info.uniqueIdentifier = remoteID
+        info.uniqueIdentifier = settings.clientIdentity.pairingIdentifier
 
         var message = base(.deviceInfoMessage)
         message.deviceInfoMessage = info

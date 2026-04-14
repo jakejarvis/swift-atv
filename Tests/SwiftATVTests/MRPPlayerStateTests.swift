@@ -123,7 +123,7 @@ final class MRPPlayerStateTests: XCTestCase {
 
     func testDeviceInformationMessageSerializesWithExtension() throws {
         let settings = ATVSettings(
-            info: InfoSettings(name: "Clicker", remotePairingID: "remote-id")
+            clientIdentity: ClientIdentitySettings(name: "Clicker", pairingIdentifier: "remote-id")
         )
 
         let message = MRPMessages.deviceInformation(settings: settings)

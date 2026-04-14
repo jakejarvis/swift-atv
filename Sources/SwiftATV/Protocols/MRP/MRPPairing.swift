@@ -29,8 +29,10 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
         self.config = config
         self._service = service
         self.connection = connection
-        self.setup = HAPPairSetupHandler()
         self.settings = settings
+        self.setup = HAPPairSetupHandler(
+            clientIdentifier: Data(settings.clientIdentity.pairingIdentifier.utf8)
+        )
     }
 
     /// Create a direct-MRP pairing handler.
@@ -74,7 +76,7 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
 
         let m3 = try setup.m3(fromResponse: m2Data, pin: pin)
         let m4 = try await exchange(m3)
-        let m5 = try setup.m5(fromResponse: m4, displayName: settings.info.name)
+        let m5 = try setup.m5(fromResponse: m4, displayName: settings.clientIdentity.name)
         let m6 = try await exchange(m5)
         try setup.finish(fromResponse: m6)
 

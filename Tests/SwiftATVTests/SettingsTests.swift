@@ -9,7 +9,11 @@ final class SettingsTests: XCTestCase {
 
     func testSettingsDefaults() {
         let settings = ATVSettings()
-        XCTAssertNil(settings.info.name)
+        XCTAssertEqual(settings.clientIdentity.name, "SwiftATV")
+        XCTAssertEqual(settings.clientIdentity.macAddress, "02:73:77:69:66:74")
+        XCTAssertEqual(settings.clientIdentity.model, "iPhone10,6")
+        XCTAssertEqual(settings.clientIdentity.deviceID, "FF:70:79:61:74:76")
+        XCTAssertFalse(settings.clientIdentity.pairingIdentifier.isEmpty)
         XCTAssertNil(settings.protocols.companion.credentials)
         XCTAssertNil(settings.protocols.mrp.credentials)
         XCTAssertNil(settings.protocols.airplay.credentials)
@@ -20,8 +24,9 @@ final class SettingsTests: XCTestCase {
         settings.protocols.companion.credentials = "test-cred"
         settings.protocols.airplay.airPlayVersion = .v2
         settings.protocols.airplay.mrpTunnelMode = .force
-        settings.info.name = "My Device"
-        settings.info.model = .gen4K
+        settings.clientIdentity.name = "My Device"
+        settings.clientIdentity.model = "iPhone15,2"
+        settings.clientIdentity.pairingIdentifier = "remote-id"
 
         let data = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(ATVSettings.self, from: data)
@@ -29,8 +34,9 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.protocols.companion.credentials, "test-cred")
         XCTAssertEqual(decoded.protocols.airplay.airPlayVersion, .v2)
         XCTAssertEqual(decoded.protocols.airplay.mrpTunnelMode, .force)
-        XCTAssertEqual(decoded.info.name, "My Device")
-        XCTAssertEqual(decoded.info.model, .gen4K)
+        XCTAssertEqual(decoded.clientIdentity.name, "My Device")
+        XCTAssertEqual(decoded.clientIdentity.model, "iPhone15,2")
+        XCTAssertEqual(decoded.clientIdentity.pairingIdentifier, "remote-id")
     }
 
     // MARK: - Credentials accessor
@@ -66,10 +72,19 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.mrpTunnelMode, .auto)
     }
 
-    func testInfoSettingsRemotePairingID() {
-        let settings = InfoSettings()
-        // Remote pairing ID should be auto-generated
-        XCTAssertNotNil(settings.remotePairingID)
+    func testClientIdentitySettingsPairingIdentifier() {
+        let settings = ClientIdentitySettings()
+        XCTAssertFalse(settings.pairingIdentifier.isEmpty)
+    }
+
+    func testClientIdentityDefaultsWhenDecodingMissingFields() throws {
+        let data = "{}".data(using: .utf8)!
+        let settings = try JSONDecoder().decode(ClientIdentitySettings.self, from: data)
+
+        XCTAssertEqual(settings.name, "SwiftATV")
+        XCTAssertEqual(settings.macAddress, "02:73:77:69:66:74")
+        XCTAssertEqual(settings.deviceID, "FF:70:79:61:74:76")
+        XCTAssertFalse(settings.pairingIdentifier.isEmpty)
     }
 
     // MARK: - AirPlayVersion and MrpTunnelMode codable

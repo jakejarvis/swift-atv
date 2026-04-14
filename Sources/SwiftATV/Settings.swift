@@ -65,31 +65,80 @@ public struct MrpSettings: Codable, Sendable {
     }
 }
 
-// MARK: - Info Settings
+// MARK: - Client Identity Settings
 
-/// General device identification settings.
-public struct InfoSettings: Codable, Sendable {
-    public var name: String?
-    public var macAddress: String?
-    public var model: DeviceModel?
-    public var deviceID: String?
-    public var remotePairingID: String?
-    public var operatingSystem: OperatingSystem?
+/// Local controller identity sent to Apple TV protocols.
+///
+/// These values describe the app or controller running SwiftATV, not the
+/// target Apple TV. They are used in Companion `_systemInfo`, MRP device-info
+/// messages, AirPlay client-info payloads, and pair-setup display names.
+public struct ClientIdentitySettings: Codable, Sendable {
+    public static let defaultName = "SwiftATV"
+    public static let defaultMacAddress = "02:73:77:69:66:74"
+    public static let defaultModel = "iPhone10,6"
+    public static let defaultDeviceID = "FF:70:79:61:74:76"
+    public static let defaultOperatingSystemName = "iPhone OS"
+    public static let defaultOperatingSystemBuild = "18G82"
+    public static let defaultOperatingSystemVersion = "14.7.1"
+
+    public var name: String
+    public var macAddress: String
+    public var model: String
+    public var deviceID: String
+    public var pairingIdentifier: String
+    public var operatingSystemName: String
+    public var operatingSystemBuild: String
+    public var operatingSystemVersion: String
 
     public init(
-        name: String? = nil,
-        macAddress: String? = nil,
-        model: DeviceModel? = nil,
-        deviceID: String? = nil,
-        remotePairingID: String? = nil,
-        operatingSystem: OperatingSystem? = nil
+        name: String = ClientIdentitySettings.defaultName,
+        macAddress: String = ClientIdentitySettings.defaultMacAddress,
+        model: String = ClientIdentitySettings.defaultModel,
+        deviceID: String = ClientIdentitySettings.defaultDeviceID,
+        pairingIdentifier: String? = nil,
+        operatingSystemName: String = ClientIdentitySettings.defaultOperatingSystemName,
+        operatingSystemBuild: String = ClientIdentitySettings.defaultOperatingSystemBuild,
+        operatingSystemVersion: String = ClientIdentitySettings.defaultOperatingSystemVersion
     ) {
         self.name = name
         self.macAddress = macAddress
         self.model = model
         self.deviceID = deviceID
-        self.remotePairingID = remotePairingID ?? UUID().uuidString
-        self.operatingSystem = operatingSystem
+        self.pairingIdentifier = pairingIdentifier ?? UUID().uuidString
+        self.operatingSystemName = operatingSystemName
+        self.operatingSystemBuild = operatingSystemBuild
+        self.operatingSystemVersion = operatingSystemVersion
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case macAddress
+        case model
+        case deviceID
+        case pairingIdentifier
+        case operatingSystemName
+        case operatingSystemBuild
+        case operatingSystemVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? Self.defaultName
+        self.macAddress = try container.decodeIfPresent(String.self, forKey: .macAddress) ?? Self.defaultMacAddress
+        self.model = try container.decodeIfPresent(String.self, forKey: .model) ?? Self.defaultModel
+        self.deviceID = try container.decodeIfPresent(String.self, forKey: .deviceID) ?? Self.defaultDeviceID
+        self.pairingIdentifier =
+            try container.decodeIfPresent(String.self, forKey: .pairingIdentifier)
+            ?? UUID().uuidString
+        self.operatingSystemName =
+            try container.decodeIfPresent(String.self, forKey: .operatingSystemName)
+            ?? Self.defaultOperatingSystemName
+        self.operatingSystemBuild =
+            try container.decodeIfPresent(String.self, forKey: .operatingSystemBuild)
+            ?? Self.defaultOperatingSystemBuild
+        self.operatingSystemVersion =
+            try container.decodeIfPresent(String.self, forKey: .operatingSystemVersion)
+            ?? Self.defaultOperatingSystemVersion
     }
 }
 
@@ -114,17 +163,32 @@ public struct ProtocolSettings: Codable, Sendable {
 
 // MARK: - ATV Settings
 
-/// Top-level settings for a device, combining identification and protocol settings.
+/// Top-level settings for a device, combining local controller identity and protocol settings.
 public struct ATVSettings: Codable, Sendable {
-    public var info: InfoSettings
+    public var clientIdentity: ClientIdentitySettings
     public var protocols: ProtocolSettings
 
     public init(
-        info: InfoSettings = InfoSettings(),
+        clientIdentity: ClientIdentitySettings = ClientIdentitySettings(),
         protocols: ProtocolSettings = ProtocolSettings()
     ) {
-        self.info = info
+        self.clientIdentity = clientIdentity
         self.protocols = protocols
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case clientIdentity
+        case protocols
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.clientIdentity =
+            try container.decodeIfPresent(ClientIdentitySettings.self, forKey: .clientIdentity)
+            ?? ClientIdentitySettings()
+        self.protocols =
+            try container.decodeIfPresent(ProtocolSettings.self, forKey: .protocols)
+            ?? ProtocolSettings()
     }
 
     /// Get credentials for a specific protocol.

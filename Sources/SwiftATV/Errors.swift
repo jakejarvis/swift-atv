@@ -1,12 +1,28 @@
 import Foundation
 
+/// A protocol setup failure recorded during automatic connection fallback.
+public struct ConnectionAttemptError: Sendable {
+    public let `protocol`: ATVProtocol
+    public let port: Int
+    public let error: ATVError
+
+    public init(protocol: ATVProtocol, port: Int, error: ATVError) {
+        self.protocol = `protocol`
+        self.port = port
+        self.error = error
+    }
+}
+
 /// Errors that can occur when interacting with Apple TV devices.
-public enum ATVError: Error, LocalizedError, Sendable {
+public indirect enum ATVError: Error, LocalizedError, Sendable {
     /// No service found for the requested protocol.
     case noService(String)
 
     /// Failed to establish connection to device.
-    case connectionFailed(String)
+    ///
+    /// `attempts` is populated when automatic connection setup exhausts every
+    /// usable protocol without connecting.
+    case connectionFailed(message: String, attempts: [ConnectionAttemptError] = [])
 
     /// Connection to device was lost.
     case connectionLost(String)
@@ -64,7 +80,12 @@ public enum ATVError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .noService(let msg): return "No service: \(msg)"
-        case .connectionFailed(let msg): return "Connection failed: \(msg)"
+        case .connectionFailed(let msg, let attempts):
+            if attempts.isEmpty {
+                return "Connection failed: \(msg)"
+            }
+            let details = attempts.map(Self.describeAttempt).joined(separator: "; ")
+            return "Connection failed: \(msg) (\(details))"
         case .connectionLost(let msg): return "Connection lost: \(msg)"
         case .pairingFailed(let msg): return "Pairing failed: \(msg)"
         case .authenticationFailed(let msg): return "Authentication failed: \(msg)"
@@ -91,5 +112,10 @@ public enum ATVError: Error, LocalizedError, Sendable {
     public static func wrap(_ error: Error) -> ATVError {
         if let atv = error as? ATVError { return atv }
         return .internalError(String(describing: error))
+    }
+
+    private static func describeAttempt(_ attempt: ConnectionAttemptError) -> String {
+        let message = attempt.error.errorDescription ?? String(describing: attempt.error)
+        return "\(attempt.protocol): \(message)"
     }
 }

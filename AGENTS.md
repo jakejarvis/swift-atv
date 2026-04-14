@@ -25,7 +25,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > AirPlay > Companion)
-- **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (direct MRP > AirPlay-tunneled MRP > Companion) and falls back across unfiltered failures. Explicit `.mrp` stays strict; explicit `.airPlay` opens the tunnel.
+- **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (direct MRP > AirPlay-tunneled MRP > Companion), returns after the first usable protocol connects, and aggregates per-protocol errors if none connect. Explicit `.mrp` stays strict; explicit `.airPlay` opens the tunnel.
 - **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
@@ -38,7 +38,8 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   - `Interfaces.swift` -- Swift protocol definitions (`RemoteControl`, `AppleTVDevice`, etc.)
   - `Configuration.swift` -- `AppleTVConfiguration` and `ServiceInfo`
   - `DiscoveryIdentifiers.swift` -- Bonjour TXT identifier lookup priority
-  - `Errors.swift` -- `ATVError` (all public API is `throws(ATVError)`)
+  - `Errors.swift` -- `ATVError` and `ConnectionAttemptError` (all public API is `throws(ATVError)`)
+  - `Settings.swift` -- `ATVSettings`, local `ClientIdentitySettings`, and protocol-specific credential settings
   - `Support/` -- Binary codecs: OPACK, TLV8, BinaryPlistArchive, ChaCha20-Poly1305, AirPlay HAP session encryption
   - `Core/` -- Relayer, Facade, Scanner (NWBrowser plus NetService TXT resolution with identifier-first merge and diagnostics), MessageDispatcher
   - `Auth/`
@@ -68,6 +69,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   because consumers use `SwiftATV` as the module qualifier.
 - All public types conform to `Sendable`
 - `ATVProtocol` only contains supported connection/pairing surfaces; do not add compatibility-only protocol cases without implementation
+- `ATVSettings.clientIdentity` is the local controller/app identity sent to Apple TV protocols. Do not copy the target Apple TV's identifiers into it; connect and pair validate against that mistake.
 - `Codable` on all settings/config types for JSON persistence
 - `AsyncStream` replaces Python callback-based listeners
 
@@ -126,13 +128,14 @@ Most tests are ported from pyatv's test suite (XCTest):
   model/version metadata coverage.
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
 - `CompanionServiceTests.swift` -- Companion setup resilience when `_touchStart`
-  times out after required setup succeeds.
+  times out after credentialed pair-verify and required setup succeeds.
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
   Companion identifier extraction, NetService TXT resolver path, scan timeout
   validation, diagnostics, and identifier-first scan-result merging.
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
-  malformed-credential, deterministic-priority, service-credential,
-  mandatory-credential, and fallback service setup.
+  malformed-credential, deterministic first-usable priority, service-credential,
+  mandatory-credential, Companion credential requirements, aggregate failures,
+  and client-identity collision checks.
 - `FacadeEventTests.swift` -- facade connection-closed and connection-lost
   event propagation.
 - `TimingTests.swift` -- shared timeout-to-nanoseconds conversion guards.

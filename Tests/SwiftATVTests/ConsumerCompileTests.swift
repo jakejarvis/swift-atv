@@ -14,7 +14,8 @@ final class ConsumerCompileTests: XCTestCase {
             name: "Living Room",
             services: [service]
         )
-        let settings = SwiftATV.ATVSettings()
+        let identity = SwiftATV.ClientIdentitySettings(name: "Clicker")
+        let settings = SwiftATV.ATVSettings(clientIdentity: identity)
 
         XCTAssertFalse(ATVClient.version.isEmpty)
         XCTAssertNotNil(
@@ -25,6 +26,7 @@ final class ConsumerCompileTests: XCTestCase {
         )
         XCTAssertEqual(config.service(for: protocolName)?.port, SwiftATV.ServiceInfo.defaultMRPPort)
         XCTAssertNil(settings.credentials(for: protocolName))
+        XCTAssertEqual(settings.clientIdentity.name, "Clicker")
     }
 
     func testFacadeFunctionReferencesCompileForConsumers() {

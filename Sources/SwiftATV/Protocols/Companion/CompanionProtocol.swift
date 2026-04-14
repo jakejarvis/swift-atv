@@ -272,11 +272,11 @@ public actor CompanionProtocolHandler {
     public func sendSystemInfo(
         name: String = "SwiftATV",
         model: String = "iPhone14,2",
-        remotePairingID: String? = nil,
+        pairingIdentifier: String? = nil,
         clientID: String? = nil,
         deviceID: String? = nil
     ) async throws(ATVError) {
-        let rpID = remotePairingID ?? UUID().uuidString
+        let rpID = pairingIdentifier ?? UUID().uuidString
         let idsID = clientID ?? UUID().uuidString
         let pubID = deviceID ?? UUID().uuidString
 

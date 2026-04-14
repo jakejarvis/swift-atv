@@ -2,17 +2,27 @@
     import Foundation
     import Network
     import XCTest
+    #if canImport(CryptoKit)
+        import CryptoKit
+    #else
+        import Crypto
+    #endif
 
     @testable import SwiftATV
 
     final class CompanionServiceTests: XCTestCase {
         func testTouchStartTimeoutDoesNotFailSetup() async throws {
-            let server = try await FakeCompanionServer.start(ignoredRequests: ["_touchStart"])
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(
+                ignoredRequests: ["_touchStart"],
+                pairVerify: pairVerify.responder
+            )
             defer { server.stop() }
 
             let service = CompanionService(
                 host: "127.0.0.1",
                 port: server.port,
+                credentials: pairVerify.credentials,
                 touchStartTimeout: 0.05
             )
 
@@ -40,8 +50,11 @@
         private let listener: NWListener
         private let queue = DispatchQueue(label: "SwiftATVTests.FakeCompanionServer")
         private let ignoredRequests: Set<String>
+        private let pairVerify: FakePairVerifyResponder?
         private let lock = NSLock()
         private var connection: NWConnection?
+        private var pendingCipher: ChaCha20Cipher?
+        private var cipher: ChaCha20Cipher?
         private var _requests: [String] = []
 
         var port: Int {
@@ -52,14 +65,18 @@
             lock.withLock { _requests }
         }
 
-        static func start(ignoredRequests: Set<String> = []) async throws -> FakeCompanionServer {
-            let server = try FakeCompanionServer(ignoredRequests: ignoredRequests)
+        static func start(
+            ignoredRequests: Set<String> = [],
+            pairVerify: FakePairVerifyResponder? = nil
+        ) async throws -> FakeCompanionServer {
+            let server = try FakeCompanionServer(ignoredRequests: ignoredRequests, pairVerify: pairVerify)
             try await server.start()
             return server
         }
 
-        private init(ignoredRequests: Set<String>) throws {
+        private init(ignoredRequests: Set<String>, pairVerify: FakePairVerifyResponder?) throws {
             self.ignoredRequests = ignoredRequests
+            self.pairVerify = pairVerify
             self.listener = try NWListener(using: .tcp, on: .any)
         }
 
@@ -74,7 +91,10 @@
                     case .failed(let error):
                         resume.resume(throwing: error)
                     case .cancelled:
-                        resume.resume(throwing: ATVError.connectionFailed("Fake Companion server cancelled"))
+                        resume.resume(
+                            throwing: ATVError.connectionFailed(
+                                message: "Fake Companion server cancelled"
+                            ))
                     default:
                         break
                     }
@@ -118,7 +138,9 @@
 
         private func processFrames(in buffer: inout Data, connection: NWConnection) {
             while buffer.count >= 4 {
-                let header = Array(buffer.prefix(4))
+                let headerData = Data(buffer.prefix(4))
+                let header = Array(headerData)
+                let frameType = CompanionFrameType(rawValue: header[0]) ?? .unknown
                 let length =
                     (Int(header[1]) << 16)
                     | (Int(header[2]) << 8)
@@ -127,13 +149,63 @@
                     return
                 }
 
-                let payload = Data(buffer.dropFirst(4).prefix(length))
+                let wirePayload = Data(buffer.dropFirst(4).prefix(length))
                 buffer.removeSubrange(buffer.startIndex..<buffer.index(buffer.startIndex, offsetBy: 4 + length))
-                handlePayload(payload, connection: connection)
+                let payload: Data
+                do {
+                    if let cipher = lock.withLock({ self.cipher }), !wirePayload.isEmpty {
+                        payload = try cipher.decrypt(wirePayload, aad: headerData)
+                    } else {
+                        payload = wirePayload
+                    }
+                } catch {
+                    return
+                }
+                handleFrame(type: frameType, payload: payload, connection: connection)
             }
         }
 
-        private func handlePayload(_ payload: Data, connection: NWConnection) {
+        private func handleFrame(type: CompanionFrameType, payload: Data, connection: NWConnection) {
+            switch type {
+            case .pvStart:
+                handlePairVerifyStart(payload, connection: connection)
+            case .pvNext:
+                handlePairVerifyNext(payload, connection: connection)
+            case .eOPACK:
+                handleOPACKPayload(payload, connection: connection)
+            default:
+                break
+            }
+        }
+
+        private func handlePairVerifyStart(_ payload: Data, connection: NWConnection) {
+            guard let pairVerify else { return }
+            do {
+                let result = try pairVerify.startResponse(for: payload)
+                lock.withLock {
+                    pendingCipher = result.cipher
+                }
+                sendFrame(type: .pvNext, payload: result.payload, connection: connection)
+            } catch {
+                return
+            }
+        }
+
+        private func handlePairVerifyNext(_ payload: Data, connection: NWConnection) {
+            guard let pairVerify else { return }
+            do {
+                let response = try pairVerify.finishResponse(for: payload)
+                sendFrame(type: .pvNext, payload: response, connection: connection)
+                lock.withLock {
+                    cipher = pendingCipher
+                    pendingCipher = nil
+                }
+            } catch {
+                return
+            }
+        }
+
+        private func handleOPACKPayload(_ payload: Data, connection: NWConnection) {
             guard
                 let message = try? OPACK.decode(payload),
                 let identifier = message["_i"]?.stringValue
@@ -176,15 +248,138 @@
                 ("_c", content),
             ])
             let payload = OPACK.encode(response)
+            sendFrame(type: .eOPACK, payload: payload, connection: connection)
+        }
 
-            var frame = Data()
-            frame.append(CompanionFrameType.eOPACK.rawValue)
-            frame.append(UInt8((payload.count >> 16) & 0xFF))
-            frame.append(UInt8((payload.count >> 8) & 0xFF))
-            frame.append(UInt8(payload.count & 0xFF))
-            frame.append(payload)
+        private func sendFrame(type: CompanionFrameType, payload: Data, connection: NWConnection) {
+            let cipher = lock.withLock { self.cipher }
+            let wireLength = payload.count + ((cipher != nil && !payload.isEmpty) ? 16 : 0)
 
-            connection.send(content: frame, completion: .contentProcessed { _ in })
+            var header = Data()
+            header.append(type.rawValue)
+            header.append(UInt8((wireLength >> 16) & 0xFF))
+            header.append(UInt8((wireLength >> 8) & 0xFF))
+            header.append(UInt8(wireLength & 0xFF))
+
+            let wirePayload: Data
+            do {
+                if let cipher, !payload.isEmpty {
+                    wirePayload = try cipher.encrypt(payload, aad: header)
+                } else {
+                    wirePayload = payload
+                }
+            } catch {
+                return
+            }
+
+            connection.send(content: header + wirePayload, completion: .contentProcessed { _ in })
+        }
+    }
+
+    private struct FakePairVerifyFixture {
+        let credentials: HAPCredentials
+        let responder: FakePairVerifyResponder
+
+        init() {
+            let serverSigningKey = Curve25519.Signing.PrivateKey()
+            let clientSigningKey = Curve25519.Signing.PrivateKey()
+            let atvIdentifier = Data("fake-atv".utf8)
+            let clientIdentifier = Data("fake-client".utf8)
+
+            self.credentials = HAPCredentials(
+                ltpk: Data(serverSigningKey.publicKey.rawRepresentation),
+                ltsk: Data(clientSigningKey.rawRepresentation),
+                atvIdentifier: atvIdentifier,
+                clientIdentifier: clientIdentifier
+            )
+            self.responder = FakePairVerifyResponder(
+                identifier: atvIdentifier,
+                signingKey: serverSigningKey
+            )
+        }
+    }
+
+    private final class FakePairVerifyResponder: @unchecked Sendable {
+        private let identifier: Data
+        private let signingKey: Curve25519.Signing.PrivateKey
+        private let lock = NSLock()
+        private var sessionKey: Data?
+
+        init(identifier: Data, signingKey: Curve25519.Signing.PrivateKey) {
+            self.identifier = identifier
+            self.signingKey = signingKey
+        }
+
+        func startResponse(for payload: Data) throws(ATVError) -> (payload: Data, cipher: ChaCha20Cipher) {
+            let innerTLV = try unwrapCompanionAuthEnvelope(payload)
+            let request = try TLV8.decodeStrict(innerTLV)
+            guard let clientPublicKey = request[TLVTag.publicKey.rawValue] else {
+                throw ATVError.invalidResponse("Pair-verify start missing client public key")
+            }
+
+            let serverPrivateKey = Curve25519.KeyAgreement.PrivateKey()
+            let serverPublicKey = Data(serverPrivateKey.publicKey.rawRepresentation)
+            let sharedSecret: Data
+            do {
+                sharedSecret = try SRPAuthHandler.sharedSecret(
+                    privateKey: serverPrivateKey,
+                    peerPublicKey: clientPublicKey
+                )
+            } catch {
+                throw ATVError.wrap(error)
+            }
+            let sessionKey = hkdfExpand(
+                salt: "Pair-Verify-Encrypt-Salt",
+                info: "Pair-Verify-Encrypt-Info",
+                sharedSecret: sharedSecret
+            )
+
+            var deviceInfo = Data()
+            deviceInfo.append(serverPublicKey)
+            deviceInfo.append(identifier)
+            deviceInfo.append(clientPublicKey)
+            let signature: Data
+            do {
+                signature = Data(try signingKey.signature(for: deviceInfo))
+            } catch {
+                throw ATVError.wrap(error)
+            }
+            let proof = TLV8.encode([
+                TLV8.Entry(tag: .identifier, data: identifier),
+                TLV8.Entry(tag: .signature, data: signature),
+            ])
+            let encrypted = try hapEncrypt(proof, key: sessionKey, nonce: hapNonce("PV-Msg02"))
+            let response = TLV8.encode([
+                TLV8.Entry(tag: .state, value: 2),
+                TLV8.Entry(tag: .publicKey, data: serverPublicKey),
+                TLV8.Entry(tag: .encryptedData, data: encrypted),
+            ])
+
+            lock.withLock {
+                self.sessionKey = sessionKey
+            }
+
+            let outputKey = hkdfExpand(salt: "", info: "ClientEncrypt-main", sharedSecret: sharedSecret)
+            let inputKey = hkdfExpand(salt: "", info: "ServerEncrypt-main", sharedSecret: sharedSecret)
+            let cipher = ChaCha20Cipher(encryptKey: inputKey, decryptKey: outputKey)
+            return (wrapCompanionAuthEnvelope(innerTLV: response), cipher)
+        }
+
+        func finishResponse(for payload: Data) throws(ATVError) -> Data {
+            let innerTLV = try unwrapCompanionAuthEnvelope(payload)
+            let request = try TLV8.decodeStrict(innerTLV)
+            guard
+                let encryptedData = request[TLVTag.encryptedData.rawValue],
+                let sessionKey = lock.withLock({ self.sessionKey })
+            else {
+                throw ATVError.invalidResponse("Pair-verify finish missing encrypted proof")
+            }
+
+            _ = try hapDecrypt(encryptedData, key: sessionKey, nonce: hapNonce("PV-Msg03"))
+            let response = TLV8.encode([
+                TLV8.Entry(tag: .state, value: 4)
+            ])
+            return wrapCompanionAuthEnvelope(innerTLV: response)
         }
     }
 

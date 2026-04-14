@@ -13,7 +13,12 @@ HAP pairing; AirPlay 2 can pair with HAP and tunnel MRP remote-control traffic
 when direct MRP is unavailable; Companion provides modern app, keyboard text
 input/focus, best-effort touch, power, audio-volume, and remote-control
 support. Connection setup is deterministic for implemented control protocols
-(direct MRP, then AirPlay-tunneled MRP, then Companion).
+(direct MRP, then AirPlay-tunneled MRP, then Companion) and returns as soon as
+one usable protocol connects.
+
+``ATVSettings/clientIdentity`` describes the local controller or app identity
+sent during pairing and protocol setup. It must not be copied from the target
+Apple TV's identifiers.
 
 Discovery resolves Bonjour TXT records with each live service, merges services
 by stable device identifiers, including Companion-only TXT identifiers, and can
@@ -90,6 +95,12 @@ await atv.close()
 ### Protocols
 
 - ``ATVProtocol``
+- ``ATVSettings``
+- ``ClientIdentitySettings``
+- ``ProtocolSettings``
+- ``AirPlaySettings``
+- ``CompanionSettings``
+- ``MrpSettings``
 - ``AirPlayVersion``
 - ``MrpTunnelMode``
 - ``CompanionService``
@@ -126,3 +137,4 @@ await atv.close()
 ### Errors
 
 - ``ATVError``
+- ``ConnectionAttemptError``

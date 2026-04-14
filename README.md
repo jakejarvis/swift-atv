@@ -17,6 +17,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures when Companion touch setup is available
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
+- **Local Client Identity** -- Configure the controller/app identity sent during pairing and protocol setup with `ATVSettings.clientIdentity`
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
 - **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion
 
@@ -148,7 +149,14 @@ await atv.close()
 ### Pair with a Device
 
 ```swift
-let handler = try await ATVClient.pair(device, protocol: .companion)
+var settings = ATVSettings()
+settings.clientIdentity.name = "Clicker"
+
+let handler = try await ATVClient.pair(
+    device,
+    protocol: .companion,
+    settings: settings
+)
 
 // Start the handshake. Current Companion and MRP flows display a PIN on screen.
 try await handler.begin()
@@ -167,7 +175,8 @@ try await handler.finish()
 
 // Pull the HAP long-term credentials and persist them. On the next connection,
 // load them into ATVSettings (or enrich ServiceInfo.credentials) so SwiftATV
-// uses pair-verify instead of pair-setup.
+// uses pair-verify instead of pair-setup. Companion connections always
+// require credentials.
 if let identifier = device.mainIdentifier,
    let credentials = handler.serializedCredentials
 {
@@ -180,16 +189,20 @@ await handler.close()
 Use `.mrp` instead of `.companion` to pair against the direct Media Remote
 Protocol service. Use `.airPlay` to pair for AirPlay 2 HAP credentials used by
 the MRP tunnel. Persist the returned credentials under the matching protocol by
-calling `settings.setCredentials(handler.serializedCredentials, for: .mrp)` or
+calling `settings.setCredentials(handler.serializedCredentials, for: .companion)`,
+`settings.setCredentials(handler.serializedCredentials, for: .mrp)`, or
 `settings.setCredentials(handler.serializedCredentials, for: .airPlay)`.
 
-`ATVClient.connect` tries enabled services in deterministic setup order:
-direct MRP, then AirPlay 2 MRP tunnel when direct MRP is unavailable or fails,
-then Companion. Explicit `protocol: .mrp` stays strict and does not fall back to
-the tunnel; explicit `protocol: .airPlay` opens the tunnel. The tunnel uses
-AirPlay credentials first, then Companion credentials when AirPlay credentials
-are absent. When both settings and a service contain credentials for the same
-protocol, `ATVSettings` wins.
+`ATVClient.connect` tries enabled services in deterministic setup order and
+returns as soon as the first usable protocol connects: direct MRP, then the
+AirPlay 2 MRP tunnel, then Companion. Explicit `protocol: .mrp` stays strict
+and does not fall back to the tunnel; explicit `protocol: .airPlay` opens the
+tunnel. The tunnel uses AirPlay credentials first, then Companion credentials
+when AirPlay credentials are absent. Companion always requires credentials.
+When both settings and a service contain credentials for the same protocol,
+`ATVSettings` wins.
+When auto-connect exhausts all options, the thrown `ATVError.connectionFailed`
+contains `ConnectionAttemptError` entries for every attempted protocol.
 
 ### Check Feature Availability
 
@@ -231,8 +244,8 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 ```
 
 **Relayer priority order**: MRP > AirPlay > Companion.
-Connection setup uses direct MRP first, AirPlay-tunneled MRP as the MRP fallback,
-then Companion.
+Connection setup returns after the first usable protocol connects: direct MRP
+first, AirPlay-tunneled MRP next, then Companion.
 
 ### Protocols
 
@@ -248,10 +261,10 @@ then Companion.
 Sources/SwiftATV/
 ├── ATVClient.swift              # Public API: scan(), scanWithDiagnostics(), connect(), pair()
 ├── Constants.swift              # All enums (ATVProtocol, FeatureName, etc.)
-├── Errors.swift                 # ATVError + wrap() factory
+├── Errors.swift                 # ATVError, ConnectionAttemptError + wrap() factory
 ├── Interfaces.swift             # Swift protocols (all throws(ATVError))
 ├── Configuration.swift          # AppleTVConfiguration, ServiceInfo
-├── Settings.swift               # Per-protocol settings (Codable)
+├── Settings.swift               # Local client identity + per-protocol settings (Codable)
 ├── DeviceInfo.swift             # Device model/OS lookup tables
 ├── DiscoveryIdentifiers.swift   # Bonjour TXT identifier lookup priority
 ├── SwiftATV.docc/               # DocC catalog
@@ -303,7 +316,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 286 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 292 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -314,10 +327,10 @@ takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
 Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
-resolution, scan diagnostics, identity merging, deterministic connect
-fallback/credential selection including AirPlay tunnel ordering, Companion
-touch-start timeout resilience, facade device events, timeout conversion,
-strict TLV8 auth decoding,
+resolution, scan diagnostics, identity merging, deterministic first-usable
+connect, aggregate connection errors, credential selection including AirPlay
+tunnel ordering, Companion touch-start timeout resilience, facade device
+events, timeout conversion, strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, consumer-style module-qualified
 imports, pairing code direction, and `MessageDispatcher` actor behavior.
 

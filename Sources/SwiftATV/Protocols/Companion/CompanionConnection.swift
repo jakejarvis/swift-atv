@@ -209,7 +209,7 @@ public final class CompanionConnection: @unchecked Sendable {
         case .closed:
             throw ATVError.connectionLost("Connection has been closed")
         case .notConnected:
-            throw ATVError.connectionFailed("Not connected")
+            throw ATVError.connectionFailed(message: "Not connected")
         case .ready(let ch, let cph):
             channel = ch
             currentCipher = cph

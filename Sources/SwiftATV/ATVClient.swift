@@ -109,11 +109,13 @@ public enum ATVClient {
     ///
     /// Without an explicit protocol, implemented control protocols are tried
     /// in deterministic order: direct MRP, then AirPlay-tunneled MRP when
-    /// direct MRP is unavailable or fails, then Companion. Setup falls back
-    /// past failed services until at least one protocol connects. If
-    /// `settings` does not contain credentials for a protocol,
-    /// `ServiceInfo.credentials` is used as a fallback. The AirPlay tunnel
-    /// tries AirPlay credentials first and Companion credentials second.
+    /// direct MRP is unavailable or fails, then Companion. The method returns
+    /// as soon as the first usable protocol connects. If all automatic
+    /// attempts fail, the thrown `.connectionFailed` contains the attempted
+    /// protocols and their underlying errors. If `settings` does not contain
+    /// credentials for a protocol, `ServiceInfo.credentials` is used as a
+    /// fallback. The AirPlay tunnel tries AirPlay credentials first and
+    /// Companion credentials second. Companion requires credentials.
     ///
     /// - Parameters:
     ///   - config: Device configuration obtained from scanning or manually created.
@@ -145,25 +147,22 @@ public enum ATVClient {
             throw ATVError.noService("No enabled services in configuration")
         }
 
+        try validateClientIdentity(settings: deviceSettings, for: config)
+
         let prioritizedServices = selectedServices.prioritizedForConnect()
         let facade = FacadeAppleTV(
             configuration: config,
             settings: deviceSettings
         )
 
-        var setupCount = 0
-        var bestError: ATVError?
+        var attempts: [ConnectionAttemptError] = []
         let requestedSpecificProtocol = `protocol` != nil
-        var directMRPConnected = false
 
         for service in prioritizedServices {
             do {
                 let credentials: HAPCredentials?
                 var airPlayCredentialCandidates: [HAPCredentials]?
                 if service.protocol == .airPlay {
-                    if !requestedSpecificProtocol, directMRPConnected {
-                        continue
-                    }
                     let candidates = try resolvedAirPlayTunnelCredentialCandidates(
                         for: service,
                         configuration: config,
@@ -181,6 +180,9 @@ public enum ATVClient {
                     airPlayCredentialCandidates = candidates
                 } else {
                     credentials = try resolvedCredentials(for: service, settings: deviceSettings)
+                    if service.protocol == .companion, credentials == nil {
+                        throw ATVError.noCredentials("Companion requires pairing credentials")
+                    }
                     if service.pairingRequirement == .mandatory, credentials == nil {
                         throw ATVError.noCredentials(
                             "\(service.protocol) service requires pairing credentials"
@@ -196,39 +198,25 @@ public enum ATVClient {
                 } else {
                     try await setupProtocol(facade, service: service, credentials: credentials)
                 }
-                setupCount += 1
-                if service.protocol == .mrp {
-                    directMRPConnected = true
-                }
+                return facade
             } catch let error as ATVError {
                 if requestedSpecificProtocol {
                     await facade.close()
                     throw error
                 }
-                if setupCount == 0, bestError == nil {
-                    bestError = error
-                }
+                attempts.append(ConnectionAttemptError(protocol: service.protocol, port: service.port, error: error))
             } catch {
                 let wrapped = ATVError.wrap(error)
                 if requestedSpecificProtocol {
                     await facade.close()
                     throw wrapped
                 }
-                if setupCount == 0, bestError == nil {
-                    bestError = wrapped
-                }
+                attempts.append(ConnectionAttemptError(protocol: service.protocol, port: service.port, error: wrapped))
             }
         }
 
-        guard setupCount > 0 else {
-            await facade.close()
-            if let bestError {
-                throw bestError
-            }
-            throw ATVError.noService("No usable enabled services in configuration")
-        }
-
-        return facade
+        await facade.close()
+        throw ATVError.connectionFailed(message: "No usable protocol connected", attempts: attempts)
     }
 
     /// Pair with an Apple TV device.
@@ -253,7 +241,8 @@ public enum ATVClient {
     /// Pair with an Apple TV device using explicit settings.
     ///
     /// This overload is useful for protocol-specific pairing options, such as
-    /// forcing AirPlay 2 pairing for manually constructed configurations.
+    /// forcing AirPlay 2 pairing for manually constructed configurations, and
+    /// for setting the local client identity shown in Apple TV pairing records.
     ///
     /// - Parameters:
     ///   - config: Device configuration.
@@ -273,12 +262,14 @@ public enum ATVClient {
             throw ATVError.noService("No enabled \(`protocol`) service found")
         }
         try validatePairingService(service)
+        try validateClientIdentity(settings: deviceSettings, for: config)
 
         switch `protocol` {
         case .companion:
             return try await CompanionPairingHandler.create(
                 config: config,
-                service: service
+                service: service,
+                settings: deviceSettings
             )
         case .mrp:
             return try await MRPPairingHandler.create(
@@ -391,6 +382,33 @@ public enum ATVClient {
         throw ATVError.noCredentials("AirPlay MRP tunnel requires AirPlay or Companion HAP credentials")
     }
 
+    internal static func validateClientIdentity(
+        settings: ATVSettings,
+        for configuration: AppleTVConfiguration
+    ) throws(ATVError) {
+        var targetIdentifiers = configuration.allIdentifiers
+        if let macAddress = configuration.deviceInfo.macAddress {
+            targetIdentifiers.insert(macAddress)
+        }
+        guard !targetIdentifiers.isEmpty else { return }
+
+        let identity = settings.clientIdentity
+        let clientValues: [(field: String, value: String)] = [
+            ("clientIdentity.deviceID", identity.deviceID),
+            ("clientIdentity.macAddress", identity.macAddress),
+            ("clientIdentity.pairingIdentifier", identity.pairingIdentifier),
+        ]
+
+        for clientValue in clientValues {
+            for targetIdentifier in targetIdentifiers
+            where identifiersCollide(clientValue.value, targetIdentifier) {
+                throw ATVError.settingsError(
+                    "\(clientValue.field) must identify the local controller, but matches target device identifier \(targetIdentifier)"
+                )
+            }
+        }
+    }
+
     internal static func validatePairingService(_ service: ServiceInfo) throws(ATVError) {
         switch service.pairingRequirement {
         case .mandatory, .optional:
@@ -404,6 +422,31 @@ public enum ATVClient {
         case .notNeeded:
             throw ATVError.notSupported("Pairing is not needed for \(service.protocol)")
         }
+    }
+
+    private static func identifiersCollide(_ lhs: String, _ rhs: String) -> Bool {
+        let lhs = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhs = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !lhs.isEmpty, !rhs.isEmpty else { return false }
+        if lhs == rhs { return true }
+        if let lhsMac = normalizedMAC(lhs), let rhsMac = normalizedMAC(rhs) {
+            return lhsMac == rhsMac
+        }
+        return false
+    }
+
+    private static func normalizedMAC(_ value: String) -> String? {
+        var hex = ""
+        for scalar in value.unicodeScalars {
+            if CharacterSet(charactersIn: "0123456789abcdefABCDEF").contains(scalar) {
+                hex.unicodeScalars.append(UnicodeScalar(scalar.value)!)
+            } else if scalar == ":" || scalar == "-" {
+                continue
+            } else {
+                return nil
+            }
+        }
+        return hex.count == 12 ? hex.lowercased() : nil
     }
 }
 
