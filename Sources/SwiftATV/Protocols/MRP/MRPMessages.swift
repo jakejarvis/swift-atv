@@ -182,7 +182,10 @@ enum MRPMessages {
     }
 
     static func commandOptions(
-        position: TimeInterval? = nil, shuffle: ShuffleState? = nil, repeatState: RepeatState? = nil
+        position: TimeInterval? = nil,
+        skipInterval: TimeInterval? = nil,
+        shuffle: ShuffleState? = nil,
+        repeatState: RepeatState? = nil
     )
         -> CommandOptions
     {
@@ -190,10 +193,39 @@ enum MRPMessages {
         if let position {
             options.playbackPosition = position
         }
+        if let skipInterval {
+            options.skipInterval = Float(skipInterval)
+        }
         if let shuffle {
             options.shuffleMode = shuffle.mrpShuffleMode
         }
         if let repeatState {
+            options.repeatMode = repeatState.mrpRepeatMode
+        }
+        return options
+    }
+
+    static func commandOptions(_ mediaOptions: MediaCommandOptions) -> CommandOptions {
+        var options = CommandOptions()
+        if let playbackPosition = mediaOptions.playbackPosition {
+            options.playbackPosition = playbackPosition
+        }
+        if let skipInterval = mediaOptions.skipInterval {
+            options.skipInterval = Float(skipInterval)
+        }
+        if let playbackRate = mediaOptions.playbackRate {
+            options.playbackRate = playbackRate
+        }
+        if let rating = mediaOptions.rating {
+            options.rating = rating
+        }
+        if let negative = mediaOptions.negative {
+            options.negative = negative
+        }
+        if let shuffle = mediaOptions.shuffle {
+            options.shuffleMode = shuffle.mrpShuffleMode
+        }
+        if let repeatState = mediaOptions.repeatState {
             options.repeatMode = repeatState.mrpRepeatMode
         }
         return options

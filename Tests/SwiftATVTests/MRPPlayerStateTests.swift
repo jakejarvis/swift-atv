@@ -289,9 +289,9 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(playing.hash, "item-id")
         XCTAssertEqual(playing.app, App(name: "Music", identifier: "com.apple.TVMusic"))
         let artworkID = await state.artworkID
-        let playFeatureState = await state.featureState(for: .play)
+        let playCapabilityState = await state.capabilityState(for: .play)
         XCTAssertEqual(artworkID, "artwork-id")
-        XCTAssertEqual(playFeatureState, .available)
+        XCTAssertEqual(playCapabilityState, .available)
     }
 
     // MARK: - Message Dispatcher
@@ -405,12 +405,12 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(received.values, [7, 10])
     }
 
-    func testMRPFeaturesGateAudioControlsUntilVolumeStateArrives() {
+    func testMRPCapabilitiesGateAudioControlsUntilVolumeStateArrives() {
         let stateStore = MRPStateStore()
-        let features = MRPFeatures(stateStore: stateStore)
+        let capabilities = MRPCapabilities(stateStore: stateStore)
 
-        XCTAssertEqual(features.featureInfo(.volume).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.setVolume).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volume)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
 
         var message = ProtocolMessageMessage()
         message.type = .volumeDidChangeMessage
@@ -419,13 +419,13 @@ final class MRPPlayerStateTests: XCTestCase {
         message.volumeDidChangeMessage = volume
         stateStore.update(message: message)
 
-        XCTAssertEqual(features.featureInfo(.volume).state, .available)
-        XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volume)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .available)
     }
 
     func testMRPStateStorePrefersClusterAwareOutputDeviceUpdates() {
         let stateStore = MRPStateStore()
-        let features = MRPFeatures(stateStore: stateStore)
+        let capabilities = MRPCapabilities(stateStore: stateStore)
 
         stateStore.update(
             message: Self.updateOutputDevicesMessage(
@@ -440,10 +440,10 @@ final class MRPPlayerStateTests: XCTestCase {
             stateStore.outputDevices,
             [OutputDevice(identifier: "cluster", name: "Cluster", volume: 35)]
         )
-        XCTAssertEqual(features.featureInfo(.outputDevices).state, .available)
-        XCTAssertEqual(features.featureInfo(.addOutputDevices).state, .available)
-        XCTAssertEqual(features.featureInfo(.removeOutputDevices).state, .available)
-        XCTAssertEqual(features.featureInfo(.setOutputDevices).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.outputDevices)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.addOutputDevices)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.removeOutputDevices)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setOutputDevices)).state, .available)
     }
 
     func testMRPStateStoreFallsBackToLegacyOutputDeviceUpdates() {
@@ -501,15 +501,50 @@ final class MRPPlayerStateTests: XCTestCase {
         )
     }
 
-    func testMRPFeaturesExposeOptionalSetupDiagnostics() {
+    func testMRPCapabilitiesExposeOptionalSetupDiagnostics() {
         let stateStore = MRPStateStore()
-        let features = MRPFeatures(stateStore: stateStore)
+        let capabilities = MRPCapabilities(stateStore: stateStore)
 
-        stateStore.recordSetupFailure("client updates failed", affectedFeatures: [.pushUpdates])
+        stateStore.recordSetupFailure("client updates failed", affectedCapabilities: [.push(.updates)])
 
-        let info = features.featureInfo(.pushUpdates)
+        let info = capabilities.capabilityInfo(.push(.updates))
         XCTAssertEqual(info.state, .unavailable)
         XCTAssertEqual(info.options["diagnostic"], "client updates failed")
+    }
+
+    func testMRPCapabilitiesExposeSupportedMediaCommands() {
+        let stateStore = MRPStateStore()
+        let capabilities = MRPCapabilities(stateStore: stateStore)
+
+        var play = CommandInfo()
+        play.command = .play
+        play.enabled = true
+        play.localizedTitle = "Play"
+
+        var pause = CommandInfo()
+        pause.command = .pause
+        pause.enabled = false
+
+        var queue = CommandInfo()
+        queue.command = .setPlaybackQueue
+        queue.enabled = true
+
+        var commands = SupportedCommands()
+        commands.supportedCommands = [play, pause, queue]
+
+        stateStore.update(
+            message: Self.setStateMessage(
+                title: "Title",
+                artist: "Artist",
+                album: "Album",
+                commands: commands
+            )
+        )
+
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.play)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.pause)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.setPlaybackQueue)).state, .unsupported)
+        XCTAssertEqual(stateStore.commandInfo(.play)?.localizedTitle, "Play")
     }
 
     private static func setStateMessage(

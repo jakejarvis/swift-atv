@@ -280,57 +280,52 @@ final class InterfaceTests: XCTestCase {
         XCTAssertEqual(App(name: "test", identifier: "test2"), App(name: "test", identifier: "test2"))
     }
 
-    // MARK: - Features (test_interface.py::test_features_*)
+    // MARK: - Capabilities
 
-    func testAllUnsupportedFeatures() {
-        let features = CompanionFeatures(isConnected: false)
-        let allFeats = features.allFeatures()
-        // Only non-unsupported features should be returned
-        for (_, info) in allFeats {
+    func testAllUnavailableCapabilities() {
+        let capabilities = CompanionCapabilities(isConnected: false)
+        let allCapabilities = capabilities.allCapabilities()
+        // Only non-unsupported capabilities should be returned
+        for (_, info) in allCapabilities {
             XCTAssertNotEqual(info.state, .unsupported)
         }
     }
 
-    func testAllIncludeUnsupportedFeatures() {
-        let features = CompanionFeatures(isConnected: true)
-        let allFeats = features.allFeatures(includeUnsupported: true)
+    func testAllIncludeUnsupportedCapabilities() {
+        let capabilities = CompanionCapabilities(isConnected: true)
+        let allCapabilities = capabilities.allCapabilities(includeUnsupported: true)
 
-        // Should include ALL features
-        XCTAssertEqual(allFeats.count, FeatureName.allCases.count)
+        XCTAssertEqual(allCapabilities.count, Capability.allCases.count)
     }
 
-    func testFeaturesInState() {
-        let features = CompanionFeatures(isConnected: true)
+    func testCapabilitiesInState() {
+        let capabilities = CompanionCapabilities(isConnected: true)
 
-        // Play is unsupported via companion? Actually it IS supported (playPause)
-        // Test with a known unsupported feature
-        XCTAssertFalse(features.inState([.unknown], features: .title))
-        XCTAssertTrue(features.inState([.unsupported], features: .title))
+        XCTAssertFalse(capabilities.inState([.unknown], capabilities: .metadata(.title)))
+        XCTAssertTrue(capabilities.inState([.unsupported], capabilities: .metadata(.title)))
 
-        // Test with supported features
-        XCTAssertTrue(features.inState([.available], features: .up, .down))
-        XCTAssertFalse(features.inState([.available], features: .up, .title))
+        XCTAssertTrue(capabilities.inState([.available], capabilities: .remote(.up), .remote(.down)))
+        XCTAssertFalse(capabilities.inState([.available], capabilities: .remote(.up), .metadata(.title)))
 
-        // Multiple states
-        XCTAssertTrue(features.inState([.unsupported, .available], features: .up, .title))
+        XCTAssertTrue(capabilities.inState([.unsupported, .available], capabilities: .remote(.up), .metadata(.title)))
     }
 
     func testIsAvailable() {
-        let features = CompanionFeatures(isConnected: true)
-        XCTAssertTrue(features.isAvailable(.up))
-        XCTAssertTrue(features.isAvailable(.home))
-        XCTAssertFalse(features.isAvailable(.title))
-        XCTAssertFalse(features.isAvailable(.artwork))
+        let capabilities = CompanionCapabilities(isConnected: true)
+        XCTAssertTrue(capabilities.isAvailable(.remote(.up)))
+        XCTAssertTrue(capabilities.isAvailable(.remote(.home)))
+        XCTAssertFalse(capabilities.isAvailable(.metadata(.title)))
+        XCTAssertFalse(capabilities.isAvailable(.metadata(.artwork)))
     }
 
-    // MARK: - FeatureInfo
+    // MARK: - CapabilityInfo
 
-    func testFeatureInfoCreation() {
-        let info = FeatureInfo(state: .available)
+    func testCapabilityInfoCreation() {
+        let info = CapabilityInfo(state: .available)
         XCTAssertEqual(info.state, .available)
         XCTAssertTrue(info.options.isEmpty)
 
-        let info2 = FeatureInfo(state: .unavailable, options: ["key": "val"])
+        let info2 = CapabilityInfo(state: .unavailable, options: ["key": "val"])
         XCTAssertEqual(info2.state, .unavailable)
         XCTAssertEqual(info2.options["key"], "val")
     }

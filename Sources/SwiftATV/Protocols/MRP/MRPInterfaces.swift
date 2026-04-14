@@ -68,12 +68,12 @@ public final class MRPRemoteControl: @unchecked Sendable, RemoteControl {
     }
 
     public func skipForward(interval: TimeInterval) async throws(ATVError) {
-        let options = MRPMessages.commandOptions(position: interval)
+        let options = MRPMessages.commandOptions(skipInterval: interval)
         try await `protocol`.sendCommand(.skipForward, options: options)
     }
 
     public func skipBackward(interval: TimeInterval) async throws(ATVError) {
-        let options = MRPMessages.commandOptions(position: interval)
+        let options = MRPMessages.commandOptions(skipInterval: interval)
         try await `protocol`.sendCommand(.skipBackward, options: options)
     }
 
@@ -270,74 +270,152 @@ public final class MRPAudio: @unchecked Sendable, AudioController {
     }
 }
 
-/// Feature provider for direct MRP interfaces, supported-command updates, and
-/// optional setup diagnostics.
-public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
+/// Media command controller backed by direct MRP SendCommand messages.
+public final class MRPMediaCommands: @unchecked Sendable, MediaCommandController {
+    private let `protocol`: MRPProtocolHandler
+    private let stateStore: MRPStateStore
+
+    init(protocol: MRPProtocolHandler, stateStore: MRPStateStore) {
+        self.protocol = `protocol`
+        self.stateStore = stateStore
+    }
+
+    public func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo {
+        if !command.isSendableOverMRP {
+            return MediaCommandInfo(
+                state: .unsupported,
+                diagnostic: "Media command \(command) requires options SwiftATV does not model yet"
+            )
+        }
+        return stateStore.commandInfo(command) ?? MediaCommandInfo(state: .unavailable)
+    }
+
+    public func allCommands(includeUnsupported: Bool) -> [MediaRemoteCommand: MediaCommandInfo] {
+        Dictionary(
+            uniqueKeysWithValues: MediaRemoteCommand.allCases.compactMap { command in
+                let info = commandInfo(command)
+                if !includeUnsupported, info.state == .unsupported {
+                    return nil
+                }
+                return (command, info)
+            })
+    }
+
+    public func send(_ command: MediaRemoteCommand, options: MediaCommandOptions) async throws(ATVError) {
+        guard command.isSendableOverMRP else {
+            throw ATVError.notSupported("Media command \(command) requires options SwiftATV does not model yet")
+        }
+        guard let mrpCommand = command.mrpCommand else {
+            throw ATVError.notSupported("Media command \(command) is not supported by MRP")
+        }
+        let commandOptions = options.isEmpty ? nil : MRPMessages.commandOptions(options)
+        try await `protocol`.sendCommand(mrpCommand, options: commandOptions)
+    }
+}
+
+extension MediaCommandOptions {
+    fileprivate var isEmpty: Bool {
+        playbackPosition == nil
+            && skipInterval == nil
+            && playbackRate == nil
+            && rating == nil
+            && negative == nil
+            && shuffle == nil
+            && repeatState == nil
+    }
+}
+
+/// Capability provider for direct MRP interfaces, supported-command updates,
+/// and optional setup diagnostics.
+public final class MRPCapabilities: @unchecked Sendable, CapabilityProvider {
     private let stateStore: MRPStateStore
 
     init(stateStore: MRPStateStore) {
         self.stateStore = stateStore
     }
 
-    public func featureInfo(_ feature: FeatureName) -> FeatureInfo {
-        if let info = stateStore.featureInfo(feature) {
+    public func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
+        if case .mediaCommand(let command) = capability {
+            if !command.isSendableOverMRP {
+                return MRPMediaCommandsPlaceholder.commandInfo(command).capabilityInfo
+            }
+            return stateStore.capabilityInfo(capability)
+                ?? MRPMediaCommandsPlaceholder.commandInfo(command).capabilityInfo
+        }
+        if let info = stateStore.capabilityInfo(capability) {
             return info
         }
-        if Self.remoteHIDFeatures.contains(feature) {
-            return FeatureInfo(state: .available)
+        if Self.remoteHIDCapabilities.contains(capability) {
+            return CapabilityInfo(state: .available)
         }
-        if Self.powerFeatures.contains(feature) {
-            return FeatureInfo(state: stateStore.powerState == .unknown ? .unavailable : .available)
+        if Self.powerCapabilities.contains(capability) {
+            return CapabilityInfo(state: stateStore.powerState == .unknown ? .unavailable : .available)
         }
-        if feature == .pushUpdates {
-            return FeatureInfo(state: stateStore.clientUpdatesConfigured ? .available : .unavailable)
+        if capability == .push(.updates) {
+            return CapabilityInfo(state: stateStore.clientUpdatesConfigured ? .available : .unavailable)
         }
-        if Self.audioFeatures.contains(feature) {
-            return FeatureInfo(state: stateStore.hasVolumeState ? .available : .unavailable)
+        if Self.audioCapabilities.contains(capability) {
+            return CapabilityInfo(state: stateStore.hasVolumeState ? .available : .unavailable)
         }
-        if Self.outputDeviceFeatures.contains(feature) {
-            return FeatureInfo(state: stateStore.hasOutputDevicesState ? .available : .unavailable)
+        if Self.outputDeviceCapabilities.contains(capability) {
+            return CapabilityInfo(state: stateStore.hasOutputDevicesState ? .available : .unavailable)
         }
-        if Self.metadata.contains(feature) {
-            return FeatureInfo(state: stateStore.hasPlayingSnapshot ? .available : .unavailable)
+        if Self.metadataCapabilities.contains(capability) {
+            return CapabilityInfo(state: stateStore.hasPlayingSnapshot ? .available : .unavailable)
         }
-        return FeatureInfo(state: .unsupported)
+        return CapabilityInfo(state: .unsupported)
     }
 
-    public func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {
+    public func allCapabilities(includeUnsupported: Bool) -> [Capability: CapabilityInfo] {
         Dictionary(
-            uniqueKeysWithValues: FeatureName.allCases.compactMap { feature in
-                let info = featureInfo(feature)
+            uniqueKeysWithValues: Capability.allCases.compactMap { capability in
+                let info = capabilityInfo(capability)
                 if !includeUnsupported, info.state == .unsupported {
                     return nil
                 }
-                return (feature, info)
+                return (capability, info)
             })
     }
 
-    public func inState(_ states: [FeatureState], features: FeatureName...) -> Bool {
-        features.allSatisfy { states.contains(featureInfo($0).state) }
+    public func inState(_ states: [CapabilityState], capabilities: Capability...) -> Bool {
+        capabilities.allSatisfy { states.contains(capabilityInfo($0).state) }
     }
 
-    private static let remoteHIDFeatures: Set<FeatureName> = [
-        .up, .down, .left, .right, .select, .menu, .home, .homeHold, .topMenu,
-        .suspend, .wakeUp,
+    private static let remoteHIDCapabilities: Set<Capability> = [
+        .remote(.up), .remote(.down), .remote(.left), .remote(.right), .remote(.select), .remote(.menu),
+        .remote(.home), .remote(.homeHold), .remote(.topMenu), .remote(.suspend), .remote(.wakeUp),
     ]
 
-    private static let powerFeatures: Set<FeatureName> = [
-        .powerState, .turnOn, .turnOff,
+    private static let powerCapabilities: Set<Capability> = [
+        .power(.state), .power(.turnOn), .power(.turnOff),
     ]
 
-    private static let audioFeatures: Set<FeatureName> = [
-        .volume, .setVolume, .volumeUp, .volumeDown,
+    private static let audioCapabilities: Set<Capability> = [
+        .audio(.volume), .audio(.setVolume), .audio(.volumeUp), .audio(.volumeDown),
     ]
 
-    private static let outputDeviceFeatures: Set<FeatureName> = [
-        .outputDevices, .addOutputDevices, .removeOutputDevices, .setOutputDevices,
+    private static let outputDeviceCapabilities: Set<Capability> = [
+        .audio(.outputDevices), .audio(.addOutputDevices), .audio(.removeOutputDevices), .audio(.setOutputDevices),
     ]
 
-    private static let metadata: Set<FeatureName> = [
-        .title, .artist, .album, .genre, .totalTime, .position, .artwork, .app,
-        .seriesName, .seasonNumber, .episodeNumber, .contentIdentifier, .iTunesStoreIdentifier,
+    private static let metadataCapabilities: Set<Capability> = [
+        .metadata(.currentApp), .metadata(.artwork), .metadata(.artworkID),
+        .metadata(.playing), .metadata(.title), .metadata(.artist), .metadata(.album),
+        .metadata(.genre), .metadata(.totalTime), .metadata(.position),
+        .metadata(.shuffle), .metadata(.repeatState), .metadata(.seriesName),
+        .metadata(.seasonNumber), .metadata(.episodeNumber), .metadata(.contentIdentifier),
+        .metadata(.iTunesStoreIdentifier),
     ]
+}
+
+private enum MRPMediaCommandsPlaceholder {
+    static func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo {
+        if command.isSendableOverMRP {
+            return MediaCommandInfo(state: .unavailable)
+        }
+        return MediaCommandInfo(
+            state: .unsupported,
+            diagnostic: "Media command \(command) requires options SwiftATV does not model yet"
+        )
+    }
 }

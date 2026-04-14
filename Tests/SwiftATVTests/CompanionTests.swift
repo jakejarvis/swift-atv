@@ -73,77 +73,77 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(CompanionSystemStatus.idle.rawValue, 4)
     }
 
-    // MARK: - CompanionFeatures (test_companion_interface.py)
+    // MARK: - CompanionCapabilities (test_companion_interface.py)
 
-    func testCompanionFeaturesConnected() {
-        let features = CompanionFeatures(isConnected: true)
+    func testCompanionCapabilitiesConnected() {
+        let capabilities = CompanionCapabilities(isConnected: true)
 
-        // Navigation features
-        XCTAssertEqual(features.featureInfo(.up).state, .available)
-        XCTAssertEqual(features.featureInfo(.down).state, .available)
-        XCTAssertEqual(features.featureInfo(.left).state, .available)
-        XCTAssertEqual(features.featureInfo(.right).state, .available)
-        XCTAssertEqual(features.featureInfo(.select).state, .available)
-        XCTAssertEqual(features.featureInfo(.menu).state, .available)
-        XCTAssertEqual(features.featureInfo(.home).state, .available)
+        // Navigation capabilities
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.up)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.down)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.left)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.right)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.select)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.menu)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.home)).state, .available)
 
         // Playback
-        XCTAssertEqual(features.featureInfo(.play).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.playPause).state, .available)
-        XCTAssertEqual(features.featureInfo(.pause).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.stop).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.next).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.previous).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.play)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.playPause)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.pause)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.stop)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.nextTrack)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.previousTrack)).state, .unavailable)
 
         // Power
-        XCTAssertEqual(features.featureInfo(.turnOn).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.turnOff).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.powerState).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.power(.turnOn)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.power(.turnOff)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.power(.state)).state, .unavailable)
 
         // Audio
-        XCTAssertEqual(features.featureInfo(.setVolume).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
 
         // Apps
-        XCTAssertEqual(features.featureInfo(.appList).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.launchApp).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.apps(.list)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.apps(.launch)).state, .unavailable)
 
         // Accounts
-        XCTAssertEqual(features.featureInfo(.accountList).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.switchAccount).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.accounts(.list)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.accounts(.switchAccount)).state, .unavailable)
 
         // Keyboard
-        XCTAssertEqual(features.featureInfo(.textGet).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.textClear).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.textAppend).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.textSet).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.textFocusState).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.textGet)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.textClear)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.textAppend)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.textSet)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.focusState)).state, .unavailable)
 
         // Touch
-        XCTAssertEqual(features.featureInfo(.swipe).state, .available)
-        XCTAssertEqual(features.featureInfo(.action).state, .available)
-        XCTAssertEqual(features.featureInfo(.click).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.touch(.swipe)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.touch(.action)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.touch(.click)).state, .available)
     }
 
-    func testCompanionFeaturesUnsupported() {
-        let features = CompanionFeatures(isConnected: true)
+    func testCompanionCapabilitiesUnsupported() {
+        let capabilities = CompanionCapabilities(isConnected: true)
 
-        // MRP-only metadata features
-        XCTAssertEqual(features.featureInfo(.title).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.artist).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.album).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.genre).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.artwork).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.totalTime).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.position).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.shuffle).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.repeatState).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.pushUpdates).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.playUrl).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.streamFile).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.outputDevices).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.addOutputDevices).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.removeOutputDevices).state, .unsupported)
-        XCTAssertEqual(features.featureInfo(.setOutputDevices).state, .unsupported)
+        // MRP-only metadata capabilities
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.title)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.artist)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.album)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.genre)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.artwork)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.totalTime)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.position)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.shuffle)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.repeatState)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.push(.updates)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.stream(.playURL)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.stream(.streamFile)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.outputDevices)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.addOutputDevices)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.removeOutputDevices)).state, .unsupported)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setOutputDevices)).state, .unsupported)
     }
 
     func testCompanionAudioDoesNotSupportOutputDeviceMutation() async {
@@ -157,9 +157,9 @@ final class CompanionTests: XCTestCase {
         await connection.close()
     }
 
-    func testCompanionFeaturesReflectObservedState() {
+    func testCompanionCapabilitiesReflectObservedState() {
         let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
-        let features = CompanionFeatures(stateStore: stateStore)
+        let capabilities = CompanionCapabilities(stateStore: stateStore)
 
         stateStore.setMediaControlFlags([
             .play, .pause, .nextTrack, .previousTrack, .skipForward, .skipBackward, .volume,
@@ -170,20 +170,20 @@ final class CompanionTests: XCTestCase {
         stateStore.markUserAccountsAvailable()
         stateStore.setTextFocusState(.focused)
 
-        XCTAssertEqual(features.featureInfo(.play).state, .available)
-        XCTAssertEqual(features.featureInfo(.pause).state, .available)
-        XCTAssertEqual(features.featureInfo(.next).state, .available)
-        XCTAssertEqual(features.featureInfo(.previous).state, .available)
-        XCTAssertEqual(features.featureInfo(.skipForward).state, .available)
-        XCTAssertEqual(features.featureInfo(.skipBackward).state, .available)
-        XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
-        XCTAssertEqual(features.featureInfo(.volume).state, .available)
-        XCTAssertEqual(features.featureInfo(.powerState).state, .available)
-        XCTAssertEqual(features.featureInfo(.turnOn).state, .available)
-        XCTAssertEqual(features.featureInfo(.appList).state, .available)
-        XCTAssertEqual(features.featureInfo(.accountList).state, .available)
-        XCTAssertEqual(features.featureInfo(.textFocusState).state, .available)
-        XCTAssertEqual(features.featureInfo(.textGet).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.play)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.pause)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.nextTrack)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.previousTrack)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.skipForward)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.skipBackward)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volume)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.power(.state)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.power(.turnOn)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.apps(.list)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.accounts(.list)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.focusState)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.textGet)).state, .available)
     }
 
     private func assertNotSupported(
@@ -202,52 +202,57 @@ final class CompanionTests: XCTestCase {
         }
     }
 
-    func testCompanionFeaturesDisconnected() {
-        let features = CompanionFeatures(isConnected: false)
+    func testCompanionCapabilitiesDisconnected() {
+        let capabilities = CompanionCapabilities(isConnected: false)
 
-        // Supported features become unavailable when disconnected
-        XCTAssertEqual(features.featureInfo(.up).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.home).state, .unavailable)
-        XCTAssertEqual(features.featureInfo(.appList).state, .unavailable)
+        // Supported capabilities become unavailable when disconnected
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.up)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.home)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.apps(.list)).state, .unavailable)
 
-        // Unsupported features stay unsupported
-        XCTAssertEqual(features.featureInfo(.title).state, .unsupported)
+        // Unsupported capabilities stay unsupported
+        XCTAssertEqual(capabilities.capabilityInfo(.metadata(.title)).state, .unsupported)
     }
 
-    func testCompanionFeaturesIsAvailable() {
+    func testCompanionCapabilitiesIsAvailable() {
         let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
-        let features = CompanionFeatures(stateStore: stateStore)
+        let capabilities = CompanionCapabilities(stateStore: stateStore)
 
-        XCTAssertFalse(features.isAvailable(.play))
+        XCTAssertFalse(capabilities.isAvailable(.mediaCommand(.play)))
         stateStore.setMediaControlFlags([.play])
-        XCTAssertTrue(features.isAvailable(.play))
-        XCTAssertTrue(features.isAvailable(.home))
-        XCTAssertFalse(features.isAvailable(.title))
-        XCTAssertFalse(features.isAvailable(.artwork))
+        XCTAssertTrue(capabilities.isAvailable(.mediaCommand(.play)))
+        XCTAssertTrue(capabilities.isAvailable(.remote(.home)))
+        XCTAssertFalse(capabilities.isAvailable(.metadata(.title)))
+        XCTAssertFalse(capabilities.isAvailable(.metadata(.artwork)))
     }
 
-    func testCompanionFeaturesInState() {
-        let features = CompanionFeatures(isConnected: true)
+    func testCompanionCapabilitiesInState() {
+        let capabilities = CompanionCapabilities(isConnected: true)
 
-        XCTAssertTrue(features.inState([.available], features: .up, .down, .left, .right))
-        XCTAssertFalse(features.inState([.available], features: .up, .title))
-        XCTAssertTrue(features.inState([.unsupported, .available], features: .up, .title))
+        XCTAssertTrue(
+            capabilities.inState(
+                [.available],
+                capabilities: .remote(.up), .remote(.down), .remote(.left), .remote(.right)
+            )
+        )
+        XCTAssertFalse(capabilities.inState([.available], capabilities: .remote(.up), .metadata(.title)))
+        XCTAssertTrue(capabilities.inState([.unsupported, .available], capabilities: .remote(.up), .metadata(.title)))
     }
 
-    func testCompanionFeaturesAllFeaturesExcludeUnsupported() {
-        let features = CompanionFeatures(isConnected: true)
-        let all = features.allFeatures()
+    func testCompanionCapabilitiesAllCapabilitiesExcludeUnsupported() {
+        let capabilities = CompanionCapabilities(isConnected: true)
+        let all = capabilities.allCapabilities()
 
         for (_, info) in all {
             XCTAssertNotEqual(info.state, .unsupported)
         }
     }
 
-    func testCompanionFeaturesAllFeaturesIncludeUnsupported() {
-        let features = CompanionFeatures(isConnected: true)
-        let all = features.allFeatures(includeUnsupported: true)
+    func testCompanionCapabilitiesAllCapabilitiesIncludeUnsupported() {
+        let capabilities = CompanionCapabilities(isConnected: true)
+        let all = capabilities.allCapabilities(includeUnsupported: true)
 
-        XCTAssertEqual(all.count, FeatureName.allCases.count)
+        XCTAssertEqual(all.count, Capability.allCases.count)
     }
 
     // MARK: - CompanionFrame

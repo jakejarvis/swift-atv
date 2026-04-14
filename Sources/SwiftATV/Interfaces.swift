@@ -40,14 +40,89 @@ public struct MediaMetadata: Sendable {
     }
 }
 
-/// Information about a specific feature's availability.
-public struct FeatureInfo: Sendable, Hashable {
-    public let state: FeatureState
+/// Information about a specific capability's availability.
+public struct CapabilityInfo: Sendable, Hashable {
+    public let state: CapabilityState
     public let options: [String: String]
 
-    public init(state: FeatureState, options: [String: String] = [:]) {
+    public init(state: CapabilityState, options: [String: String] = [:]) {
         self.state = state
         self.options = options
+    }
+}
+
+/// Options for sending a MediaRemote command.
+public struct MediaCommandOptions: Sendable, Hashable {
+    public var playbackPosition: TimeInterval?
+    public var skipInterval: TimeInterval?
+    public var playbackRate: Float?
+    public var rating: Float?
+    public var negative: Bool?
+    public var shuffle: ShuffleState?
+    public var repeatState: RepeatState?
+
+    public init(
+        playbackPosition: TimeInterval? = nil,
+        skipInterval: TimeInterval? = nil,
+        playbackRate: Float? = nil,
+        rating: Float? = nil,
+        negative: Bool? = nil,
+        shuffle: ShuffleState? = nil,
+        repeatState: RepeatState? = nil
+    ) {
+        self.playbackPosition = playbackPosition
+        self.skipInterval = skipInterval
+        self.playbackRate = playbackRate
+        self.rating = rating
+        self.negative = negative
+        self.shuffle = shuffle
+        self.repeatState = repeatState
+    }
+}
+
+/// Current availability and metadata for a MediaRemote command.
+public struct MediaCommandInfo: Sendable, Hashable {
+    public let state: CapabilityState
+    public let active: Bool
+    public let preferredIntervals: [TimeInterval]
+    public let localizedTitle: String?
+    public let localizedShortTitle: String?
+    public let supportedRates: [Float]
+    public let preferredPlaybackRate: Float?
+    public let skipInterval: Int?
+    public let numberOfAvailableSkips: Int?
+    public let diagnostic: String?
+
+    public init(
+        state: CapabilityState,
+        active: Bool = false,
+        preferredIntervals: [TimeInterval] = [],
+        localizedTitle: String? = nil,
+        localizedShortTitle: String? = nil,
+        supportedRates: [Float] = [],
+        preferredPlaybackRate: Float? = nil,
+        skipInterval: Int? = nil,
+        numberOfAvailableSkips: Int? = nil,
+        diagnostic: String? = nil
+    ) {
+        self.state = state
+        self.active = active
+        self.preferredIntervals = preferredIntervals
+        self.localizedTitle = localizedTitle
+        self.localizedShortTitle = localizedShortTitle
+        self.supportedRates = supportedRates
+        self.preferredPlaybackRate = preferredPlaybackRate
+        self.skipInterval = skipInterval
+        self.numberOfAvailableSkips = numberOfAvailableSkips
+        self.diagnostic = diagnostic
+    }
+
+    public var capabilityInfo: CapabilityInfo {
+        var options: [String: String] = [:]
+        if let diagnostic {
+            options["diagnostic"] = diagnostic
+        }
+        return CapabilityInfo(state: state, options: options)
     }
 }
 
@@ -355,22 +430,41 @@ public protocol UserAccountsController: Sendable {
     func switchAccount(_ accountID: String) async throws(ATVError)
 }
 
-// MARK: - Features Protocol
+// MARK: - Media Commands Protocol
 
-/// Interface for querying feature availability.
-public protocol FeatureProvider: Sendable {
-    func featureInfo(_ feature: FeatureName) -> FeatureInfo
-    func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo]
-    func inState(_ states: [FeatureState], features: FeatureName...) -> Bool
+/// Interface for sending broad MediaRemote commands.
+public protocol MediaCommandController: Sendable {
+    func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo
+    func allCommands(includeUnsupported: Bool) -> [MediaRemoteCommand: MediaCommandInfo]
+    func send(_ command: MediaRemoteCommand, options: MediaCommandOptions) async throws(ATVError)
 }
 
-extension FeatureProvider {
-    public func allFeatures() -> [FeatureName: FeatureInfo] {
-        allFeatures(includeUnsupported: false)
+extension MediaCommandController {
+    public func allCommands() -> [MediaRemoteCommand: MediaCommandInfo] {
+        allCommands(includeUnsupported: false)
     }
 
-    public func isAvailable(_ feature: FeatureName) -> Bool {
-        featureInfo(feature).state == .available
+    public func send(_ command: MediaRemoteCommand) async throws(ATVError) {
+        try await send(command, options: MediaCommandOptions())
+    }
+}
+
+// MARK: - Capabilities Protocol
+
+/// Interface for querying capability availability.
+public protocol CapabilityProvider: Sendable {
+    func capabilityInfo(_ capability: Capability) -> CapabilityInfo
+    func allCapabilities(includeUnsupported: Bool) -> [Capability: CapabilityInfo]
+    func inState(_ states: [CapabilityState], capabilities: Capability...) -> Bool
+}
+
+extension CapabilityProvider {
+    public func allCapabilities() -> [Capability: CapabilityInfo] {
+        allCapabilities(includeUnsupported: false)
+    }
+
+    public func isAvailable(_ capability: Capability) -> Bool {
+        capabilityInfo(capability).state == .available
     }
 }
 
@@ -464,7 +558,8 @@ public protocol AppleTVDevice: Sendable {
     var pushUpdater: PushUpdater { get }
     var stream: StreamController { get }
     var power: PowerController { get }
-    var features: FeatureProvider { get }
+    var capabilities: CapabilityProvider { get }
+    var mediaCommands: MediaCommandController { get }
     var apps: AppsController { get }
     var userAccounts: UserAccountsController { get }
     var audio: AudioController { get }

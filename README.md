@@ -18,7 +18,8 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
 - **Local Client Identity** -- Configure the controller/app identity sent during pairing and protocol setup with `ATVSettings.clientIdentity`
-- **State-backed Features** -- Feature availability reflects protocol state and diagnostics instead of assuming every connected interface is ready
+- **State-backed Capabilities** -- Typed capability availability reflects protocol state and diagnostics instead of assuming every connected interface is ready
+- **Broad Media Commands** -- Query and send supported MediaRemote commands through `mediaCommands`
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
 - **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion
 
@@ -139,7 +140,7 @@ try await atv.apps.launchApp(bundleID: "com.apple.TVMovies")
 try await atv.power.turnOff()
 
 // Keyboard text entry, when a text field is focused on the Apple TV
-if atv.features.isAvailable(.textSet) {
+if atv.capabilities.isAvailable(.keyboard(.textSet)) {
     try await atv.keyboard.textSet("Movie title")
 }
 
@@ -205,28 +206,36 @@ When both settings and a service contain credentials for the same protocol,
 When auto-connect exhausts all options, the thrown `ATVError.connectionFailed`
 contains `ConnectionAttemptError` entries for every attempted protocol.
 
-### Check Feature Availability
+### Check Capability Availability
 
-Not every protocol implements every feature. Availability can change after
+Not every protocol implements every capability. Availability can change after
 protocol events or a successful request. Companion media controls, volume,
 power, apps, accounts, and keyboard focus start unavailable until the Apple TV
 reports or proves that state; Companion touch can also be unavailable even when
-the rest of Companion setup succeeds. Output-device list and mutation features
+the rest of Companion setup succeeds. Output-device list and mutation capabilities
 become available when MRP or AirPlay-tunneled MRP reports route state.
 
 ```swift
-if atv.features.isAvailable(.textSet) {
+if atv.capabilities.isAvailable(.keyboard(.textSet)) {
     try await atv.keyboard.textSet("Movie title")
 }
 
-// Check multiple features at once
-if atv.features.inState([.available], features: .play, .pause, .next) {
+// Check multiple capabilities at once
+if atv.capabilities.inState(
+    [.available],
+    capabilities: .mediaCommand(.play), .mediaCommand(.pause), .mediaCommand(.nextTrack)
+) {
     // Full playback control is available
 }
 
-if atv.features.isAvailable(.setOutputDevices) {
+if atv.capabilities.isAvailable(.audio(.setOutputDevices)) {
     let speakers = await atv.audio.outputDevices
     try await atv.audio.setOutputDevices(speakers.map(\.identifier))
+}
+
+let playInfo = atv.mediaCommands.commandInfo(.play)
+if playInfo.state == .available {
+    try await atv.mediaCommands.send(.play)
 }
 ```
 
@@ -243,7 +252,8 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
              │   ├─ audio          │
              │   ├─ keyboard       │
              │   ├─ touch          │
-             │   └─ features       │
+             │   ├─ capabilities   │
+             │   └─ mediaCommands  │
              └──────────┬──────────┘
                         │
                    ┌────┴────┐
@@ -276,7 +286,7 @@ protocol close still emits `connectionLost`.
 ```
 Sources/SwiftATV/
 ├── ATVClient.swift              # Public API: scan(), scanWithDiagnostics(), connect(), pair()
-├── Constants.swift              # All enums (ATVProtocol, FeatureName, etc.)
+├── Constants.swift              # Enums (ATVProtocol, Capability, MediaRemoteCommand, etc.)
 ├── Errors.swift                 # ATVError, ConnectionAttemptError + wrap() factory
 ├── Interfaces.swift             # Swift protocols (all throws(ATVError))
 ├── Configuration.swift          # AppleTVConfiguration, ServiceInfo
@@ -321,7 +331,7 @@ Sources/SwiftATV/
         ├── MRPProtocol.swift    # Transport abstraction, TCP framing, protobuf dispatch
         ├── MRPMessages.swift    # Outbound MRP message builders, including output context changes
         ├── MRPPlayerState.swift # Now-playing state actor
-        ├── MRPInterfaces.swift  # Remote, metadata, push, power, audio, features
+        ├── MRPInterfaces.swift  # Remote, metadata, push, power, audio, capabilities, media commands
         ├── MRPPairing.swift     # MRP HAP pair-setup flow
         └── MRPService.swift     # MRP lifecycle and facade registration
 ```
@@ -332,17 +342,17 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 305 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 307 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
 every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
 8-byte nonce), configuration/service merging, `Playing` state equality,
 device model lookups, settings Codable round-trips, relayer priority and
-takeover, Companion feature availability, HAP credential serialization,
+takeover, Companion capability availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
-MRP output-device mutation/state updates, MRP optional setup diagnostics and feature gating,
+MRP output-device mutation/state updates, MRP optional setup diagnostics and capability gating,
 Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
 resolution, scan diagnostics, identity merging, deterministic first-usable
 connect, aggregate connection errors, credential selection including AirPlay

@@ -29,6 +29,22 @@ final class ConsumerCompileTests: XCTestCase {
         XCTAssertEqual(settings.clientIdentity.name, "Clicker")
     }
 
+    func testCapabilityTypesCompileForConsumers() {
+        let capability: SwiftATV.Capability = .mediaCommand(.play)
+        let info = SwiftATV.CapabilityInfo(state: .available)
+        let options = SwiftATV.MediaCommandOptions(skipInterval: 15)
+        let commandInfo = SwiftATV.MediaCommandInfo(
+            state: .available,
+            preferredIntervals: [15, 30],
+            localizedTitle: "Skip"
+        )
+
+        XCTAssertEqual(capability.identifier, "mediaCommand.play")
+        XCTAssertEqual(info.state, .available)
+        XCTAssertEqual(options.skipInterval, 15)
+        XCTAssertEqual(commandInfo.preferredIntervals, [15, 30])
+    }
+
     func testFacadeFunctionReferencesCompileForConsumers() {
         let connect:
             (

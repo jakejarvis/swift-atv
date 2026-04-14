@@ -193,25 +193,25 @@ final class RelayerTests: XCTestCase {
         XCTAssertEqual(companion.channelUpCalls, 0)
     }
 
-    func testRelayingFeaturesUseLowerPriorityWhenHigherPriorityIsUnsupported() {
-        let relayer = Relayer<FeatureProvider>()
-        relayer.register(StubFeatures([.channelUp: .unsupported]), for: .mrp)
-        relayer.register(StubFeatures([.channelUp: .available]), for: .companion)
+    func testRelayingCapabilitiesUseLowerPriorityWhenHigherPriorityIsUnsupported() {
+        let relayer = Relayer<CapabilityProvider>()
+        relayer.register(StubCapabilities([.remote(.channelUp): .unsupported]), for: .mrp)
+        relayer.register(StubCapabilities([.remote(.channelUp): .available]), for: .companion)
 
-        let features = RelayingFeatures(relayer: relayer)
+        let capabilities = RelayingCapabilities(relayer: relayer)
 
-        XCTAssertEqual(features.featureInfo(.channelUp).state, .available)
-        XCTAssertTrue(features.isAvailable(.channelUp))
+        XCTAssertEqual(capabilities.capabilityInfo(.remote(.channelUp)).state, .available)
+        XCTAssertTrue(capabilities.isAvailable(.remote(.channelUp)))
     }
 
-    func testRelayingFeaturesKeepHigherPriorityUnavailableState() {
-        let relayer = Relayer<FeatureProvider>()
-        relayer.register(StubFeatures([.play: .unavailable]), for: .mrp)
-        relayer.register(StubFeatures([.play: .available]), for: .companion)
+    func testRelayingCapabilitiesKeepHigherPriorityUnavailableState() {
+        let relayer = Relayer<CapabilityProvider>()
+        relayer.register(StubCapabilities([.mediaCommand(.play): .unavailable]), for: .mrp)
+        relayer.register(StubCapabilities([.mediaCommand(.play): .available]), for: .companion)
 
-        let features = RelayingFeatures(relayer: relayer)
+        let capabilities = RelayingCapabilities(relayer: relayer)
 
-        XCTAssertEqual(features.featureInfo(.play).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.play)).state, .unavailable)
     }
 }
 
@@ -274,29 +274,29 @@ private final class StubRemoteControl: @unchecked Sendable, RemoteControl {
     func controlCenter() async throws(ATVError) { throw ATVError.notSupported("unused") }
 }
 
-private struct StubFeatures: FeatureProvider {
-    let states: [FeatureName: FeatureState]
+private struct StubCapabilities: CapabilityProvider {
+    let states: [Capability: CapabilityState]
 
-    init(_ states: [FeatureName: FeatureState]) {
+    init(_ states: [Capability: CapabilityState]) {
         self.states = states
     }
 
-    func featureInfo(_ feature: FeatureName) -> FeatureInfo {
-        FeatureInfo(state: states[feature] ?? .unsupported)
+    func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
+        CapabilityInfo(state: states[capability] ?? .unsupported)
     }
 
-    func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {
+    func allCapabilities(includeUnsupported: Bool) -> [Capability: CapabilityInfo] {
         Dictionary(
-            uniqueKeysWithValues: FeatureName.allCases.compactMap { feature in
-                let info = featureInfo(feature)
+            uniqueKeysWithValues: Capability.allCases.compactMap { capability in
+                let info = capabilityInfo(capability)
                 if !includeUnsupported, info.state == .unsupported {
                     return nil
                 }
-                return (feature, info)
+                return (capability, info)
             })
     }
 
-    func inState(_ states: [FeatureState], features: FeatureName...) -> Bool {
-        features.allSatisfy { states.contains(featureInfo($0).state) }
+    func inState(_ states: [CapabilityState], capabilities: Capability...) -> Bool {
+        capabilities.allSatisfy { states.contains(capabilityInfo($0).state) }
     }
 }

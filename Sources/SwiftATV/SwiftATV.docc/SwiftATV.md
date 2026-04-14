@@ -19,10 +19,10 @@ connects.
 
 The facade tracks lifecycle per protocol. Closing or failing a non-primary
 secondary protocol unregisters only that protocol; the device emits
-`connectionLost` when the primary or last active protocol closes. Feature
+`connectionLost` when the primary or last active protocol closes. Capability
 availability is state-backed, so optional Companion and MRP surfaces are
 reported unavailable until setup, events, or successful requests prove them
-usable. Output-device list and mutation features become available when direct
+usable. Output-device list and mutation capabilities become available when direct
 MRP or AirPlay-tunneled MRP reports route state.
 
 ``ATVSettings/clientIdentity`` describes the local controller or app identity
@@ -87,7 +87,24 @@ await atv.close()
 - ``TouchController``
 - ``AppsController``
 - ``UserAccountsController``
-- ``FeatureProvider``
+- ``CapabilityProvider``
+- ``MediaCommandController``
+- ``Capability``
+- ``CapabilityInfo``
+- ``CapabilityState``
+- ``RemoteCapability``
+- ``MediaRemoteCommand``
+- ``MediaCommandInfo``
+- ``MediaCommandOptions``
+- ``MetadataCapability``
+- ``PushCapability``
+- ``StreamCapability``
+- ``PowerCapability``
+- ``AudioCapability``
+- ``AppsCapability``
+- ``AccountsCapability``
+- ``KeyboardCapability``
+- ``TouchCapability``
 
 ### Pairing and authentication
 
@@ -122,7 +139,8 @@ await atv.close()
 - ``CompanionPower``
 - ``CompanionAudio``
 - ``CompanionTouch``
-- ``CompanionFeatures``
+- ``CompanionCapabilities``
+- ``CompanionMediaCommands``
 - ``MRPService``
 - ``MRPConnection``
 - ``MRPPlayerState``
@@ -131,7 +149,8 @@ await atv.close()
 - ``MRPPushUpdater``
 - ``MRPPower``
 - ``MRPAudio``
-- ``MRPFeatures``
+- ``MRPCapabilities``
+- ``MRPMediaCommands``
 - ``MRPFrameType``
 - ``MRPMessageType``
 - ``MRPConnectionState``

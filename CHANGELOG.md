@@ -13,8 +13,14 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 - MRP output-device mutation now mirrors pyatv by sending both legacy and
   cluster-aware output-context fields, uses AirPlay-tunneled MRP the same as
-  direct MRP, and derives output-device feature state from both output-device
-  updates and device-info group state.
+  direct MRP, and derives output-device capability state from both
+  output-device updates and device-info group state.
+- Removed the flat `FeatureName` / `FeatureProvider` API in favor of typed
+  `Capability` values exposed through `AppleTVDevice.capabilities`.
+- Added `AppleTVDevice.mediaCommands` with `MediaRemoteCommand`,
+  `MediaCommandInfo`, and `MediaCommandOptions`; MRP maps `SupportedCommands`
+  into command availability, while commands needing unmodeled queue, session,
+  or language payloads remain explicitly unsupported.
 
 ## [0.3.0] - 2026-04-14
 
@@ -41,15 +47,15 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - `FacadeAppleTV` now tracks protocol lifecycle per protocol. A failed or
   closed optional secondary protocol no longer tears down an already usable
   primary connection.
-- Companion feature availability is now backed by observed Companion state.
+- Companion capability availability is now backed by observed Companion state.
   Media controls, volume, power, apps, accounts, keyboard focus, and touch are
   unavailable until setup, events, or successful requests prove them usable.
 - Companion power and audio no longer mutate local state optimistically.
   Power waits for real status when requested, and volume up/down use HID volume
   buttons plus volume events instead of synthetic absolute volume changes.
-- MRP feature availability is now more conservative for metadata, push, audio,
+- MRP capability availability is now more conservative for metadata, push, audio,
   output devices, and power state, and optional startup failures are exposed as
-  feature diagnostics instead of being silently swallowed.
+  capability diagnostics instead of being silently swallowed.
 - Documentation now describes AirPlay support as the implemented AirPlay 2 MRP
   tunnel instead of as a broader AirPlay media surface.
 - `ATVSettings.info` was replaced by `ATVSettings.clientIdentity`, which now

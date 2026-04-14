@@ -90,116 +90,23 @@ final class ConstantsTests: XCTestCase {
         XCTAssertEqual(DeviceModel.homePod2.description, "HomePod (2nd gen)")
     }
 
-    // MARK: - FeatureName raw values
+    // MARK: - Capabilities
 
-    func testFeatureNameRawValues() {
-        // Navigation
-        XCTAssertEqual(FeatureName.up.rawValue, 0)
-        XCTAssertEqual(FeatureName.down.rawValue, 1)
-        XCTAssertEqual(FeatureName.left.rawValue, 2)
-        XCTAssertEqual(FeatureName.right.rawValue, 3)
+    func testCapabilityIdentifiers() throws {
+        XCTAssertEqual(Capability.remote(.up).identifier, "remote.up")
+        XCTAssertEqual(Capability.mediaCommand(.play).identifier, "mediaCommand.play")
+        XCTAssertEqual(Capability.metadata(.title).identifier, "metadata.title")
+        XCTAssertEqual(Capability.audio(.setOutputDevices).identifier, "audio.setOutputDevices")
 
-        // Playback
-        XCTAssertEqual(FeatureName.play.rawValue, 4)
-        XCTAssertEqual(FeatureName.playPause.rawValue, 5)
-        XCTAssertEqual(FeatureName.pause.rawValue, 6)
-        XCTAssertEqual(FeatureName.stop.rawValue, 7)
-        XCTAssertEqual(FeatureName.next.rawValue, 8)
-        XCTAssertEqual(FeatureName.previous.rawValue, 9)
-
-        // Control
-        XCTAssertEqual(FeatureName.select.rawValue, 10)
-        XCTAssertEqual(FeatureName.menu.rawValue, 11)
-        XCTAssertEqual(FeatureName.volumeUp.rawValue, 12)
-        XCTAssertEqual(FeatureName.volumeDown.rawValue, 13)
-        XCTAssertEqual(FeatureName.home.rawValue, 14)
-        XCTAssertEqual(FeatureName.homeHold.rawValue, 15)
-        XCTAssertEqual(FeatureName.topMenu.rawValue, 16)
-        XCTAssertEqual(FeatureName.suspend.rawValue, 17)
-        XCTAssertEqual(FeatureName.wakeUp.rawValue, 18)
-
-        // Playback control
-        XCTAssertEqual(FeatureName.setPosition.rawValue, 19)
-        XCTAssertEqual(FeatureName.setShuffle.rawValue, 20)
-        XCTAssertEqual(FeatureName.setRepeat.rawValue, 21)
-
-        // Metadata
-        XCTAssertEqual(FeatureName.title.rawValue, 22)
-        XCTAssertEqual(FeatureName.artist.rawValue, 23)
-        XCTAssertEqual(FeatureName.album.rawValue, 24)
-        XCTAssertEqual(FeatureName.genre.rawValue, 25)
-        XCTAssertEqual(FeatureName.totalTime.rawValue, 26)
-        XCTAssertEqual(FeatureName.position.rawValue, 27)
-        XCTAssertEqual(FeatureName.shuffle.rawValue, 28)
-        XCTAssertEqual(FeatureName.repeatState.rawValue, 29)
-
-        // Media
-        XCTAssertEqual(FeatureName.artwork.rawValue, 30)
-        XCTAssertEqual(FeatureName.playUrl.rawValue, 31)
-        XCTAssertEqual(FeatureName.powerState.rawValue, 32)
-        XCTAssertEqual(FeatureName.turnOn.rawValue, 33)
-        XCTAssertEqual(FeatureName.turnOff.rawValue, 34)
-        XCTAssertEqual(FeatureName.app.rawValue, 35)
-        XCTAssertEqual(FeatureName.skipForward.rawValue, 36)
-        XCTAssertEqual(FeatureName.skipBackward.rawValue, 37)
-
-        // Apps
-        XCTAssertEqual(FeatureName.appList.rawValue, 38)
-        XCTAssertEqual(FeatureName.launchApp.rawValue, 39)
-
-        // Series
-        XCTAssertEqual(FeatureName.seriesName.rawValue, 40)
-        XCTAssertEqual(FeatureName.seasonNumber.rawValue, 41)
-        XCTAssertEqual(FeatureName.episodeNumber.rawValue, 42)
-
-        // Push/Stream/Volume
-        XCTAssertEqual(FeatureName.pushUpdates.rawValue, 43)
-        XCTAssertEqual(FeatureName.streamFile.rawValue, 44)
-        XCTAssertEqual(FeatureName.volume.rawValue, 45)
-        XCTAssertEqual(FeatureName.setVolume.rawValue, 46)
-        XCTAssertEqual(FeatureName.contentIdentifier.rawValue, 47)
-
-        // Channel
-        XCTAssertEqual(FeatureName.channelUp.rawValue, 48)
-        XCTAssertEqual(FeatureName.channelDown.rawValue, 49)
-
-        // iTunes
-        XCTAssertEqual(FeatureName.iTunesStoreIdentifier.rawValue, 50)
-
-        // Keyboard
-        XCTAssertEqual(FeatureName.textGet.rawValue, 51)
-        XCTAssertEqual(FeatureName.textClear.rawValue, 52)
-        XCTAssertEqual(FeatureName.textAppend.rawValue, 53)
-        XCTAssertEqual(FeatureName.textSet.rawValue, 54)
-
-        // Accounts
-        XCTAssertEqual(FeatureName.accountList.rawValue, 55)
-        XCTAssertEqual(FeatureName.switchAccount.rawValue, 56)
-
-        // Focus/Screen
-        XCTAssertEqual(FeatureName.textFocusState.rawValue, 57)
-        XCTAssertEqual(FeatureName.screensaver.rawValue, 58)
-
-        // Output
-        XCTAssertEqual(FeatureName.outputDevices.rawValue, 59)
-        XCTAssertEqual(FeatureName.addOutputDevices.rawValue, 60)
-        XCTAssertEqual(FeatureName.removeOutputDevices.rawValue, 61)
-        XCTAssertEqual(FeatureName.setOutputDevices.rawValue, 62)
-
-        // Touch
-        XCTAssertEqual(FeatureName.swipe.rawValue, 63)
-        XCTAssertEqual(FeatureName.action.rawValue, 64)
-        XCTAssertEqual(FeatureName.click.rawValue, 65)
-
-        // Guide
-        XCTAssertEqual(FeatureName.guide.rawValue, 66)
-
-        // Control Center
-        XCTAssertEqual(FeatureName.controlCenter.rawValue, 68)
+        XCTAssertEqual(try Capability(identifier: "remote.up"), .remote(.up))
+        XCTAssertEqual(try Capability(identifier: "mediaCommand.play"), .mediaCommand(.play))
     }
 
-    func testFeatureNameAllCases() {
-        XCTAssertTrue(FeatureName.allCases.count >= 60)
+    func testCapabilityAllCases() {
+        XCTAssertTrue(Capability.allCases.contains(.remote(.up)))
+        XCTAssertTrue(Capability.allCases.contains(.mediaCommand(.seekToPlaybackPosition)))
+        XCTAssertTrue(Capability.allCases.contains(.keyboard(.textSet)))
+        XCTAssertTrue(Capability.allCases.contains(.touch(.click)))
     }
 
     // MARK: - PairingRequirement
@@ -256,10 +163,10 @@ final class ConstantsTests: XCTestCase {
         XCTAssertEqual(decoded, original)
     }
 
-    func testFeatureNameCodable() throws {
-        let original = FeatureName.artwork
+    func testCapabilityCodable() throws {
+        let original = Capability.metadata(.artwork)
         let data = try JSONEncoder().encode(original)
-        let decoded = try JSONDecoder().decode(FeatureName.self, from: data)
+        let decoded = try JSONDecoder().decode(Capability.self, from: data)
         XCTAssertEqual(decoded, original)
     }
 }

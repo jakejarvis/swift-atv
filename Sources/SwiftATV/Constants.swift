@@ -242,10 +242,10 @@ public enum PairingRequirement: Int, Codable, Sendable, Hashable, CaseIterable, 
     }
 }
 
-// MARK: - Feature State
+// MARK: - Capability State
 
-/// Availability state of a feature.
-public enum FeatureState: Int, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+/// Availability state of a capability.
+public enum CapabilityState: Int, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
     case unknown = 0
     case unsupported = 1
     case unavailable = 2
@@ -261,180 +261,298 @@ public enum FeatureState: Int, Codable, Sendable, Hashable, CaseIterable, Custom
     }
 }
 
-// MARK: - Feature Name
+// MARK: - Capabilities
 
-/// All features that can be queried from a device.
-public enum FeatureName: Int, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
-    // Remote control
-    case up = 0
-    case down = 1
-    case left = 2
-    case right = 3
-    case play = 4
-    case playPause = 5
-    case pause = 6
-    case stop = 7
-    case next = 8
-    case previous = 9
-    case select = 10
-    case menu = 11
-    case volumeUp = 12
-    case volumeDown = 13
-    case home = 14
-    case homeHold = 15
-    case topMenu = 16
-    case suspend = 17
-    case wakeUp = 18
+/// Remote-control buttons and HID-style actions.
+public enum RemoteCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case up
+    case down
+    case left
+    case right
+    case select
+    case menu
+    case volumeUp
+    case volumeDown
+    case home
+    case homeHold
+    case topMenu
+    case suspend
+    case wakeUp
+    case playPause
+    case channelUp
+    case channelDown
+    case screensaver
+    case guide
+    case controlCenter
 
-    // Playback control
-    case setPosition = 19
-    case setShuffle = 20
-    case setRepeat = 21
+    public var description: String { rawValue }
+}
 
-    // Metadata
-    case title = 22
-    case artist = 23
-    case album = 24
-    case genre = 25
-    case totalTime = 26
-    case position = 27
-    case shuffle = 28
-    case repeatState = 29
+/// MediaRemote commands that can be sent through MRP or compatible control surfaces.
+public enum MediaRemoteCommand: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case play
+    case pause
+    case togglePlayPause
+    case stop
+    case nextTrack
+    case previousTrack
+    case advanceShuffleMode
+    case advanceRepeatMode
+    case beginFastForward
+    case endFastForward
+    case beginRewind
+    case endRewind
+    case rewind15Seconds
+    case fastForward15Seconds
+    case rewind30Seconds
+    case fastForward30Seconds
+    case skipForward
+    case skipBackward
+    case changePlaybackRate
+    case rateTrack
+    case likeTrack
+    case dislikeTrack
+    case bookmarkTrack
+    case nextChapter
+    case previousChapter
+    case nextAlbum
+    case previousAlbum
+    case nextPlaylist
+    case previousPlaylist
+    case banTrack
+    case addTrackToWishList
+    case removeTrackFromWishList
+    case nextInContext
+    case previousInContext
+    case resetPlaybackTimeout
+    case seekToPlaybackPosition
+    case changeRepeatMode
+    case changeShuffleMode
+    case setPlaybackQueue
+    case addNowPlayingItemToLibrary
+    case createRadioStation
+    case addItemToLibrary
+    case insertIntoPlaybackQueue
+    case enableLanguageOption
+    case disableLanguageOption
+    case reorderPlaybackQueue
+    case removeFromPlaybackQueue
+    case playItemInPlaybackQueue
+    case prepareForSetQueue
+    case setPlaybackSession
+    case preloadedPlaybackSession
+    case setPriorityForPlaybackSession
+    case discardPlaybackSession
+    case reshuffle
+    case changeQueueEndAction
 
-    // Media
-    case artwork = 30
-    case playUrl = 31
-    case powerState = 32
-    case turnOn = 33
-    case turnOff = 34
-    case app = 35
-    case skipForward = 36
-    case skipBackward = 37
+    public var description: String { rawValue }
+}
 
-    // Apps
-    case appList = 38
-    case launchApp = 39
+/// Metadata fields that may be populated by the active protocol.
+public enum MetadataCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case deviceID
+    case artworkID
+    case currentApp
+    case artwork
+    case playing
+    case title
+    case artist
+    case album
+    case genre
+    case totalTime
+    case position
+    case shuffle
+    case repeatState
+    case seriesName
+    case seasonNumber
+    case episodeNumber
+    case contentIdentifier
+    case iTunesStoreIdentifier
 
-    // Series
-    case seriesName = 40
-    case seasonNumber = 41
-    case episodeNumber = 42
+    public var description: String { rawValue }
+}
 
-    // Push / Stream / Volume
-    case pushUpdates = 43
-    case streamFile = 44
-    case volume = 45
-    case setVolume = 46
-    case contentIdentifier = 47
+/// Push-update capabilities.
+public enum PushCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case updates
 
-    // Channel
-    case channelUp = 48
-    case channelDown = 49
+    public var description: String { rawValue }
+}
 
-    // iTunes
-    case iTunesStoreIdentifier = 50
+/// Streaming capabilities.
+public enum StreamCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case playURL
+    case streamFile
 
-    // Keyboard
-    case textGet = 51
-    case textClear = 52
-    case textAppend = 53
-    case textSet = 54
+    public var description: String { rawValue }
+}
 
-    // Accounts
-    case accountList = 55
-    case switchAccount = 56
+/// Power-control capabilities.
+public enum PowerCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case state
+    case turnOn
+    case turnOff
 
-    // Focus / Screen
-    case textFocusState = 57
-    case screensaver = 58
+    public var description: String { rawValue }
+}
 
-    // Output devices
-    case outputDevices = 59
-    case addOutputDevices = 60
-    case removeOutputDevices = 61
-    case setOutputDevices = 62
+/// Audio and output-device capabilities.
+public enum AudioCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case volume
+    case setVolume
+    case volumeUp
+    case volumeDown
+    case outputDevices
+    case addOutputDevices
+    case removeOutputDevices
+    case setOutputDevices
 
-    // Touch
-    case swipe = 63
-    case action = 64
-    case click = 65
+    public var description: String { rawValue }
+}
 
-    // Guide
-    case guide = 66
+/// App-management capabilities.
+public enum AppsCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case list
+    case launch
 
-    // Control Center
-    case controlCenter = 68
+    public var description: String { rawValue }
+}
 
-    public var description: String {
+/// User-account capabilities.
+public enum AccountsCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case list
+    case switchAccount
+
+    public var description: String { rawValue }
+}
+
+/// Keyboard focus and text-entry capabilities.
+public enum KeyboardCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case focusState
+    case textGet
+    case textClear
+    case textAppend
+    case textSet
+
+    public var description: String { rawValue }
+}
+
+/// Touch-surface capabilities.
+public enum TouchCapability: String, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
+    case swipe
+    case action
+    case click
+
+    public var description: String { rawValue }
+}
+
+/// A typed capability exposed by a connected Apple TV.
+public enum Capability: Sendable, Hashable, CaseIterable, Codable, CustomStringConvertible {
+    case remote(RemoteCapability)
+    case mediaCommand(MediaRemoteCommand)
+    case metadata(MetadataCapability)
+    case push(PushCapability)
+    case stream(StreamCapability)
+    case power(PowerCapability)
+    case audio(AudioCapability)
+    case apps(AppsCapability)
+    case accounts(AccountsCapability)
+    case keyboard(KeyboardCapability)
+    case touch(TouchCapability)
+
+    public static var allCases: [Capability] {
+        RemoteCapability.allCases.map(Capability.remote)
+            + MediaRemoteCommand.allCases.map(Capability.mediaCommand)
+            + MetadataCapability.allCases.map(Capability.metadata)
+            + PushCapability.allCases.map(Capability.push)
+            + StreamCapability.allCases.map(Capability.stream)
+            + PowerCapability.allCases.map(Capability.power)
+            + AudioCapability.allCases.map(Capability.audio)
+            + AppsCapability.allCases.map(Capability.apps)
+            + AccountsCapability.allCases.map(Capability.accounts)
+            + KeyboardCapability.allCases.map(Capability.keyboard)
+            + TouchCapability.allCases.map(Capability.touch)
+    }
+
+    public var description: String { identifier }
+
+    public var identifier: String {
         switch self {
-        case .up: return "Up"
-        case .down: return "Down"
-        case .left: return "Left"
-        case .right: return "Right"
-        case .play: return "Play"
-        case .playPause: return "Play/Pause"
-        case .pause: return "Pause"
-        case .stop: return "Stop"
-        case .next: return "Next"
-        case .previous: return "Previous"
-        case .select: return "Select"
-        case .menu: return "Menu"
-        case .volumeUp: return "Volume Up"
-        case .volumeDown: return "Volume Down"
-        case .home: return "Home"
-        case .homeHold: return "Home Hold"
-        case .topMenu: return "Top Menu"
-        case .suspend: return "Suspend"
-        case .wakeUp: return "Wake Up"
-        case .setPosition: return "Set Position"
-        case .setShuffle: return "Set Shuffle"
-        case .setRepeat: return "Set Repeat"
-        case .title: return "Title"
-        case .artist: return "Artist"
-        case .album: return "Album"
-        case .genre: return "Genre"
-        case .totalTime: return "Total Time"
-        case .position: return "Position"
-        case .shuffle: return "Shuffle"
-        case .repeatState: return "Repeat"
-        case .artwork: return "Artwork"
-        case .playUrl: return "Play URL"
-        case .powerState: return "Power State"
-        case .turnOn: return "Turn On"
-        case .turnOff: return "Turn Off"
-        case .app: return "App"
-        case .skipForward: return "Skip Forward"
-        case .skipBackward: return "Skip Backward"
-        case .appList: return "App List"
-        case .launchApp: return "Launch App"
-        case .seriesName: return "Series Name"
-        case .seasonNumber: return "Season Number"
-        case .episodeNumber: return "Episode Number"
-        case .pushUpdates: return "Push Updates"
-        case .streamFile: return "Stream File"
-        case .volume: return "Volume"
-        case .setVolume: return "Set Volume"
-        case .contentIdentifier: return "Content Identifier"
-        case .channelUp: return "Channel Up"
-        case .channelDown: return "Channel Down"
-        case .iTunesStoreIdentifier: return "iTunes Store Identifier"
-        case .textGet: return "Text Get"
-        case .textClear: return "Text Clear"
-        case .textAppend: return "Text Append"
-        case .textSet: return "Text Set"
-        case .accountList: return "Account List"
-        case .switchAccount: return "Switch Account"
-        case .textFocusState: return "Text Focus State"
-        case .screensaver: return "Screensaver"
-        case .outputDevices: return "Output Devices"
-        case .addOutputDevices: return "Add Output Devices"
-        case .removeOutputDevices: return "Remove Output Devices"
-        case .setOutputDevices: return "Set Output Devices"
-        case .swipe: return "Swipe"
-        case .action: return "Action"
-        case .click: return "Click"
-        case .guide: return "Guide"
-        case .controlCenter: return "Control Center"
+        case .remote(let capability): return "remote.\(capability.rawValue)"
+        case .mediaCommand(let command): return "mediaCommand.\(command.rawValue)"
+        case .metadata(let capability): return "metadata.\(capability.rawValue)"
+        case .push(let capability): return "push.\(capability.rawValue)"
+        case .stream(let capability): return "stream.\(capability.rawValue)"
+        case .power(let capability): return "power.\(capability.rawValue)"
+        case .audio(let capability): return "audio.\(capability.rawValue)"
+        case .apps(let capability): return "apps.\(capability.rawValue)"
+        case .accounts(let capability): return "accounts.\(capability.rawValue)"
+        case .keyboard(let capability): return "keyboard.\(capability.rawValue)"
+        case .touch(let capability): return "touch.\(capability.rawValue)"
         }
+    }
+
+    public init(identifier: String) throws {
+        let parts = identifier.split(separator: ".", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Invalid capability identifier \(identifier)")
+            )
+        }
+
+        switch parts[0] {
+        case "remote":
+            guard let value = RemoteCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .remote(value)
+        case "mediaCommand":
+            guard let value = MediaRemoteCommand(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .mediaCommand(value)
+        case "metadata":
+            guard let value = MetadataCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .metadata(value)
+        case "push":
+            guard let value = PushCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .push(value)
+        case "stream":
+            guard let value = StreamCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .stream(value)
+        case "power":
+            guard let value = PowerCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .power(value)
+        case "audio":
+            guard let value = AudioCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .audio(value)
+        case "apps":
+            guard let value = AppsCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .apps(value)
+        case "accounts":
+            guard let value = AccountsCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .accounts(value)
+        case "keyboard":
+            guard let value = KeyboardCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .keyboard(value)
+        case "touch":
+            guard let value = TouchCapability(rawValue: parts[1]) else { throw Self.invalidIdentifier(identifier) }
+            self = .touch(value)
+        default:
+            throw Self.invalidIdentifier(identifier)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        try self.init(identifier: container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(identifier)
+    }
+
+    private static func invalidIdentifier(_ identifier: String) -> DecodingError {
+        DecodingError.dataCorrupted(
+            .init(codingPath: [], debugDescription: "Invalid capability identifier \(identifier)")
+        )
     }
 }

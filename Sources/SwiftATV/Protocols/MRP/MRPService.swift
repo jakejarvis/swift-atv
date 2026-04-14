@@ -12,8 +12,8 @@ final class MRPStateStore: @unchecked Sendable {
     private var _outputDevicesRevision = 0
     private var _hasPlayingSnapshot = false
     private var _clientUpdatesConfigured = false
-    private var featureOverrides: [FeatureName: FeatureInfo] = [:]
-    private var setupDiagnostics: [FeatureName: FeatureInfo] = [:]
+    private var commandInfos: [MediaRemoteCommand: MediaCommandInfo] = [:]
+    private var setupDiagnostics: [Capability: CapabilityInfo] = [:]
     private var volumeContinuations: [UUID: AsyncStream<Float>.Continuation] = [:]
     private var outputContinuations: [UUID: AsyncStream<[OutputDevice]>.Continuation] = [:]
     private var powerContinuations: [UUID: AsyncStream<PowerState>.Continuation] = [:]
@@ -47,9 +47,9 @@ final class MRPStateStore: @unchecked Sendable {
             setOutputDevices(message.deviceInfoMessage)
         case .setStateMessage:
             lock.withLock { _hasPlayingSnapshot = true }
-            updateCommandFeatures(message.setStateMessage.supportedCommands)
+            updateCommandInfos(message.setStateMessage.supportedCommands)
         case .setDefaultSupportedCommandsMessage:
-            updateCommandFeatures(message.setDefaultSupportedCommandsMessage.supportedCommands)
+            updateCommandInfos(message.setDefaultSupportedCommandsMessage.supportedCommands)
         case .volumeControlAvailabilityMessage:
             lock.withLock {
                 _hasVolumeState = message.volumeControlAvailabilityMessage.volumeControlAvailable
@@ -61,8 +61,20 @@ final class MRPStateStore: @unchecked Sendable {
         }
     }
 
-    func featureInfo(_ feature: FeatureName) -> FeatureInfo? {
-        lock.withLock { setupDiagnostics[feature] ?? featureOverrides[feature] }
+    func capabilityInfo(_ capability: Capability) -> CapabilityInfo? {
+        lock.withLock {
+            if let diagnostic = setupDiagnostics[capability] {
+                return diagnostic
+            }
+            if case .mediaCommand(let command) = capability, let info = commandInfos[command] {
+                return info.capabilityInfo
+            }
+            return nil
+        }
+    }
+
+    func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo? {
+        lock.withLock { commandInfos[command] }
     }
 
     func updateMetadata(app: App?, artworkID: String) {
@@ -79,11 +91,11 @@ final class MRPStateStore: @unchecked Sendable {
         lock.withLock { _clientUpdatesConfigured = true }
     }
 
-    func recordSetupFailure(_ message: String, affectedFeatures: Set<FeatureName>) {
-        let info = FeatureInfo(state: .unavailable, options: ["diagnostic": message])
+    func recordSetupFailure(_ message: String, affectedCapabilities: Set<Capability>) {
+        let info = CapabilityInfo(state: .unavailable, options: ["diagnostic": message])
         lock.withLock {
-            for feature in affectedFeatures {
-                setupDiagnostics[feature] = info
+            for capability in affectedCapabilities {
+                setupDiagnostics[capability] = info
             }
         }
     }
@@ -208,16 +220,16 @@ final class MRPStateStore: @unchecked Sendable {
         }
     }
 
-    private func updateCommandFeatures(_ commands: SupportedCommands) {
-        let mapped: [(FeatureName, FeatureInfo)] = commands.supportedCommands.compactMap { command in
-            guard let feature = command.command.featureName else {
+    private func updateCommandInfos(_ commands: SupportedCommands) {
+        let mapped: [(MediaRemoteCommand, MediaCommandInfo)] = commands.supportedCommands.compactMap { command in
+            guard let mediaCommand = command.command.mediaRemoteCommand else {
                 return nil
             }
-            return (feature, FeatureInfo(state: command.enabled ? .available : .unavailable))
+            return (mediaCommand, MediaCommandInfo(command))
         }
         lock.withLock {
-            for (feature, info) in mapped {
-                featureOverrides[feature] = info
+            for (command, info) in mapped {
+                commandInfos[command] = info
             }
         }
     }
@@ -254,7 +266,8 @@ public final class MRPService: @unchecked Sendable {
     private var _pushUpdater: MRPPushUpdater?
     private var _power: MRPPower?
     private var _audio: MRPAudio?
-    private var _features: MRPFeatures?
+    private var _capabilities: MRPCapabilities?
+    private var _mediaCommands: MRPMediaCommands?
 
     /// Remote-control interface registered after setup.
     public var remoteControl: MRPRemoteControl? { lock.withLock { _remoteControl } }
@@ -266,8 +279,10 @@ public final class MRPService: @unchecked Sendable {
     public var power: MRPPower? { lock.withLock { _power } }
     /// Audio interface registered after setup.
     public var audio: MRPAudio? { lock.withLock { _audio } }
-    /// Feature provider registered after setup.
-    public var features: MRPFeatures? { lock.withLock { _features } }
+    /// Capability provider registered after setup.
+    public var capabilities: MRPCapabilities? { lock.withLock { _capabilities } }
+    /// Media command controller registered after setup.
+    public var mediaCommands: MRPMediaCommands? { lock.withLock { _mediaCommands } }
 
     /// Create an MRP service for a host and port.
     public init(
@@ -330,7 +345,8 @@ public final class MRPService: @unchecked Sendable {
             _pushUpdater = MRPPushUpdater(playerState: playerState)
             _power = MRPPower(protocol: protocolHandler, stateStore: stateStore)
             _audio = MRPAudio(protocol: protocolHandler, stateStore: stateStore)
-            _features = MRPFeatures(stateStore: stateStore)
+            _capabilities = MRPCapabilities(stateStore: stateStore)
+            _mediaCommands = MRPMediaCommands(protocol: protocolHandler, stateStore: stateStore)
         }
     }
 
@@ -350,10 +366,10 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var heartbeatTask: Task<Void, Never>?
 
-    private static let clientUpdateDependentFeatures: Set<FeatureName> = [
-        .pushUpdates,
-        .volume, .setVolume, .volumeUp, .volumeDown,
-        .outputDevices, .addOutputDevices, .removeOutputDevices, .setOutputDevices,
+    private static let clientUpdateDependentCapabilities: Set<Capability> = [
+        .push(.updates),
+        .audio(.volume), .audio(.setVolume), .audio(.volumeUp), .audio(.volumeDown),
+        .audio(.outputDevices), .audio(.addOutputDevices), .audio(.removeOutputDevices), .audio(.setOutputDevices),
     ]
 
     init(
@@ -397,7 +413,7 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         } catch {
             stateStore.recordSetupFailure(
                 "MRP client update subscription failed: \(String(describing: error))",
-                affectedFeatures: Self.clientUpdateDependentFeatures
+                affectedCapabilities: Self.clientUpdateDependentCapabilities
             )
         }
         do {
@@ -407,7 +423,7 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
             )
         } catch {
             // MRP keyboard setup is optional and SwiftATV does not expose an
-            // MRP keyboard interface yet, so no public features are downgraded.
+            // MRP keyboard interface yet, so no public capabilities are downgraded.
         }
         if heartbeatMode == .genericMessage {
             startHeartbeat()
@@ -567,20 +583,155 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
 }
 
 extension Command {
-    fileprivate var featureName: FeatureName? {
+    fileprivate var mediaRemoteCommand: MediaRemoteCommand? {
+        switch self {
+        case .unknown: return nil
+        case .play: return .play
+        case .pause: return .pause
+        case .togglePlayPause: return .togglePlayPause
+        case .stop: return .stop
+        case .nextTrack: return .nextTrack
+        case .previousTrack: return .previousTrack
+        case .advanceShuffleMode: return .advanceShuffleMode
+        case .advanceRepeatMode: return .advanceRepeatMode
+        case .beginFastForward: return .beginFastForward
+        case .endFastForward: return .endFastForward
+        case .beginRewind: return .beginRewind
+        case .endRewind: return .endRewind
+        case .rewind15Seconds: return .rewind15Seconds
+        case .fastForward15Seconds: return .fastForward15Seconds
+        case .rewind30Seconds: return .rewind30Seconds
+        case .fastForward30Seconds: return .fastForward30Seconds
+        case .skipForward: return .skipForward
+        case .skipBackward: return .skipBackward
+        case .changePlaybackRate: return .changePlaybackRate
+        case .rateTrack: return .rateTrack
+        case .likeTrack: return .likeTrack
+        case .dislikeTrack: return .dislikeTrack
+        case .bookmarkTrack: return .bookmarkTrack
+        case .seekToPlaybackPosition: return .seekToPlaybackPosition
+        case .changeRepeatMode: return .changeRepeatMode
+        case .changeShuffleMode: return .changeShuffleMode
+        case .enableLanguageOption: return .enableLanguageOption
+        case .disableLanguageOption: return .disableLanguageOption
+        case .nextChapter: return .nextChapter
+        case .previousChapter: return .previousChapter
+        case .nextAlbum: return .nextAlbum
+        case .previousAlbum: return .previousAlbum
+        case .nextPlaylist: return .nextPlaylist
+        case .previousPlaylist: return .previousPlaylist
+        case .banTrack: return .banTrack
+        case .addTrackToWishList: return .addTrackToWishList
+        case .removeTrackFromWishList: return .removeTrackFromWishList
+        case .nextInContext: return .nextInContext
+        case .previousInContext: return .previousInContext
+        case .resetPlaybackTimeout: return .resetPlaybackTimeout
+        case .setPlaybackQueue: return .setPlaybackQueue
+        case .addNowPlayingItemToLibrary: return .addNowPlayingItemToLibrary
+        case .createRadioStation: return .createRadioStation
+        case .addItemToLibrary: return .addItemToLibrary
+        case .insertIntoPlaybackQueue: return .insertIntoPlaybackQueue
+        case .reorderPlaybackQueue: return .reorderPlaybackQueue
+        case .removeFromPlaybackQueue: return .removeFromPlaybackQueue
+        case .playItemInPlaybackQueue: return .playItemInPlaybackQueue
+        case .prepareForSetQueue: return .prepareForSetQueue
+        case .setPlaybackSession: return .setPlaybackSession
+        case .preloadedPlaybackSession: return .preloadedPlaybackSession
+        case .setPriorityForPlaybackSession: return .setPriorityForPlaybackSession
+        case .discardPlaybackSession: return .discardPlaybackSession
+        case .reshuffle: return .reshuffle
+        case .changeQueueEndAction: return .changeQueueEndAction
+        }
+    }
+}
+
+extension MediaRemoteCommand {
+    internal var mrpCommand: Command? {
         switch self {
         case .play: return .play
         case .pause: return .pause
-        case .togglePlayPause: return .playPause
+        case .togglePlayPause: return .togglePlayPause
         case .stop: return .stop
-        case .nextTrack: return .next
-        case .previousTrack: return .previous
-        case .seekToPlaybackPosition: return .setPosition
-        case .changeRepeatMode: return .setRepeat
-        case .changeShuffleMode: return .setShuffle
+        case .nextTrack: return .nextTrack
+        case .previousTrack: return .previousTrack
+        case .advanceShuffleMode: return .advanceShuffleMode
+        case .advanceRepeatMode: return .advanceRepeatMode
+        case .beginFastForward: return .beginFastForward
+        case .endFastForward: return .endFastForward
+        case .beginRewind: return .beginRewind
+        case .endRewind: return .endRewind
+        case .rewind15Seconds: return .rewind15Seconds
+        case .fastForward15Seconds: return .fastForward15Seconds
+        case .rewind30Seconds: return .rewind30Seconds
+        case .fastForward30Seconds: return .fastForward30Seconds
         case .skipForward: return .skipForward
         case .skipBackward: return .skipBackward
-        default: return nil
+        case .changePlaybackRate: return .changePlaybackRate
+        case .rateTrack: return .rateTrack
+        case .likeTrack: return .likeTrack
+        case .dislikeTrack: return .dislikeTrack
+        case .bookmarkTrack: return .bookmarkTrack
+        case .nextChapter: return .nextChapter
+        case .previousChapter: return .previousChapter
+        case .nextAlbum: return .nextAlbum
+        case .previousAlbum: return .previousAlbum
+        case .nextPlaylist: return .nextPlaylist
+        case .previousPlaylist: return .previousPlaylist
+        case .banTrack: return .banTrack
+        case .addTrackToWishList: return .addTrackToWishList
+        case .removeTrackFromWishList: return .removeTrackFromWishList
+        case .nextInContext: return .nextInContext
+        case .previousInContext: return .previousInContext
+        case .resetPlaybackTimeout: return .resetPlaybackTimeout
+        case .seekToPlaybackPosition: return .seekToPlaybackPosition
+        case .changeRepeatMode: return .changeRepeatMode
+        case .changeShuffleMode: return .changeShuffleMode
+        case .setPlaybackQueue: return .setPlaybackQueue
+        case .addNowPlayingItemToLibrary: return .addNowPlayingItemToLibrary
+        case .createRadioStation: return .createRadioStation
+        case .addItemToLibrary: return .addItemToLibrary
+        case .insertIntoPlaybackQueue: return .insertIntoPlaybackQueue
+        case .enableLanguageOption: return .enableLanguageOption
+        case .disableLanguageOption: return .disableLanguageOption
+        case .reorderPlaybackQueue: return .reorderPlaybackQueue
+        case .removeFromPlaybackQueue: return .removeFromPlaybackQueue
+        case .playItemInPlaybackQueue: return .playItemInPlaybackQueue
+        case .prepareForSetQueue: return .prepareForSetQueue
+        case .setPlaybackSession: return .setPlaybackSession
+        case .preloadedPlaybackSession: return .preloadedPlaybackSession
+        case .setPriorityForPlaybackSession: return .setPriorityForPlaybackSession
+        case .discardPlaybackSession: return .discardPlaybackSession
+        case .reshuffle: return .reshuffle
+        case .changeQueueEndAction: return .changeQueueEndAction
         }
+    }
+
+    internal var isSendableOverMRP: Bool {
+        switch self {
+        case .enableLanguageOption, .disableLanguageOption,
+            .setPlaybackQueue, .insertIntoPlaybackQueue, .reorderPlaybackQueue,
+            .removeFromPlaybackQueue, .playItemInPlaybackQueue, .prepareForSetQueue,
+            .setPlaybackSession, .preloadedPlaybackSession, .setPriorityForPlaybackSession,
+            .discardPlaybackSession, .changeQueueEndAction:
+            return false
+        default:
+            return true
+        }
+    }
+}
+
+extension MediaCommandInfo {
+    fileprivate init(_ info: CommandInfo) {
+        self.init(
+            state: info.enabled ? .available : .unavailable,
+            active: info.hasActive ? info.active : false,
+            preferredIntervals: info.preferredIntervals,
+            localizedTitle: info.hasLocalizedTitle ? info.localizedTitle : nil,
+            localizedShortTitle: info.hasLocalizedShortTitle ? info.localizedShortTitle : nil,
+            supportedRates: info.supportedRates,
+            preferredPlaybackRate: info.hasPreferredPlaybackRate ? info.preferredPlaybackRate : nil,
+            skipInterval: info.hasSkipInterval ? Int(info.skipInterval) : nil,
+            numberOfAvailableSkips: info.hasNumAvailableSkips ? Int(info.numAvailableSkips) : nil
+        )
     }
 }

@@ -6,7 +6,7 @@ import Foundation
 /// performing pair-verify, and initializing protocol interfaces. Touch setup
 /// is best-effort so devices that do not answer `_touchStart` can still expose
 /// remote, app, power, audio, and keyboard functionality. Subscribed Companion
-/// events feed a shared state store used by controllers and feature reporting.
+/// events feed a shared state store used by controllers and capability reporting.
 ///
 /// Thread safety: Mutable interface references protected by `NSLock`.
 public final class CompanionService: @unchecked Sendable, CompanionConnectionDelegate {
@@ -32,7 +32,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     private var _audio: CompanionAudio?
     private var _keyboard: CompanionKeyboard?
     private var _touch: CompanionTouch?
-    private var _features: CompanionFeatures?
+    private var _capabilities: CompanionCapabilities?
+    private var _mediaCommands: CompanionMediaCommands?
 
     public var remoteControl: CompanionRemoteControl? {
         lock.lock()
@@ -69,10 +70,15 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         defer { lock.unlock() }
         return _touch
     }
-    public var features: CompanionFeatures? {
+    public var capabilities: CompanionCapabilities? {
         lock.lock()
         defer { lock.unlock() }
-        return _features
+        return _capabilities
+    }
+    public var mediaCommands: CompanionMediaCommands? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _mediaCommands
     }
 
     public convenience init(
@@ -153,7 +159,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             _audio = CompanionAudio(protocol: protocolHandler, stateStore: stateStore)
             _keyboard = CompanionKeyboard(protocol: protocolHandler, stateStore: stateStore)
             _touch = touchAvailable ? CompanionTouch(protocol: protocolHandler) : nil
-            _features = CompanionFeatures(stateStore: stateStore)
+            _capabilities = CompanionCapabilities(stateStore: stateStore)
+            _mediaCommands = CompanionMediaCommands(protocol: protocolHandler, stateStore: stateStore)
         }
     }
 

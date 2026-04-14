@@ -196,7 +196,7 @@ try await atv.apps.launchApp(bundleID: "com.apple.TVMovies")
 try await atv.power.turnOff()
 
 // Keyboard text entry, when a text field is focused on the Apple TV
-if atv.features.isAvailable(.textSet) {
+if atv.capabilities.isAvailable(.keyboard(.textSet)) {
     try await atv.keyboard.textSet("Movie title")
 }
 
@@ -236,25 +236,32 @@ Task {
 }
 ```
 
-## Check feature availability
+## Check capability availability
 
-Not every protocol implements every feature. Use ``FeatureProvider`` to check
+Not every protocol implements every capability. Use ``CapabilityProvider`` to check
 what's available on a connected device before calling it. Availability can
 change after protocol events or a successful request. Companion media controls,
 volume, power, apps, accounts, and keyboard focus start unavailable until the
 Apple TV reports or proves that state; Companion touch gestures can also be
 unavailable even when the rest of Companion setup succeeds. Output-device list
-and mutation features become available when direct MRP or AirPlay-tunneled MRP
+and mutation capabilities become available when direct MRP or AirPlay-tunneled MRP
 reports route state:
 
 ```swift
-if atv.features.inState([.available], features: .play, .pause, .next) {
+if atv.capabilities.inState(
+    [.available],
+    capabilities: .mediaCommand(.play), .mediaCommand(.pause), .mediaCommand(.nextTrack)
+) {
     // Full playback control is supported.
 }
 
-if atv.features.isAvailable(.setOutputDevices) {
+if atv.capabilities.isAvailable(.audio(.setOutputDevices)) {
     let speakers = await atv.audio.outputDevices
     try await atv.audio.setOutputDevices(speakers.map(\.identifier))
+}
+
+if atv.mediaCommands.commandInfo(.play).state == .available {
+    try await atv.mediaCommands.send(.play)
 }
 ```
 

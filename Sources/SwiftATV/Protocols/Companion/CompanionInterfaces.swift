@@ -1,23 +1,5 @@
 import Foundation
 
-/// Maps FeatureName to HIDCommand for remote control.
-private let featureToHID: [FeatureName: HIDCommand] = [
-    .up: .up,
-    .down: .down,
-    .left: .left,
-    .right: .right,
-    .menu: .menu,
-    .select: .select,
-    .home: .home,
-    .volumeUp: .volumeUp,
-    .volumeDown: .volumeDown,
-    .playPause: .playPause,
-    .channelUp: .channelIncrement,
-    .channelDown: .channelDecrement,
-    .screensaver: .screensaver,
-    .guide: .guide,
-]
-
 private let companionStateWaitIntervalNanoseconds: UInt64 = 50_000_000
 
 internal struct CompanionMediaControlFlags: OptionSet, Sendable {
@@ -180,100 +162,112 @@ internal final class CompanionStateStore: @unchecked Sendable {
         }
     }
 
-    internal func featureInfo(_ feature: FeatureName) -> FeatureInfo {
+    internal func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
         lock.withLock {
             guard _isConnected else {
-                if Self.supportedFeatures.contains(feature) || Self.touchFeatures.contains(feature) {
-                    return FeatureInfo(state: .unavailable)
+                if Self.supportedCapabilities.contains(capability) || Self.touchCapabilities.contains(capability) {
+                    return CapabilityInfo(state: .unavailable)
                 }
-                return FeatureInfo(state: .unsupported)
+                return CapabilityInfo(state: .unsupported)
             }
 
-            if Self.touchFeatures.contains(feature) {
-                return FeatureInfo(state: _touchAvailable ? .available : .unavailable)
+            if Self.touchCapabilities.contains(capability) {
+                return CapabilityInfo(state: _touchAvailable ? .available : .unavailable)
             }
-            if Self.hidFeatures.contains(feature) {
-                return FeatureInfo(state: .available)
+            if Self.hidCapabilities.contains(capability) {
+                return CapabilityInfo(state: .available)
             }
-            if let flag = Self.mediaControlMap[feature] {
-                return FeatureInfo(state: _mediaControlFlags?.contains(flag) == true ? .available : .unavailable)
+            if Self.alwaysAvailableMediaCommandCapabilities.contains(capability) {
+                return CapabilityInfo(state: .available)
             }
-            if Self.volumeFeatures.contains(feature) {
-                return FeatureInfo(
+            if let flag = Self.mediaControlMap[capability] {
+                return CapabilityInfo(state: _mediaControlFlags?.contains(flag) == true ? .available : .unavailable)
+            }
+            if Self.volumeCapabilities.contains(capability) {
+                return CapabilityInfo(
                     state: _mediaControlFlags?.contains(.volume) == true && _hasVolume ? .available : .unavailable
                 )
             }
-            if Self.powerFeatures.contains(feature) {
-                return FeatureInfo(state: _hasPowerState ? .available : .unavailable)
+            if Self.powerCapabilities.contains(capability) {
+                return CapabilityInfo(state: _hasPowerState ? .available : .unavailable)
             }
-            if feature == .textFocusState {
-                return FeatureInfo(state: _hasKeyboardFocus ? .available : .unavailable)
+            if capability == .keyboard(.focusState) {
+                return CapabilityInfo(state: _hasKeyboardFocus ? .available : .unavailable)
             }
-            if Self.textInputFeatures.contains(feature) {
-                return FeatureInfo(state: _focusState == .focused ? .available : .unavailable)
+            if Self.textInputCapabilities.contains(capability) {
+                return CapabilityInfo(state: _focusState == .focused ? .available : .unavailable)
             }
-            if Self.appFeatures.contains(feature) {
-                return FeatureInfo(state: _appsAvailable ? .available : .unavailable)
+            if Self.appCapabilities.contains(capability) {
+                return CapabilityInfo(state: _appsAvailable ? .available : .unavailable)
             }
-            if Self.accountFeatures.contains(feature) {
-                return FeatureInfo(state: _accountsAvailable ? .available : .unavailable)
+            if Self.accountCapabilities.contains(capability) {
+                return CapabilityInfo(state: _accountsAvailable ? .available : .unavailable)
             }
-            return FeatureInfo(state: .unsupported)
+            return CapabilityInfo(state: .unsupported)
         }
     }
 
-    private static let hidFeatures: Set<FeatureName> = [
-        .up, .down, .left, .right,
-        .playPause, .select, .menu,
-        .volumeUp, .volumeDown, .home, .homeHold,
-        .topMenu, .suspend, .wakeUp,
-        .channelUp, .channelDown,
-        .screensaver, .guide, .controlCenter,
+    private static let hidCapabilities: Set<Capability> = [
+        .remote(.up), .remote(.down), .remote(.left), .remote(.right),
+        .remote(.playPause), .remote(.select), .remote(.menu),
+        .remote(.volumeUp), .remote(.volumeDown), .remote(.home), .remote(.homeHold),
+        .remote(.topMenu), .remote(.suspend), .remote(.wakeUp),
+        .remote(.channelUp), .remote(.channelDown),
+        .remote(.screensaver), .remote(.guide), .remote(.controlCenter),
     ]
 
-    private static let mediaControlMap: [FeatureName: CompanionMediaControlFlags] = [
-        .play: .play,
-        .pause: .pause,
-        .stop: .pause,
-        .next: .nextTrack,
-        .previous: .previousTrack,
-        .skipForward: .skipForward,
-        .skipBackward: .skipBackward,
+    private static let mediaControlMap: [Capability: CompanionMediaControlFlags] = [
+        .mediaCommand(.play): .play,
+        .mediaCommand(.pause): .pause,
+        .mediaCommand(.stop): .pause,
+        .mediaCommand(.nextTrack): .nextTrack,
+        .mediaCommand(.previousTrack): .previousTrack,
+        .mediaCommand(.beginFastForward): .fastForward,
+        .mediaCommand(.endFastForward): .fastForward,
+        .mediaCommand(.beginRewind): .rewind,
+        .mediaCommand(.endRewind): .rewind,
+        .mediaCommand(.skipForward): .skipForward,
+        .mediaCommand(.skipBackward): .skipBackward,
     ]
 
-    private static let volumeFeatures: Set<FeatureName> = [
-        .volume, .setVolume,
+    private static let alwaysAvailableMediaCommandCapabilities: Set<Capability> = [
+        .mediaCommand(.togglePlayPause)
     ]
 
-    private static let powerFeatures: Set<FeatureName> = [
-        .turnOn, .turnOff, .powerState,
+    private static let volumeCapabilities: Set<Capability> = [
+        .audio(.volume), .audio(.setVolume),
     ]
 
-    private static let textInputFeatures: Set<FeatureName> = [
-        .textGet, .textClear, .textAppend, .textSet,
+    private static let powerCapabilities: Set<Capability> = [
+        .power(.turnOn), .power(.turnOff), .power(.state),
     ]
 
-    private static let appFeatures: Set<FeatureName> = [
-        .appList, .launchApp,
+    private static let textInputCapabilities: Set<Capability> = [
+        .keyboard(.textGet), .keyboard(.textClear), .keyboard(.textAppend), .keyboard(.textSet),
     ]
 
-    private static let accountFeatures: Set<FeatureName> = [
-        .accountList, .switchAccount,
+    private static let appCapabilities: Set<Capability> = [
+        .apps(.list), .apps(.launch),
     ]
 
-    private static let touchFeatures: Set<FeatureName> = [
-        .swipe, .action, .click,
+    private static let accountCapabilities: Set<Capability> = [
+        .accounts(.list), .accounts(.switchAccount),
     ]
 
-    private static let supportedFeatures =
-        hidFeatures
+    private static let touchCapabilities: Set<Capability> = [
+        .touch(.swipe), .touch(.action), .touch(.click),
+    ]
+
+    private static let supportedCapabilities =
+        hidCapabilities
         .union(Set(mediaControlMap.keys))
-        .union(volumeFeatures)
-        .union(powerFeatures)
-        .union(textInputFeatures)
-        .union(appFeatures)
-        .union(accountFeatures)
-        .union([.textFocusState])
+        .union(alwaysAvailableMediaCommandCapabilities)
+        .union(volumeCapabilities)
+        .union(powerCapabilities)
+        .union(textInputCapabilities)
+        .union(appCapabilities)
+        .union(accountCapabilities)
+        .union([.keyboard(.focusState)])
 }
 
 /// Companion protocol implementation of RemoteControl.
@@ -391,7 +385,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
 // MARK: - Apps
 
 /// Companion protocol implementation of AppsController.
-/// Marks app features available after a successful app request.
+/// Marks app capabilities available after a successful app request.
 public struct CompanionApps: AppsController, Sendable {
     private let handler: CompanionProtocolHandler
     private let stateStore: CompanionStateStore
@@ -425,7 +419,7 @@ public struct CompanionApps: AppsController, Sendable {
 // MARK: - User Accounts
 
 /// Companion protocol implementation of UserAccountsController.
-/// Marks account features available after a successful account request.
+/// Marks account capabilities available after a successful account request.
 public struct CompanionUserAccounts: UserAccountsController, Sendable {
     private let handler: CompanionProtocolHandler
     private let stateStore: CompanionStateStore
@@ -799,15 +793,101 @@ public struct CompanionTouch: TouchController, Sendable {
     }
 }
 
-// MARK: - Features
+// MARK: - Media Commands
 
-/// Companion protocol implementation of FeatureProvider.
+/// Companion protocol implementation of selected MediaRemote commands.
+public struct CompanionMediaCommands: MediaCommandController, Sendable {
+    private let handler: CompanionProtocolHandler
+    private let stateStore: CompanionStateStore
+
+    public init(protocol handler: CompanionProtocolHandler) {
+        self.init(protocol: handler, stateStore: CompanionStateStore())
+    }
+
+    internal init(protocol handler: CompanionProtocolHandler, stateStore: CompanionStateStore) {
+        self.handler = handler
+        self.stateStore = stateStore
+    }
+
+    public func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo {
+        let info = stateStore.capabilityInfo(.mediaCommand(command))
+        return MediaCommandInfo(state: info.state, diagnostic: info.options["diagnostic"])
+    }
+
+    public func allCommands(includeUnsupported: Bool) -> [MediaRemoteCommand: MediaCommandInfo] {
+        Dictionary(
+            uniqueKeysWithValues: MediaRemoteCommand.allCases.compactMap { command in
+                let info = commandInfo(command)
+                if !includeUnsupported, info.state == .unsupported {
+                    return nil
+                }
+                return (command, info)
+            })
+    }
+
+    public func send(_ command: MediaRemoteCommand, options: MediaCommandOptions) async throws(ATVError) {
+        switch command {
+        case .play:
+            try await sendMediaControl(.play)
+        case .pause, .stop:
+            try await sendMediaControl(.pause)
+        case .togglePlayPause:
+            try await sendHIDCommand(.playPause)
+        case .nextTrack:
+            try await sendMediaControl(.nextTrack)
+        case .previousTrack:
+            try await sendMediaControl(.previousTrack)
+        case .skipForward:
+            try await sendSkip(interval: options.skipInterval ?? 0)
+        case .skipBackward:
+            try await sendSkip(interval: -(options.skipInterval ?? 0))
+        case .beginFastForward:
+            try await sendMediaControl(.fastForwardBegin)
+        case .endFastForward:
+            try await sendMediaControl(.fastForwardEnd)
+        case .beginRewind:
+            try await sendMediaControl(.rewindBegin)
+        case .endRewind:
+            try await sendMediaControl(.rewindEnd)
+        default:
+            throw ATVError.notSupported("Media command \(command) is not supported by Companion")
+        }
+    }
+
+    private func sendMediaControl(_ command: MediaControlCommand) async throws(ATVError) {
+        let content = OPACK.Value.dictionary([("_mcc", .uint(UInt64(command.rawValue)))])
+        _ = try await handler.sendRequest("_mcc", content: content)
+    }
+
+    private func sendSkip(interval: TimeInterval) async throws(ATVError) {
+        let content = OPACK.Value.dictionary([
+            ("_mcc", .uint(UInt64(MediaControlCommand.skipBy.rawValue))),
+            ("_ski", .double(interval)),
+        ])
+        _ = try await handler.sendRequest("_mcc", content: content)
+    }
+
+    private func sendHIDCommand(_ command: HIDCommand) async throws(ATVError) {
+        for state in [UInt64(1), UInt64(2)] {
+            _ = try await handler.sendRequest(
+                "_hidC",
+                content: OPACK.Value.dictionary([
+                    ("_hBtS", .uint(state)),
+                    ("_hidC", .uint(UInt64(command.rawValue))),
+                ]))
+        }
+    }
+}
+
+// MARK: - Capabilities
+
+/// Companion protocol implementation of CapabilityProvider.
 ///
-/// Feature availability is backed by observed Companion state. Navigation HID
-/// commands are available after connect, while media controls, power state,
+/// Capability availability is backed by observed Companion state. Navigation
+/// HID commands are available after connect, while media controls, power state,
 /// volume, keyboard focus, apps, accounts, and touch are gated by setup or
 /// events that prove each surface is usable.
-public final class CompanionFeatures: @unchecked Sendable, FeatureProvider {
+public final class CompanionCapabilities: @unchecked Sendable, CapabilityProvider {
     private let stateStore: CompanionStateStore
 
     public init(isConnected: Bool = true, touchAvailable: Bool = true) {
@@ -818,24 +898,24 @@ public final class CompanionFeatures: @unchecked Sendable, FeatureProvider {
         self.stateStore = stateStore
     }
 
-    public func featureInfo(_ feature: FeatureName) -> FeatureInfo {
-        stateStore.featureInfo(feature)
+    public func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
+        stateStore.capabilityInfo(capability)
     }
 
-    public func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {
-        var result: [FeatureName: FeatureInfo] = [:]
-        for feature in FeatureName.allCases {
-            let info = featureInfo(feature)
+    public func allCapabilities(includeUnsupported: Bool) -> [Capability: CapabilityInfo] {
+        var result: [Capability: CapabilityInfo] = [:]
+        for capability in Capability.allCases {
+            let info = capabilityInfo(capability)
             if includeUnsupported || info.state != .unsupported {
-                result[feature] = info
+                result[capability] = info
             }
         }
         return result
     }
 
-    public func inState(_ states: [FeatureState], features: FeatureName...) -> Bool {
-        features.allSatisfy { feature in
-            states.contains(featureInfo(feature).state)
+    public func inState(_ states: [CapabilityState], capabilities: Capability...) -> Bool {
+        capabilities.allSatisfy { capability in
+            states.contains(capabilityInfo(capability).state)
         }
     }
 }

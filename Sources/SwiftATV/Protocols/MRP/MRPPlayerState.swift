@@ -105,7 +105,7 @@ public actor MRPPlayerState {
         activeSnapshot()?.supportedCommands[command] ?? defaultSupportedCommands[command]
     }
 
-    func featureState(for command: Command) -> FeatureState {
+    func capabilityState(for command: Command) -> CapabilityState {
         guard let info = commandInfo(command) else {
             return .unavailable
         }

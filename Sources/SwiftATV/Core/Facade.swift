@@ -34,7 +34,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private let audioRelayer = Relayer<AudioController>()
     private let keyboardRelayer = Relayer<KeyboardController>()
     private let touchRelayer = Relayer<TouchController>()
-    private let featureRelayer = Relayer<FeatureProvider>()
+    private let capabilityRelayer = Relayer<CapabilityProvider>()
+    private let mediaCommandRelayer = Relayer<MediaCommandController>()
 
     // Event stream
     private var eventContinuation: AsyncStream<DeviceEvent>.Continuation?
@@ -73,8 +74,12 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         powerRelayer.main ?? UnsupportedPower()
     }
 
-    public var features: FeatureProvider {
-        RelayingFeatures(relayer: featureRelayer)
+    public var capabilities: CapabilityProvider {
+        RelayingCapabilities(relayer: capabilityRelayer)
+    }
+
+    public var mediaCommands: MediaCommandController {
+        RelayingMediaCommands(relayer: mediaCommandRelayer)
     }
 
     public var apps: AppsController {
@@ -243,7 +248,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         audioRelayer.unregister(for: `protocol`)
         keyboardRelayer.unregister(for: `protocol`)
         touchRelayer.unregister(for: `protocol`)
-        featureRelayer.unregister(for: `protocol`)
+        capabilityRelayer.unregister(for: `protocol`)
+        mediaCommandRelayer.unregister(for: `protocol`)
     }
 
     private func unregisterAllProtocols() {
@@ -350,8 +356,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         if let tch = companion.touch {
             touchRelayer.register(tch, for: .companion)
         }
-        if let feat = companion.features {
-            featureRelayer.register(feat, for: .companion)
+        if let caps = companion.capabilities {
+            capabilityRelayer.register(caps, for: .companion)
+        }
+        if let commands = companion.mediaCommands {
+            mediaCommandRelayer.register(commands, for: .companion)
         }
     }
 
@@ -433,8 +442,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         if let aud = mrp.audio {
             audioRelayer.register(aud, for: registrationProtocol)
         }
-        if let feat = mrp.features {
-            featureRelayer.register(feat, for: registrationProtocol)
+        if let caps = mrp.capabilities {
+            capabilityRelayer.register(caps, for: registrationProtocol)
+        }
+        if let commands = mrp.mediaCommands {
+            mediaCommandRelayer.register(commands, for: registrationProtocol)
         }
     }
 
@@ -510,27 +522,66 @@ struct RelayingRemoteControl: RemoteControl {
     func controlCenter() async throws(ATVError) { try await call { try await $0.controlCenter() } }
 }
 
-struct RelayingFeatures: FeatureProvider {
-    let relayer: Relayer<FeatureProvider>
+struct RelayingMediaCommands: MediaCommandController {
+    let relayer: Relayer<MediaCommandController>
 
-    func featureInfo(_ feature: FeatureName) -> FeatureInfo {
-        let infos = relayer.all.map { $0.featureInfo(feature) }
-        return infos.first { $0.state != .unsupported } ?? infos.first ?? FeatureInfo(state: .unsupported)
+    func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo {
+        let infos = relayer.all.map { $0.commandInfo(command) }
+        return infos.first { $0.state != .unsupported }
+            ?? infos.first
+            ?? MediaCommandInfo(state: .unsupported, diagnostic: "Media commands not available")
     }
 
-    func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {
-        var result: [FeatureName: FeatureInfo] = [:]
-        for feature in FeatureName.allCases {
-            let info = featureInfo(feature)
+    func allCommands(includeUnsupported: Bool) -> [MediaRemoteCommand: MediaCommandInfo] {
+        var result: [MediaRemoteCommand: MediaCommandInfo] = [:]
+        for command in MediaRemoteCommand.allCases {
+            let info = commandInfo(command)
             if includeUnsupported || info.state != .unsupported {
-                result[feature] = info
+                result[command] = info
             }
         }
         return result
     }
 
-    func inState(_ states: [FeatureState], features: FeatureName...) -> Bool {
-        features.allSatisfy { states.contains(featureInfo($0).state) }
+    func send(_ command: MediaRemoteCommand, options: MediaCommandOptions) async throws(ATVError) {
+        var lastUnsupported: ATVError?
+        for implementation in relayer.all {
+            do {
+                try await implementation.send(command, options: options)
+                return
+            } catch let error {
+                if case .notSupported = error {
+                    lastUnsupported = error
+                    continue
+                }
+                throw error
+            }
+        }
+        throw lastUnsupported ?? ATVError.notSupported("Media commands not available")
+    }
+}
+
+struct RelayingCapabilities: CapabilityProvider {
+    let relayer: Relayer<CapabilityProvider>
+
+    func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
+        let infos = relayer.all.map { $0.capabilityInfo(capability) }
+        return infos.first { $0.state != .unsupported } ?? infos.first ?? CapabilityInfo(state: .unsupported)
+    }
+
+    func allCapabilities(includeUnsupported: Bool) -> [Capability: CapabilityInfo] {
+        var result: [Capability: CapabilityInfo] = [:]
+        for capability in Capability.allCases {
+            let info = capabilityInfo(capability)
+            if includeUnsupported || info.state != .unsupported {
+                result[capability] = info
+            }
+        }
+        return result
+    }
+
+    func inState(_ states: [CapabilityState], capabilities: Capability...) -> Bool {
+        capabilities.allSatisfy { states.contains(capabilityInfo($0).state) }
     }
 }
 

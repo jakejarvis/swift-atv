@@ -28,8 +28,8 @@
 
             try await service.setup()
 
-            XCTAssertEqual(service.features?.featureInfo(.up).state, .available)
-            XCTAssertEqual(service.features?.featureInfo(.swipe).state, .unavailable)
+            XCTAssertEqual(service.capabilities?.capabilityInfo(.remote(.up)).state, .available)
+            XCTAssertEqual(service.capabilities?.capabilityInfo(.touch(.swipe)).state, .unavailable)
             XCTAssertNil(service.touch)
 
             let remote = try XCTUnwrap(service.remoteControl)
