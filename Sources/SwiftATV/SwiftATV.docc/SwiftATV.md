@@ -13,15 +13,18 @@ output-device mutation, and HAP pairing; AirPlay 2 can pair with HAP and tunnel
 MRP traffic, including output-device mutation, when direct MRP is unavailable;
 Companion provides modern app, keyboard text input/focus, best-effort touch,
 power, audio-volume, and remote-control support. Connection setup is
-deterministic for implemented control protocols (direct MRP, then
-AirPlay-tunneled MRP, then Companion) and returns as soon as one usable protocol
-connects unless ``ConnectStrategy/allAllowed`` is requested. Companion-only
+deterministic for implemented control protocols and follows
+``ConnectOptions/protocols`` for both setup attempt order and facade routing.
+By default SwiftATV tries direct MRP, then AirPlay-tunneled MRP, then
+Companion, and returns as soon as one usable protocol connects unless
+``ConnectStrategy/allAllowed`` is requested. Companion-only
 discoveries with reusable HAP credentials can still attempt AirPlay-tunneled MRP
 on the default AirPlay port. The result
-describes the primary protocol, active protocols, setup attempts, and optional
+describes the primary protocol, active protocols, enriched setup attempts, and optional
 setup diagnostics. ``ConnectOptions/requestTimeout`` bounds protocol TCP
 connects and setup exchanges so a stalled service can fail and let fallback
-continue.
+continue. ``ConnectOptions/runtimeRequestTimeout`` bounds post-connect MRP and
+Companion command request/response exchanges.
 
 The facade tracks lifecycle per protocol. Closing or failing a non-primary
 secondary protocol unregisters only that protocol; the device emits
@@ -34,7 +37,9 @@ MRP or AirPlay-tunneled MRP reports route state.
 ``ATVSettings/clientIdentity`` describes the local controller or app identity
 sent during pairing and protocol setup, including the stable Companion Rapport
 identifier sent in `_systemInfo`. It must not be copied from the target Apple
-TV's identifiers.
+TV's identifiers. ``ATVSettingsVault`` is a pure Codable helper for storing
+settings under every known device identifier and merging alias records as
+discovery data changes.
 
 Discovery resolves Bonjour TXT records with each live service, merges services
 by stable device identifiers, including Companion-only TXT identifiers, and can
@@ -76,6 +81,7 @@ await atv.close()
 - ``ConnectStrategy``
 - ``ConnectResult``
 - ``ConnectAttempt``
+- ``ConnectCredentialSource``
 - ``ProtocolSetupDiagnostic``
 - ``defaultProtocolRequestTimeout``
 - <doc:GettingStarted>
@@ -143,6 +149,8 @@ await atv.close()
 
 - ``ATVProtocol``
 - ``ATVSettings``
+- ``ATVSettingsVault``
+- ``ATVSettingsVaultRecord``
 - ``ClientIdentitySettings``
 - ``ProtocolSettings``
 - ``AirPlaySettings``

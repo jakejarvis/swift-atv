@@ -54,6 +54,8 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
             return .disabled
         case .unsupported:
             return .unsupported
+        case .notNeeded where `protocol` == .airPlay:
+            return hasAirPlayTunnelCredentials(settings: settings) ? .paired : .credentialsMissing
         case .notNeeded:
             return .notNeeded
         case .optional:
@@ -68,6 +70,19 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
             return false
         }
         return !credentials.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func hasAirPlayTunnelCredentials(settings: ATVSettings) -> Bool {
+        guard `protocol` == .airPlay else {
+            return hasCredentials(settings: settings)
+        }
+        return [
+            settings.protocols.airplay.credentials,
+            credentials,
+            settings.protocols.companion.credentials,
+        ].contains { credentials in
+            credentials?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
     }
 }
 
@@ -279,6 +294,18 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
             guard let service = candidates.first(where: { $0.protocol == `protocol` }) else {
                 continue
             }
+            if service.protocol == .airPlay {
+                let preflight = connectability(for: service, settings: settings)
+                switch preflight.status {
+                case .missingCredentials:
+                    return service
+                case .connectable:
+                    continue
+                default:
+                    break
+                }
+            }
+
             switch service.effectivePairingStatus(settings: settings) {
             case .unpaired, .credentialsMissing:
                 return service
@@ -307,7 +334,7 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func connectability(
+    internal func connectability(
         for service: ServiceInfo,
         settings: ATVSettings
     ) -> ServiceConnectability {

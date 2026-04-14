@@ -3,21 +3,21 @@ import Foundation
 // MARK: - AirPlay Settings
 
 /// AirPlay-specific version selection.
-public enum AirPlayVersion: Int, Codable, Sendable {
+public enum AirPlayVersion: Int, Codable, Sendable, Hashable {
     case auto = 0
     case v1 = 1
     case v2 = 2
 }
 
 /// MRP tunnel mode for AirPlay connections.
-public enum MrpTunnelMode: Int, Codable, Sendable {
+public enum MrpTunnelMode: Int, Codable, Sendable, Hashable {
     case auto = 0
     case force = 1
     case disable = 2
 }
 
 /// Settings for the AirPlay protocol.
-public struct AirPlaySettings: Codable, Sendable {
+public struct AirPlaySettings: Codable, Sendable, Hashable {
     public var identifier: String?
     public var credentials: String?
     public var password: String?
@@ -42,7 +42,7 @@ public struct AirPlaySettings: Codable, Sendable {
 // MARK: - Companion Settings
 
 /// Settings for the Companion protocol.
-public struct CompanionSettings: Codable, Sendable {
+public struct CompanionSettings: Codable, Sendable, Hashable {
     public var identifier: String?
     public var credentials: String?
 
@@ -55,7 +55,7 @@ public struct CompanionSettings: Codable, Sendable {
 // MARK: - MRP Settings
 
 /// Settings for the MRP protocol.
-public struct MrpSettings: Codable, Sendable {
+public struct MrpSettings: Codable, Sendable, Hashable {
     public var identifier: String?
     public var credentials: String?
 
@@ -72,7 +72,7 @@ public struct MrpSettings: Codable, Sendable {
 /// These values describe the app or controller running SwiftATV, not the
 /// target Apple TV. They are used in Companion `_systemInfo`, MRP device-info
 /// messages, AirPlay client-info payloads, and pair-setup display names.
-public struct ClientIdentitySettings: Codable, Sendable {
+public struct ClientIdentitySettings: Codable, Sendable, Hashable {
     public static let defaultName = "SwiftATV"
     public static let defaultMacAddress = "02:73:77:69:66:74"
     public static let defaultModel = "iPhone10,6"
@@ -159,7 +159,7 @@ public struct ClientIdentitySettings: Codable, Sendable {
 // MARK: - Protocol Settings
 
 /// Container for all protocol-specific settings.
-public struct ProtocolSettings: Codable, Sendable {
+public struct ProtocolSettings: Codable, Sendable, Hashable {
     public var airplay: AirPlaySettings
     public var companion: CompanionSettings
     public var mrp: MrpSettings
@@ -178,7 +178,7 @@ public struct ProtocolSettings: Codable, Sendable {
 // MARK: - ATV Settings
 
 /// Top-level settings for a device, combining local controller identity and protocol settings.
-public struct ATVSettings: Codable, Sendable {
+public struct ATVSettings: Codable, Sendable, Hashable {
     public var clientIdentity: ClientIdentitySettings
     public var protocols: ProtocolSettings
 
@@ -240,6 +240,147 @@ public struct ATVSettings: Codable, Sendable {
             protocols.companion.identifier = pairing.service.identifier
         case .mrp:
             protocols.mrp.identifier = pairing.service.identifier
+        }
+    }
+}
+
+/// A pure value container for persisting settings for multiple Apple TV devices.
+///
+/// The vault stores ``ATVSettings`` records under every known device identifier
+/// from ``AppleTVConfiguration/allIdentifiers``. It does not read or write any
+/// external storage; apps can encode this value to JSON and store the bytes in a
+/// Keychain, file, cloud record, or other persistence backend.
+public struct ATVSettingsVault: Codable, Sendable, Hashable {
+    public var version: Int
+    public var records: [ATVSettingsVaultRecord]
+
+    public init(version: Int = 1, records: [ATVSettingsVaultRecord] = []) {
+        self.version = version
+        self.records = records
+    }
+
+    /// Return stored settings for `configuration`, or `defaultSettings` when no
+    /// stored record matches any known identifier.
+    public func settings(
+        for configuration: AppleTVConfiguration,
+        defaultSettings: ATVSettings = ATVSettings()
+    ) -> ATVSettings {
+        guard let index = recordIndex(matching: identifiers(for: configuration)) else {
+            return defaultSettings
+        }
+        return records[index].settings
+    }
+
+    /// Apply a pairing result to `baseSettings` and save the result for the
+    /// configuration under every known identifier.
+    public mutating func savePairing(
+        _ pairing: PairingResult,
+        configuration: AppleTVConfiguration,
+        baseSettings: ATVSettings
+    ) {
+        var settings = baseSettings
+        settings.apply(pairing)
+        saveSettings(settings, for: configuration)
+    }
+
+    /// Save settings for a configuration, merging any existing records that
+    /// share at least one known identifier.
+    ///
+    /// Incoming settings win. Missing protocol identifiers, credentials, and
+    /// AirPlay passwords are filled from any merged records.
+    public mutating func saveSettings(
+        _ settings: ATVSettings,
+        for configuration: AppleTVConfiguration
+    ) {
+        let configurationIdentifiers = identifiers(for: configuration)
+        guard !configurationIdentifiers.isEmpty else { return }
+
+        let matchingIndexes = recordIndexes(matching: configurationIdentifiers)
+        if let firstIndex = matchingIndexes.first {
+            let mergedIdentifiers =
+                matchingIndexes
+                .reduce(configurationIdentifiers) { identifiers, index in
+                    identifiers.union(records[index].identifiers)
+                }
+                .sorted()
+
+            let mergedSettings = settings.mergingMissingProtocolValues(
+                from: matchingIndexes.map { records[$0].settings }
+            )
+            records[firstIndex] = ATVSettingsVaultRecord(
+                identifiers: mergedIdentifiers,
+                settings: mergedSettings
+            )
+            for index in matchingIndexes.dropFirst().reversed() {
+                records.remove(at: index)
+            }
+        } else {
+            records.append(
+                ATVSettingsVaultRecord(
+                    identifiers: configurationIdentifiers.sorted(),
+                    settings: settings
+                )
+            )
+        }
+    }
+
+    private func recordIndex(matching identifiers: Set<String>) -> Int? {
+        recordIndexes(matching: identifiers).first
+    }
+
+    private func recordIndexes(matching identifiers: Set<String>) -> [Int] {
+        guard !identifiers.isEmpty else { return [] }
+        return records.indices.filter { index in
+            !Set(records[index].identifiers).isDisjoint(with: identifiers)
+        }
+    }
+
+    private func identifiers(for configuration: AppleTVConfiguration) -> Set<String> {
+        configuration.allIdentifiers
+    }
+}
+
+/// One settings record in an ``ATVSettingsVault``.
+public struct ATVSettingsVaultRecord: Codable, Sendable, Hashable {
+    public var identifiers: [String]
+    public var settings: ATVSettings
+
+    public init(identifiers: [String], settings: ATVSettings) {
+        self.identifiers = identifiers
+        self.settings = settings
+    }
+}
+
+extension ATVSettings {
+    fileprivate func mergingMissingProtocolValues(from existingSettings: [ATVSettings]) -> ATVSettings {
+        var merged = self
+        for existing in existingSettings {
+            merged.fillMissingProtocolValues(from: existing)
+        }
+        return merged
+    }
+
+    private mutating func fillMissingProtocolValues(from existing: ATVSettings) {
+        if protocols.airplay.identifier == nil {
+            protocols.airplay.identifier = existing.protocols.airplay.identifier
+        }
+        if protocols.airplay.credentials == nil {
+            protocols.airplay.credentials = existing.protocols.airplay.credentials
+        }
+        if protocols.airplay.password == nil {
+            protocols.airplay.password = existing.protocols.airplay.password
+        }
+        if protocols.companion.identifier == nil {
+            protocols.companion.identifier = existing.protocols.companion.identifier
+        }
+        if protocols.companion.credentials == nil {
+            protocols.companion.credentials = existing.protocols.companion.credentials
+        }
+        if protocols.mrp.identifier == nil {
+            protocols.mrp.identifier = existing.protocols.mrp.identifier
+        }
+        if protocols.mrp.credentials == nil {
+            protocols.mrp.credentials = existing.protocols.mrp.credentials
         }
     }
 }

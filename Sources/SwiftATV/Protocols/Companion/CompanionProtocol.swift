@@ -57,17 +57,19 @@ public enum CompanionSystemStatus: Int, Sendable {
 public let defaultCompanionTimeout: TimeInterval = 5.0
 
 private final class PendingCompanionRequest: @unchecked Sendable {
-    let id = UUID()
+    let id: UUID
     let identifier: String
     let timeout: TimeInterval
     let continuation: CheckedContinuation<OPACK.Value, Error>
     var timeoutTask: Task<Void, Never>?
 
     init(
+        id: UUID = UUID(),
         identifier: String,
         timeout: TimeInterval,
         continuation: CheckedContinuation<OPACK.Value, Error>
     ) {
+        self.id = id
         self.identifier = identifier
         self.timeout = timeout
         self.continuation = continuation
@@ -81,6 +83,7 @@ private final class PendingCompanionRequest: @unchecked Sendable {
 /// and the full connection lifecycle (pair-verify, system info, sessions).
 public actor CompanionProtocolHandler {
     private let connection: CompanionConnection
+    private let defaultRequestTimeout: TimeInterval
     private var xid: Int
     private var pendingRequests: [Int: PendingCompanionRequest] = [:]
     private var eventContinuation: AsyncStream<(String, OPACK.Value)>.Continuation?
@@ -99,8 +102,12 @@ public actor CompanionProtocolHandler {
         return stream
     }
 
-    public init(connection: CompanionConnection) {
+    public init(
+        connection: CompanionConnection,
+        defaultRequestTimeout: TimeInterval = defaultCompanionTimeout
+    ) {
         self.connection = connection
+        self.defaultRequestTimeout = defaultRequestTimeout
         self.xid = Int.random(in: 0..<65536)
     }
 
@@ -160,15 +167,24 @@ public actor CompanionProtocolHandler {
     /// `failPendingRequests` on connection close). Used by regression
     /// tests that need to drive the drain path without a live channel.
     internal func _testInstallPendingRequest(xid: Int) async throws(ATVError) -> OPACK.Value {
+        let requestID = UUID()
+        let timeout = defaultRequestTimeout
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let context = TimeoutContext(
+            protocol: .companion,
+            operation: "testRequest",
+            requestID: "test",
+            duration: timeout
+        )
         do {
-            return try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<OPACK.Value, Error>) in
-                pendingRequests[xid] = PendingCompanionRequest(
-                    identifier: "test",
-                    timeout: defaultCompanionTimeout,
-                    continuation: continuation
-                )
-            }
+            return try await waitForRequest(
+                xid: xid,
+                identifier: "test",
+                timeout: timeout,
+                timeoutNs: timeoutNs,
+                requestID: requestID,
+                cancellationContext: context
+            ) {}
         } catch let err as ATVError {
             throw err
         } catch {
@@ -192,8 +208,9 @@ public actor CompanionProtocolHandler {
     public func sendRequest(
         _ identifier: String,
         content: OPACK.Value = .dict([]),
-        timeout: TimeInterval = defaultCompanionTimeout
+        timeout: TimeInterval? = nil
     ) async throws(ATVError) -> OPACK.Value {
+        let timeout = timeout ?? defaultRequestTimeout
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         xid += 1
         let currentXID = xid
@@ -206,25 +223,61 @@ public actor CompanionProtocolHandler {
         ])
         let data = OPACK.encode(message)
 
+        let requestID = UUID()
+        let context = TimeoutContext(
+            protocol: .companion,
+            operation: "request",
+            requestID: identifier,
+            duration: timeout
+        )
+
         do {
-            return try await withCheckedThrowingContinuation {
+            return try await waitForRequest(
+                xid: currentXID,
+                identifier: identifier,
+                timeout: timeout,
+                timeoutNs: timeoutNs,
+                requestID: requestID,
+                cancellationContext: context
+            ) { [connection] in
+                try await connection.send(type: .eOPACK, payload: data)
+            }
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
+        }
+    }
+
+    private func waitForRequest(
+        xid currentXID: Int,
+        identifier: String,
+        timeout: TimeInterval,
+        timeoutNs: UInt64,
+        requestID: UUID,
+        cancellationContext: TimeoutContext,
+        sendOperation: @escaping @Sendable () async throws -> Void
+    ) async throws -> OPACK.Value {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<OPACK.Value, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: ATVError.operationCancelled(cancellationContext))
+                    return
+                }
+
                 let request = PendingCompanionRequest(
+                    id: requestID,
                     identifier: identifier,
                     timeout: timeout,
                     continuation: continuation
                 )
-                let requestID = request.id
-                // 1. Synchronously install the waiter in the actor's state.
-                //    (Fine to touch actor-isolated state here: this closure
-                //    runs synchronously on the actor before any suspension.)
-                self.pendingRequests[currentXID] = request
-                // 2. Kick off the send + timeout on a detached Task that
-                //    hops back onto the actor when it needs to touch state.
+                pendingRequests[currentXID] = request
+
                 let task = Task { [weak self] in
                     guard let self else { return }
                     do {
-                        try await self.connection.send(type: .eOPACK, payload: data)
+                        try await sendOperation()
                     } catch {
                         if let waiter = await self.takePendingRequest(xid: currentXID, id: requestID) {
                             waiter.timeoutTask?.cancel()
@@ -239,23 +292,20 @@ public actor CompanionProtocolHandler {
                     }
                     if let waiter = await self.takePendingRequest(xid: currentXID, id: requestID) {
                         waiter.continuation.resume(
-                            throwing: ATVError.operationTimeout(
-                                TimeoutContext(
-                                    protocol: .companion,
-                                    operation: "request",
-                                    requestID: identifier,
-                                    duration: timeout
-                                )
-                            )
+                            throwing: ATVError.operationTimeout(cancellationContext)
                         )
                     }
                 }
                 request.timeoutTask = task
             }
-        } catch let err as ATVError {
-            throw err
-        } catch {
-            throw ATVError.wrap(error)
+        } onCancel: { [weak self] in
+            Task { [weak self] in
+                await self?.cancelPendingRequest(
+                    xid: currentXID,
+                    id: requestID,
+                    context: cancellationContext
+                )
+            }
         }
     }
 
@@ -266,6 +316,18 @@ public actor CompanionProtocolHandler {
             return nil
         }
         return pendingRequests.removeValue(forKey: xid)
+    }
+
+    private func cancelPendingRequest(
+        xid: Int,
+        id: UUID,
+        context: TimeoutContext
+    ) {
+        guard let request = takePendingRequest(xid: xid, id: id) else {
+            return
+        }
+        request.timeoutTask?.cancel()
+        request.continuation.resume(throwing: ATVError.operationCancelled(context))
     }
 
     /// Send an OPACK request without registering a response waiter.

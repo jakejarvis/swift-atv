@@ -3,11 +3,12 @@ import NIOCore
 import NIOPosix
 
 private final class PendingAirPlayDataWaiter: @unchecked Sendable {
-    let id = UUID()
+    let id: UUID
     let continuation: CheckedContinuation<Data, Error>
     var timeoutTask: Task<Void, Never>?
 
-    init(_ continuation: CheckedContinuation<Data, Error>) {
+    init(id: UUID = UUID(), _ continuation: CheckedContinuation<Data, Error>) {
+        self.id = id
         self.continuation = continuation
     }
 }
@@ -145,60 +146,81 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
                 Optional<UInt64>.none
             }
 
-        do {
-            return try await withCheckedThrowingContinuation { continuation in
-                let waiter = PendingAirPlayDataWaiter(continuation)
-                let waiterID = waiter.id
-                lock.lock()
-                if isClosed {
-                    lock.unlock()
-                    continuation.resume(throwing: ATVError.connectionLost("Connection has been closed"))
-                    return
-                }
-                if let data = pendingData.isEmpty ? nil : pendingData.removeFirst() {
-                    lock.unlock()
-                    continuation.resume(returning: data)
-                    return
-                }
-                if dataWaiter != nil {
-                    lock.unlock()
-                    continuation.resume(
-                        throwing: ATVError.invalidState("AirPlay receive already has a waiter")
-                    )
-                    return
-                }
-                dataWaiter = waiter
-                lock.unlock()
+        let waiterID = UUID()
+        let cancellationContext =
+            timeoutContext
+            ?? TimeoutContext(
+                protocol: .airPlay,
+                operation: "receive",
+                duration: timeout ?? 0
+            )
 
-                if let timeoutNs {
-                    let task = Task { [weak self] in
-                        do {
-                            try await Task.sleep(nanoseconds: timeoutNs)
-                        } catch {
-                            return
-                        }
-                        guard let self else { return }
-                        if let removed = self.removeDataWaiterIfOwned(id: waiterID) {
-                            removed.continuation.resume(
-                                throwing: ATVError.operationTimeout(
-                                    timeoutContext
-                                        ?? TimeoutContext(
-                                            protocol: .airPlay,
-                                            operation: "receive",
-                                            duration: timeout ?? 0
-                                        )
-                                )
-                            )
-                        }
+        do {
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: ATVError.operationCancelled(cancellationContext))
+                        return
                     }
-                    lock.withLock {
-                        if dataWaiter?.id == waiterID {
-                            waiter.timeoutTask = task
-                        } else {
-                            task.cancel()
+
+                    let waiter = PendingAirPlayDataWaiter(id: waiterID, continuation)
+                    lock.lock()
+                    if isClosed {
+                        lock.unlock()
+                        continuation.resume(throwing: ATVError.connectionLost("Connection has been closed"))
+                        return
+                    }
+                    if let data = pendingData.isEmpty ? nil : pendingData.removeFirst() {
+                        lock.unlock()
+                        continuation.resume(returning: data)
+                        return
+                    }
+                    if dataWaiter != nil {
+                        lock.unlock()
+                        continuation.resume(
+                            throwing: ATVError.invalidState("AirPlay receive already has a waiter")
+                        )
+                        return
+                    }
+                    dataWaiter = waiter
+                    lock.unlock()
+
+                    if let timeoutNs {
+                        let task = Task { [weak self] in
+                            do {
+                                try await Task.sleep(nanoseconds: timeoutNs)
+                            } catch {
+                                return
+                            }
+                            guard let self else { return }
+                            if let removed = self.removeDataWaiterIfOwned(id: waiterID) {
+                                removed.continuation.resume(
+                                    throwing: ATVError.operationTimeout(
+                                        timeoutContext
+                                            ?? TimeoutContext(
+                                                protocol: .airPlay,
+                                                operation: "receive",
+                                                duration: timeout ?? 0
+                                            )
+                                    )
+                                )
+                            }
+                        }
+                        lock.withLock {
+                            if dataWaiter?.id == waiterID {
+                                waiter.timeoutTask = task
+                            } else {
+                                task.cancel()
+                            }
                         }
                     }
                 }
+            } onCancel: { [weak self] in
+                guard let removed = self?.removeDataWaiterIfOwned(id: waiterID) else {
+                    return
+                }
+                removed.timeoutTask?.cancel()
+                removed.continuation.resume(throwing: ATVError.operationCancelled(cancellationContext))
             }
         } catch let err as ATVError {
             throw err
@@ -306,6 +328,10 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
             dataWaiter = nil
             return waiter
         }
+    }
+
+    internal var _testHasDataWaiter: Bool {
+        lock.withLock { dataWaiter != nil }
     }
 }
 

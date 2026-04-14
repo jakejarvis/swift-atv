@@ -82,6 +82,88 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.applying(result).protocols.companion.credentials, "01:02:03:04")
     }
 
+    func testSettingsVaultReturnsDefaultsWhenConfigurationHasNoIdentifiers() {
+        let vault = ATVSettingsVault()
+        var defaults = ATVSettings()
+        defaults.protocols.mrp.credentials = "default-mrp"
+
+        let settings = vault.settings(
+            for: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),
+            defaultSettings: defaults
+        )
+
+        XCTAssertEqual(settings.protocols.mrp.credentials, "default-mrp")
+    }
+
+    func testSettingsVaultStoresAndFindsByAnyKnownIdentifier() {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test", identifier: "device-id")
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, identifier: "mrp-id"))
+        var settings = ATVSettings()
+        settings.protocols.mrp.credentials = "mrp-cred"
+
+        var vault = ATVSettingsVault()
+        vault.saveSettings(settings, for: config)
+
+        let lookup = AppleTVConfiguration(address: "127.0.0.1", name: "Test", identifier: "mrp-id")
+        XCTAssertEqual(vault.settings(for: lookup).protocols.mrp.credentials, "mrp-cred")
+        XCTAssertEqual(vault.records.count, 1)
+        XCTAssertEqual(vault.records[0].identifiers, ["device-id", "mrp-id"])
+    }
+
+    func testSettingsVaultMergesAliasRecordsAndPreservesIncomingValues() {
+        var firstConfig = AppleTVConfiguration(address: "127.0.0.1", name: "Test", identifier: "first-id")
+        firstConfig.addService(ServiceInfo(protocol: .mrp, port: 49152, identifier: "mrp-id"))
+        var firstSettings = ATVSettings()
+        firstSettings.protocols.mrp.credentials = "old-mrp"
+        firstSettings.protocols.airplay.credentials = "airplay-cred"
+
+        var secondConfig = AppleTVConfiguration(address: "127.0.0.1", name: "Test", identifier: "second-id")
+        secondConfig.addService(ServiceInfo(protocol: .mrp, port: 49152, identifier: "mrp-id"))
+        var secondSettings = ATVSettings()
+        secondSettings.protocols.mrp.credentials = "new-mrp"
+
+        var vault = ATVSettingsVault()
+        vault.saveSettings(firstSettings, for: firstConfig)
+        vault.saveSettings(secondSettings, for: secondConfig)
+
+        XCTAssertEqual(vault.records.count, 1)
+        XCTAssertEqual(vault.records[0].identifiers, ["first-id", "mrp-id", "second-id"])
+        XCTAssertEqual(vault.records[0].settings.protocols.mrp.credentials, "new-mrp")
+        XCTAssertEqual(vault.records[0].settings.protocols.airplay.credentials, "airplay-cred")
+    }
+
+    func testSettingsVaultSavePairingAppliesResult() {
+        let credentials = HAPCredentials(
+            ltpk: Data([0x01]),
+            ltsk: Data([0x02]),
+            atvIdentifier: Data([0x03]),
+            clientIdentifier: Data([0x04])
+        )
+        let service = ServiceInfo(protocol: .airPlay, port: 7000, identifier: "airplay-id")
+        let pairing = PairingResult(service: service, credentials: credentials)
+        let config = AppleTVConfiguration(address: "127.0.0.1", name: "Test", identifier: "device-id")
+
+        var vault = ATVSettingsVault()
+        vault.savePairing(pairing, configuration: config, baseSettings: ATVSettings())
+
+        let settings = vault.settings(for: config)
+        XCTAssertEqual(settings.protocols.airplay.credentials, "01:02:03:04")
+        XCTAssertEqual(settings.protocols.airplay.identifier, "airplay-id")
+    }
+
+    func testSettingsVaultCodable() throws {
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "companion-cred"
+        let vault = ATVSettingsVault(
+            records: [ATVSettingsVaultRecord(identifiers: ["device-id"], settings: settings)]
+        )
+
+        let data = try JSONEncoder().encode(vault)
+        let decoded = try JSONDecoder().decode(ATVSettingsVault.self, from: data)
+
+        XCTAssertEqual(decoded, vault)
+    }
+
     // MARK: - Protocol-specific settings
 
     func testAirPlaySettingsDefaults() {

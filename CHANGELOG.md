@@ -30,6 +30,19 @@ Pre-1.0: minor version bumps may contain breaking changes.
   associated with a device identifier.
 - `ClientIdentitySettings.rapportIdentifier` stores the stable local
   Rapport-style identifier sent as Companion `_systemInfo._i`.
+- `ATVSettingsVault` provides a pure Codable value container for storing
+  `ATVSettings` by any known Apple TV identifier, merging alias records, and
+  saving `PairingResult` values without requiring every app to reimplement the
+  same credential-vault policy.
+- `ConnectCredentialSource` and enriched `ConnectAttempt` /
+  `ConnectionAttemptError` metadata now expose the service identifier, derived
+  AirPlay-tunnel flag, credential source, and preflight status/diagnostic for
+  each connection attempt.
+- `ConnectOptions.runtimeRequestTimeout` lets apps tune post-connect MRP and
+  Companion command request timeouts separately from setup timeouts.
+- `ATVError.operationCancelled` carries the same structured
+  `TimeoutContext` shape as operation timeouts when a pending request waiter is
+  cancelled by its caller.
 
 ### Changed
 
@@ -50,6 +63,13 @@ Pre-1.0: minor version bumps may contain breaking changes.
   higher-priority `.unavailable`, so a lower-priority protocol can expose a
   usable feature that a higher-priority protocol reports as temporarily
   unavailable.
+- `ConnectOptions.protocols` now drives facade relayer priority for connected
+  devices, not just setup attempt order. For example, requesting
+  `[.companion, .mrp]` makes Companion the primary route when both protocols
+  are attached.
+- Runtime MRP command exchanges and Companion requests now use
+  `ConnectOptions.runtimeRequestTimeout` instead of hard-coded transport
+  defaults.
 
 ### Fixed
 
@@ -65,8 +85,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - Malformed Companion session identifiers, huge MRP push initial delays, and
   invalid MRP message timestamp inputs now fail or clamp instead of trapping on
   integer conversion/overflow.
-- Companion `_sessionStart` responses that omit `_sid` now fail setup as
-  malformed instead of silently leaving the session identifier unset.
+- Companion `_sessionStart` responses that omit `_sid` now degrade optional
+  session/touch setup instead of failing basic Companion remote-control setup.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.
@@ -109,6 +129,18 @@ Pre-1.0: minor version bumps may contain breaking changes.
   returned with now-playing updates.
 - MRP push streams now cancel their player-state bridge task when the consumer
   terminates the stream.
+- Direct MRP and AirPlay-tunneled MRP response waiters now match on both
+  request identifier and expected response type, preventing same-id wrong-type
+  messages from resuming the wrong caller.
+- Direct MRP, AirPlay-tunneled MRP, AirPlay TCP, Companion request, and scanner
+  waiters now remove their owned waiter and cancel timeout work when the caller
+  task is cancelled.
+- AirPlay `.notNeeded` pairing preflight now reflects MRP-tunnel credential
+  requirements, so apps do not report "no pairing needed" while the tunnel is
+  blocked by missing credentials.
+- AirPlay DataStream MRP parsing now prefers a strict length-prefixed parse
+  before falling back to bare protobuf payloads, covering the ambiguous
+  leading-`0x08` length case.
 
 ## [0.3.0] - 2026-04-14
 
@@ -504,15 +536,14 @@ Supporting changes that landed with the fixes above:
 - DocC catalog (`Sources/SwiftATV/SwiftATV.docc/`) with a landing page and
   Getting Started article.
 - `.spi.yml` for Swift Package Index hosting.
-- Test suite: 250 XCTest cases covering pyatv ports and SwiftATV-specific
-  integration logic (codecs, crypto,
+- Test suite coverage for pyatv ports and SwiftATV-specific integration logic
+  (codecs, crypto,
   configuration, relayer, settings, interfaces, device info, Companion
   feature availability, MRP framing/message/player-state behavior, scanner
   pairing flags and timeout validation, MRP volume/command-result and
   pair-verify-final-response behavior, connect-path validation, OPACK object
   references/malformed-data handling, TLV8 strict auth decoding, and timeout
-  conversion behavior) plus 44
-  Swift Testing cases covering SRP-6a, HAP pair-setup,
+  conversion behavior), plus Swift Testing coverage for SRP-6a, HAP pair-setup,
   `Playing.description`, Companion auth envelopes, and Companion connection
   race handling.
 

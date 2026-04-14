@@ -99,7 +99,7 @@
             )
         }
 
-        func testSessionStartMissingSIDFailsSetup() async throws {
+        func testSessionStartMissingSIDKeepsBasicCompanionSetup() async throws {
             let pairVerify = FakePairVerifyFixture()
             let server = try await FakeCompanionServer.start(
                 responseContent: ["_sessionStart": .dict([])],
@@ -114,21 +114,18 @@
                 touchStartTimeout: 0.05
             )
 
-            do {
-                try await service.setup()
-                XCTFail("Expected malformed session start response to fail setup")
-            } catch {
-                guard case .invalidResponse(let message) = error else {
-                    XCTFail("Expected invalidResponse, got \(error)")
-                    await service.close()
-                    return
-                }
-                XCTAssertEqual(message, "Companion session start response missing _sid")
-            }
+            try await service.setup()
 
             await service.close()
             XCTAssertTrue(server.requests.contains("_sessionStart"))
             XCTAssertFalse(server.requests.contains("_touchStart"))
+            XCTAssertTrue(server.requests.contains("_interest"))
+            XCTAssertNotNil(service.remoteControl)
+            XCTAssertNil(service.touch)
+            XCTAssertEqual(
+                Set(service.setupDiagnostics(protocol: .companion).map(\.capability)),
+                CompanionStateStore.touchCapabilities
+            )
         }
 
         func testConnectResultIncludesCompanionSetupDiagnostics() async throws {

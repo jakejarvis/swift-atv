@@ -28,11 +28,30 @@ public struct TimeoutContext: Sendable, Hashable {
 public struct ConnectionAttemptError: Sendable {
     public let `protocol`: ATVProtocol
     public let port: Int
+    public let serviceIdentifier: String?
+    public let isDerivedAirPlayTunnel: Bool
+    public let credentialSource: ConnectCredentialSource
+    public let preflightStatus: ServiceConnectabilityStatus?
+    public let preflightDiagnostic: String?
     public let error: ATVError
 
-    public init(protocol: ATVProtocol, port: Int, error: ATVError) {
+    public init(
+        protocol: ATVProtocol,
+        port: Int,
+        serviceIdentifier: String? = nil,
+        isDerivedAirPlayTunnel: Bool = false,
+        credentialSource: ConnectCredentialSource = .none,
+        preflightStatus: ServiceConnectabilityStatus? = nil,
+        preflightDiagnostic: String? = nil,
+        error: ATVError
+    ) {
         self.protocol = `protocol`
         self.port = port
+        self.serviceIdentifier = serviceIdentifier
+        self.isDerivedAirPlayTunnel = isDerivedAirPlayTunnel
+        self.credentialSource = credentialSource
+        self.preflightStatus = preflightStatus
+        self.preflightDiagnostic = preflightDiagnostic
         self.error = error
     }
 }
@@ -68,6 +87,9 @@ public indirect enum ATVError: Error, LocalizedError, Sendable {
 
     /// Operation timed out.
     case operationTimeout(TimeoutContext)
+
+    /// Operation was cancelled before it completed.
+    case operationCancelled(TimeoutContext)
 
     /// Device is in an invalid state for this operation.
     case invalidState(String)
@@ -117,6 +139,7 @@ public indirect enum ATVError: Error, LocalizedError, Sendable {
         case .invalidCredentials(let msg): return "Invalid credentials: \(msg)"
         case .noCredentials(let msg): return "No credentials: \(msg)"
         case .operationTimeout(let context): return "Operation timeout: \(Self.describeTimeout(context))"
+        case .operationCancelled(let context): return "Operation cancelled: \(Self.describeTimeout(context))"
         case .invalidState(let msg): return "Invalid state: \(msg)"
         case .blocked(let msg): return "Blocked: \(msg)"
         case .invalidResponse(let msg): return "Invalid response: \(msg)"

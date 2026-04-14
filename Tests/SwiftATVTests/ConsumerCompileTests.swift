@@ -62,6 +62,56 @@ final class ConsumerCompileTests: XCTestCase {
         _ = pair
     }
 
+    func testConnectMetadataAndSettingsVaultTypesCompileForConsumers() {
+        let options = SwiftATV.ConnectOptions(
+            protocols: [.companion, .mrp],
+            strategy: .allAllowed,
+            requestTimeout: 3,
+            runtimeRequestTimeout: 8
+        )
+        let credentialSource: SwiftATV.ConnectCredentialSource = .settings(.companion)
+        let attempt = SwiftATV.ConnectAttempt(
+            protocol: .airPlay,
+            port: SwiftATV.ServiceInfo.defaultAirPlayPort,
+            serviceIdentifier: "service-id",
+            isDerivedAirPlayTunnel: true,
+            credentialSource: credentialSource,
+            preflightStatus: .connectable,
+            preflightDiagnostic: nil
+        )
+        let attemptError = SwiftATV.ConnectionAttemptError(
+            protocol: .airPlay,
+            port: SwiftATV.ServiceInfo.defaultAirPlayPort,
+            serviceIdentifier: attempt.serviceIdentifier,
+            isDerivedAirPlayTunnel: attempt.isDerivedAirPlayTunnel,
+            credentialSource: attempt.credentialSource,
+            preflightStatus: attempt.preflightStatus,
+            preflightDiagnostic: attempt.preflightDiagnostic,
+            error: .notSupported("example")
+        )
+        let settings = SwiftATV.ATVSettings()
+        var vault = SwiftATV.ATVSettingsVault(
+            records: [
+                SwiftATV.ATVSettingsVaultRecord(
+                    identifiers: ["service-id"],
+                    settings: settings
+                )
+            ]
+        )
+        let cancelled: SwiftATV.ATVError = .operationCancelled(
+            SwiftATV.TimeoutContext(protocol: .companion, operation: "request", duration: 1)
+        )
+
+        vault.saveSettings(settings, for: AppleTVConfiguration(address: "127.0.0.1", name: "Living Room"))
+
+        XCTAssertEqual(options.protocols, [.companion, .mrp])
+        XCTAssertEqual(options.runtimeRequestTimeout, 8)
+        XCTAssertEqual(attempt.credentialSource, .settings(.companion))
+        XCTAssertEqual(attemptError.serviceIdentifier, "service-id")
+        XCTAssertEqual(vault.records.first?.identifiers, ["service-id"])
+        XCTAssertNotNil(cancelled.errorDescription)
+    }
+
     #if canImport(Network)
         func testScanFunctionReferenceCompilesForConsumers() {
             let scan:

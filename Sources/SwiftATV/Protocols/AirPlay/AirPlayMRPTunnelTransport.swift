@@ -3,12 +3,31 @@ import NIOCore
 import NIOPosix
 
 private final class PendingAirPlayMRPWaiter: @unchecked Sendable {
-    let id = UUID()
+    let id: UUID
     let continuation: CheckedContinuation<ProtocolMessageMessage, Error>
     var timeoutTask: Task<Void, Never>?
 
-    init(_ continuation: CheckedContinuation<ProtocolMessageMessage, Error>) {
+    init(id: UUID = UUID(), _ continuation: CheckedContinuation<ProtocolMessageMessage, Error>) {
+        self.id = id
         self.continuation = continuation
+    }
+}
+
+private struct AirPlayMRPWaiterKey: Hashable, Sendable, CustomStringConvertible {
+    let identifier: String?
+    let type: ProtocolMessageMessage.TypeEnum
+
+    init(identifier: String?, type: ProtocolMessageMessage.TypeEnum) {
+        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.identifier = trimmed?.isEmpty == false ? trimmed : nil
+        self.type = type
+    }
+
+    var description: String {
+        if let identifier {
+            return "id:\(identifier):type:\(type.rawValue)"
+        }
+        return "type:\(type.rawValue)"
     }
 }
 
@@ -35,7 +54,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
     private var eventChannel: AirPlayEventChannel?
     private var dataChannel: AirPlayDataStreamChannel?
     private var feedbackTask: Task<Void, Never>?
-    private var waiters: [String: PendingAirPlayMRPWaiter] = [:]
+    private var waiters: [AirPlayMRPWaiterKey: PendingAirPlayMRPWaiter] = [:]
     private var messageContinuation: AsyncStream<ProtocolMessageMessage>.Continuation?
     private var _messageStream: AsyncStream<ProtocolMessageMessage>?
     private var isClosed = false
@@ -216,67 +235,28 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
             outbound.identifier = UUID().uuidString
         }
 
-        let waitKey = Self.waiterKey(
+        let waitKey = AirPlayMRPWaiterKey(
             identifier: outbound.identifier,
             type: responseType ?? outbound.type
         )
         let messageToSend = outbound
+        let waiterID = UUID()
+        let context = TimeoutContext(
+            protocol: .airPlay,
+            operation: "mrpTunnelRequest",
+            requestID: waitKey.description,
+            duration: timeout
+        )
 
         do {
-            return try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<ProtocolMessageMessage, Error>) in
-                let waiter = PendingAirPlayMRPWaiter(continuation)
-                let waiterID = waiter.id
-
-                switch installWaiter(key: waitKey, waiter: waiter) {
-                case .closed:
-                    continuation.resume(throwing: ATVError.connectionLost("Connection is closed"))
-                    return
-                case .duplicate:
-                    continuation.resume(
-                        throwing: ATVError.invalidState("MRP waiter already registered for \(waitKey)")
-                    )
-                    return
-                case .installed:
-                    break
-                }
-
-                let task = Task { [weak self] in
-                    guard let self else { return }
-                    do {
-                        try await self.send(messageToSend)
-                    } catch {
-                        if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
-                            removed.continuation.resume(throwing: error)
-                        }
-                        return
-                    }
-
-                    do {
-                        try await Task.sleep(nanoseconds: timeoutNs)
-                    } catch {
-                        return
-                    }
-
-                    if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
-                        removed.continuation.resume(
-                            throwing: ATVError.operationTimeout(
-                                TimeoutContext(
-                                    protocol: .airPlay,
-                                    operation: "mrpTunnelRequest",
-                                    requestID: waitKey,
-                                    duration: timeout
-                                )
-                            )
-                        )
-                    }
-                }
-
-                lock.withLock {
-                    if waiters[waitKey]?.id == waiterID {
-                        waiter.timeoutTask = task
-                    }
-                }
+            return try await waitForResponse(
+                key: waitKey,
+                waiterID: waiterID,
+                timeoutNs: timeoutNs,
+                context: context
+            ) { [weak self] in
+                guard let self else { return }
+                try await self.send(messageToSend)
             }
         } catch let err as ATVError {
             throw err
@@ -354,7 +334,76 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         case closed
     }
 
-    private func installWaiter(key: String, waiter: PendingAirPlayMRPWaiter) -> WaiterInstallResult {
+    private func waitForResponse(
+        key waitKey: AirPlayMRPWaiterKey,
+        waiterID: UUID,
+        timeoutNs: UInt64,
+        context: TimeoutContext,
+        sendOperation: @escaping @Sendable () async throws -> Void
+    ) async throws -> ProtocolMessageMessage {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<ProtocolMessageMessage, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: ATVError.operationCancelled(context))
+                    return
+                }
+
+                let waiter = PendingAirPlayMRPWaiter(id: waiterID, continuation)
+
+                switch installWaiter(key: waitKey, waiter: waiter) {
+                case .closed:
+                    continuation.resume(throwing: ATVError.connectionLost("Connection is closed"))
+                    return
+                case .duplicate:
+                    continuation.resume(
+                        throwing: ATVError.invalidState("MRP waiter already registered for \(waitKey)")
+                    )
+                    return
+                case .installed:
+                    break
+                }
+
+                let task = Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await sendOperation()
+                    } catch {
+                        if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
+                            removed.continuation.resume(throwing: error)
+                        }
+                        return
+                    }
+
+                    do {
+                        try await Task.sleep(nanoseconds: timeoutNs)
+                    } catch {
+                        return
+                    }
+
+                    if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
+                        removed.continuation.resume(throwing: ATVError.operationTimeout(context))
+                    }
+                }
+
+                lock.withLock {
+                    if waiters[waitKey]?.id == waiterID {
+                        waiter.timeoutTask = task
+                    } else {
+                        task.cancel()
+                    }
+                }
+            }
+        } onCancel: { [weak self] in
+            guard let removed = self?.removeWaiterIfOwned(key: waitKey, id: waiterID) else {
+                return
+            }
+            removed.timeoutTask?.cancel()
+            removed.continuation.resume(throwing: ATVError.operationCancelled(context))
+        }
+    }
+
+    private func installWaiter(key: AirPlayMRPWaiterKey, waiter: PendingAirPlayMRPWaiter) -> WaiterInstallResult {
         lock.withLock {
             if isClosed { return .closed }
             if waiters[key] != nil { return .duplicate }
@@ -363,7 +412,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         }
     }
 
-    private func removeWaiterIfOwned(key: String, id: UUID) -> PendingAirPlayMRPWaiter? {
+    private func removeWaiterIfOwned(key: AirPlayMRPWaiterKey, id: UUID) -> PendingAirPlayMRPWaiter? {
         lock.withLock {
             guard let waiter = waiters[key], waiter.id == id else {
                 return nil
@@ -372,11 +421,48 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         }
     }
 
+    internal func _testWaitForResponse(
+        identifier: String,
+        type: ProtocolMessageMessage.TypeEnum,
+        timeout: TimeInterval = 60
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let key = AirPlayMRPWaiterKey(identifier: identifier, type: type)
+        let waiterID = UUID()
+        let context = TimeoutContext(
+            protocol: .airPlay,
+            operation: "testMrpTunnelRequest",
+            requestID: key.description,
+            duration: timeout
+        )
+        do {
+            return try await waitForResponse(
+                key: key,
+                waiterID: waiterID,
+                timeoutNs: timeoutNs,
+                context: context
+            ) {}
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
+        }
+    }
+
+    internal var _testPendingWaiterCount: Int {
+        lock.withLock { waiters.count }
+    }
+
     private func handleReceivedMessage(_ message: ProtocolMessageMessage) {
-        let idKey = Self.waiterKey(identifier: message.identifier, type: message.type)
-        let typeKey = Self.waiterKey(identifier: "", type: message.type)
+        let idKey = AirPlayMRPWaiterKey(identifier: message.identifier, type: message.type)
+        let typeKey = AirPlayMRPWaiterKey(identifier: nil, type: message.type)
         let delivery = lock.withLock {
-            let waiter = waiters.removeValue(forKey: idKey) ?? waiters.removeValue(forKey: typeKey)
+            let waiter =
+                if message.hasIdentifier, !message.identifier.isEmpty {
+                    waiters.removeValue(forKey: idKey)
+                } else {
+                    waiters.removeValue(forKey: typeKey)
+                }
             return (waiter, messageContinuation)
         }
 
@@ -386,6 +472,10 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         Task { [weak self] in
             await self?.delegate?.connectionDidReceiveMessage(message)
         }
+    }
+
+    internal func _testHandleReceivedMessage(_ message: ProtocolMessageMessage) {
+        handleReceivedMessage(message)
     }
 
     private func handleConnectionClosed(error: Error?) {
@@ -460,10 +550,4 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         }
     }
 
-    private static func waiterKey(identifier: String, type: ProtocolMessageMessage.TypeEnum) -> String {
-        if !identifier.isEmpty {
-            return "id:\(identifier)"
-        }
-        return "type:\(type.rawValue)"
-    }
 }

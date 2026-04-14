@@ -452,7 +452,8 @@
                 browser: NWBrowser?,
                 resolvers: [NWConnection],
                 serviceResolvers: [any BonjourServiceResolving],
-                output: BrowseOutput
+                continuation: CheckedContinuation<BrowseOutput, Error>,
+                timeoutTask: Task<Void, Never>?
             )
 
             let lock = NSLock()
@@ -462,10 +463,28 @@
             var browser: NWBrowser?
             var resolvers: [ObjectIdentifier: NWConnection] = [:]
             var serviceResolvers: [ObjectIdentifier: any BonjourServiceResolving] = [:]
+            var continuation: CheckedContinuation<BrowseOutput, Error>?
+            var timeoutTask: Task<Void, Never>?
+
+            func setContinuation(_ continuation: CheckedContinuation<BrowseOutput, Error>) {
+                lock.withLock {
+                    self.continuation = continuation
+                }
+            }
 
             func setBrowser(_ browser: NWBrowser) {
                 lock.withLock {
                     self.browser = browser
+                }
+            }
+
+            func setTimeoutTask(_ task: Task<Void, Never>) {
+                lock.withLock {
+                    if hasResumed {
+                        task.cancel()
+                    } else {
+                        timeoutTask = task
+                    }
                 }
             }
 
@@ -524,22 +543,35 @@
                 }
             }
 
-            func safeResume(_ continuation: CheckedContinuation<BrowseOutput, Error>) {
+            func safeResume() {
+                let output = lock.withLock {
+                    BrowseOutput(services: discovered, diagnostics: diagnostics)
+                }
+                safeFinish(.success(output))
+            }
+
+            func safeFail(_ error: ATVError) {
+                safeFinish(.failure(error))
+            }
+
+            private func safeFinish(_ result: Result<BrowseOutput, Error>) {
                 let snapshot = lock.withLock {
-                    guard !hasResumed else {
+                    guard !hasResumed, let continuation else {
                         return nil as Snapshot?
                     }
                     hasResumed = true
-                    let output = BrowseOutput(services: discovered, diagnostics: diagnostics)
                     let snapshot: Snapshot = (
                         browser,
                         Array(resolvers.values),
                         Array(serviceResolvers.values),
-                        output
+                        continuation,
+                        timeoutTask
                     )
                     browser = nil
                     resolvers.removeAll()
                     serviceResolvers.removeAll()
+                    self.continuation = nil
+                    timeoutTask = nil
                     return snapshot
                 }
 
@@ -554,7 +586,13 @@
                 for resolver in snapshot.serviceResolvers {
                     resolver.cancel()
                 }
-                continuation.resume(returning: snapshot.output)
+                snapshot.timeoutTask?.cancel()
+                switch result {
+                case .success(let output):
+                    snapshot.continuation.resume(returning: output)
+                case .failure(let error):
+                    snapshot.continuation.resume(throwing: error)
+                }
             }
         }
 
@@ -564,64 +602,84 @@
             timeout: TimeInterval
         ) async throws -> BrowseOutput {
             let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+            let state = BrowseState()
+            let cancellationContext = TimeoutContext(
+                operation: "scan",
+                requestID: serviceType.rawValue,
+                duration: timeout
+            )
 
-            return try await withCheckedThrowingContinuation { continuation in
-                let state = BrowseState()
-
-                let params = NWParameters()
-                params.includePeerToPeer = true
-
-                let browser = NWBrowser(
-                    for: .bonjour(type: serviceType.rawValue, domain: "local."),
-                    using: params
-                )
-                state.setBrowser(browser)
-
-                let timeoutTask = Task {
-                    try? await Task.sleep(nanoseconds: timeoutNs)
-                    state.safeResume(continuation)
-                }
-
-                browser.stateUpdateHandler = { browserState in
-                    switch browserState {
-                    case .waiting(let error):
-                        state.appendDiagnostic(
-                            serviceType: serviceType,
-                            kind: .browserWaiting,
-                            message: String(describing: error)
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    if Task.isCancelled {
+                        continuation.resume(
+                            throwing: ATVError.operationCancelled(cancellationContext)
                         )
-
-                    case .failed(let error):
-                        state.appendDiagnostic(
-                            serviceType: serviceType,
-                            kind: .browserFailed,
-                            message: String(describing: error)
-                        )
-                        timeoutTask.cancel()
-                        state.safeResume(continuation)
-
-                    default:
-                        break
-                    }
-                }
-
-                browser.browseResultsChangedHandler = { results, _ in
-                    state.lock.lock()
-                    guard !state.hasResumed else {
-                        state.lock.unlock()
                         return
                     }
-                    let newResults = Array(results)
-                    state.lock.unlock()
+                    state.setContinuation(continuation)
+                    if Task.isCancelled {
+                        state.safeFail(ATVError.operationCancelled(cancellationContext))
+                        return
+                    }
 
-                    for result in newResults {
-                        Self.resolveEndpoint(result, serviceType: serviceType, browseState: state) { service in
-                            state.append(service)
+                    let params = NWParameters()
+                    params.includePeerToPeer = true
+
+                    let browser = NWBrowser(
+                        for: .bonjour(type: serviceType.rawValue, domain: "local."),
+                        using: params
+                    )
+                    state.setBrowser(browser)
+
+                    let timeoutTask = Task {
+                        try? await Task.sleep(nanoseconds: timeoutNs)
+                        state.safeResume()
+                    }
+                    state.setTimeoutTask(timeoutTask)
+
+                    browser.stateUpdateHandler = { browserState in
+                        switch browserState {
+                        case .waiting(let error):
+                            state.appendDiagnostic(
+                                serviceType: serviceType,
+                                kind: .browserWaiting,
+                                message: String(describing: error)
+                            )
+
+                        case .failed(let error):
+                            state.appendDiagnostic(
+                                serviceType: serviceType,
+                                kind: .browserFailed,
+                                message: String(describing: error)
+                            )
+                            state.safeResume()
+
+                        default:
+                            break
                         }
                     }
-                }
 
-                browser.start(queue: .global())
+                    browser.browseResultsChangedHandler = { results, _ in
+                        state.lock.lock()
+                        guard !state.hasResumed else {
+                            state.lock.unlock()
+                            return
+                        }
+                        let newResults = Array(results)
+                        state.lock.unlock()
+
+                        for result in newResults {
+                            Self.resolveEndpoint(result, serviceType: serviceType, browseState: state) { service in
+                                state.append(service)
+                            }
+                        }
+                    }
+
+                    browser.start(queue: .global())
+                }
+            } onCancel: {
+                state.safeFail(ATVError.operationCancelled(cancellationContext))
             }
         }
 

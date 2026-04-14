@@ -138,6 +138,23 @@ struct AirPlayDataStreamTests {
         #expect(messages[0].type == .genericMessage)
     }
 
+    @Test("Data stream treats leading 0x08 as a valid length prefix when it parses")
+    func acceptsLengthPrefixedEightByteProtobuf() throws {
+        var message = ProtocolMessageMessage()
+        message.type = .genericMessage
+        message.identifier = "abcd"
+        let serialized = try message.serializedData()
+        #expect(serialized.count == 8)
+
+        let messages = try AirPlayDataStreamChannel.messages(
+            fromDataField: MRPVarint.encode(serialized.count) + serialized
+        )
+
+        #expect(messages.count == 1)
+        #expect(messages[0].type == .genericMessage)
+        #expect(messages[0].identifier == "abcd")
+    }
+
     @Test("Data stream frame builder writes big-endian header")
     func frameBuilderHeader() {
         let payload = Data([0xAA, 0xBB])

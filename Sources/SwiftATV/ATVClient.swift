@@ -1,6 +1,6 @@
 import Foundation
 
-/// Default timeout for protocol request/response exchanges during setup.
+/// Default timeout for protocol request/response exchanges.
 public let defaultProtocolRequestTimeout: TimeInterval = 5.0
 
 /// Connection setup strategy.
@@ -11,37 +11,72 @@ public enum ConnectStrategy: Sendable, Hashable {
     case allAllowed
 }
 
-/// Options controlling protocol selection during connection.
+/// Options controlling protocol selection and request deadlines during connection.
 public struct ConnectOptions: Sendable, Hashable {
     public static let defaultProtocolOrder: [ATVProtocol] = [.mrp, .airPlay, .companion]
 
-    /// Protocols to attempt, in preference order.
+    /// Protocols to attempt and use for facade routing, in preference order.
     public var protocols: [ATVProtocol]
     /// Whether to return after one connection or attach every usable protocol.
     public var strategy: ConnectStrategy
     /// Timeout used by protocol setup TCP connects and setup request/response exchanges.
     public var requestTimeout: TimeInterval
+    /// Timeout used by post-connect protocol request/response exchanges.
+    public var runtimeRequestTimeout: TimeInterval
 
     public init(
         protocols: [ATVProtocol] = ConnectOptions.defaultProtocolOrder,
         strategy: ConnectStrategy = .firstUsable,
-        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout
     ) {
         self.protocols = protocols
         self.strategy = strategy
         self.requestTimeout = requestTimeout
+        self.runtimeRequestTimeout = runtimeRequestTimeout
     }
+}
+
+/// Source of credentials used for one protocol connection attempt.
+public enum ConnectCredentialSource: Sendable, Hashable {
+    /// The protocol path did not require credentials.
+    case notRequired
+    /// No credentials were available.
+    case none
+    /// Credentials came from saved settings for the associated protocol.
+    case settings(ATVProtocol)
+    /// Credentials came from the discovered service for the associated protocol.
+    case service(ATVProtocol)
 }
 
 /// One protocol setup attempt made during connection.
 public struct ConnectAttempt: Sendable {
     public let `protocol`: ATVProtocol
     public let port: Int
+    public let serviceIdentifier: String?
+    public let isDerivedAirPlayTunnel: Bool
+    public let credentialSource: ConnectCredentialSource
+    public let preflightStatus: ServiceConnectabilityStatus?
+    public let preflightDiagnostic: String?
     public let error: ATVError?
 
-    public init(protocol: ATVProtocol, port: Int, error: ATVError? = nil) {
+    public init(
+        protocol: ATVProtocol,
+        port: Int,
+        serviceIdentifier: String? = nil,
+        isDerivedAirPlayTunnel: Bool = false,
+        credentialSource: ConnectCredentialSource = .none,
+        preflightStatus: ServiceConnectabilityStatus? = nil,
+        preflightDiagnostic: String? = nil,
+        error: ATVError? = nil
+    ) {
         self.protocol = `protocol`
         self.port = port
+        self.serviceIdentifier = serviceIdentifier
+        self.isDerivedAirPlayTunnel = isDerivedAirPlayTunnel
+        self.credentialSource = credentialSource
+        self.preflightStatus = preflightStatus
+        self.preflightDiagnostic = preflightDiagnostic
         self.error = error
     }
 
@@ -102,6 +137,16 @@ public enum ATVClient {
             ServiceInfo,
             HAPCredentials?
         ) async throws -> Void
+
+    internal struct AirPlayTunnelCredentialResolution: Sendable {
+        var candidates: [HAPCredentials]
+        var source: ConnectCredentialSource
+    }
+
+    internal struct CredentialResolution: Sendable {
+        var credentials: HAPCredentials?
+        var source: ConnectCredentialSource
+    }
 
     private final class ProtocolSetupOverrideStore: @unchecked Sendable {
         private let lock = NSLock()
@@ -201,7 +246,7 @@ public enum ATVClient {
     ///
     /// - Parameters:
     ///   - config: Device configuration obtained from scanning or manually created.
-    ///   - options: Protocol order, setup strategy, and request timeout.
+    ///   - options: Protocol order, setup strategy, and setup/runtime request timeouts.
     ///   - settings: Optional settings containing saved protocol credentials.
     /// - Returns: Connected device plus protocol setup metadata.
     public static func connect(
@@ -211,6 +256,10 @@ public enum ATVClient {
     ) async throws(ATVError) -> ConnectResult {
         let deviceSettings = settings ?? ATVSettings()
         _ = try timeoutNanoseconds(from: options.requestTimeout, parameterName: "options.requestTimeout")
+        _ = try timeoutNanoseconds(
+            from: options.runtimeRequestTimeout,
+            parameterName: "options.runtimeRequestTimeout"
+        )
         let requestedProtocols = deduplicated(options.protocols)
         guard !requestedProtocols.isEmpty else {
             throw ATVError.invalidConfig("options.protocols must contain at least one protocol")
@@ -240,7 +289,8 @@ public enum ATVClient {
         let prioritizedServices = selectedServices.prioritizedForConnect(order: requestedProtocols)
         let facade = FacadeAppleTV(
             configuration: config,
-            settings: deviceSettings
+            settings: deviceSettings,
+            protocolPriority: requestedProtocols
         )
 
         var failedAttempts: [ConnectionAttemptError] = []
@@ -248,15 +298,18 @@ public enum ATVClient {
         var connectedAnyProtocol = false
 
         for service in prioritizedServices {
+            let preflight = config.connectability(for: service, settings: deviceSettings)
+            var credentialSource = ConnectCredentialSource.none
             do {
                 let credentials: HAPCredentials?
-                var airPlayCredentialCandidates: [HAPCredentials]?
+                var airPlayCredentialResolution: AirPlayTunnelCredentialResolution?
                 if service.protocol == .airPlay {
-                    let candidates = try resolvedAirPlayTunnelCredentialCandidates(
+                    let resolution = try resolvedAirPlayTunnelCredentials(
                         for: service,
                         configuration: config,
                         settings: deviceSettings
                     )
+                    let candidates = resolution.candidates
                     let isSupported = AirPlaySupport.supportsRemoteControlTunnel(
                         service: service,
                         credentials: candidates.first,
@@ -266,49 +319,89 @@ public enum ATVClient {
                         throw ATVError.notSupported("AirPlay MRP tunnel is not supported by this service")
                     }
                     credentials = candidates.first
-                    airPlayCredentialCandidates = candidates
+                    credentialSource = resolution.source
+                    airPlayCredentialResolution = resolution
                 } else {
-                    credentials = try resolvedCredentials(for: service, settings: deviceSettings)
+                    let resolution = try resolvedCredentialsWithSource(
+                        for: service,
+                        settings: deviceSettings
+                    )
+                    credentials = resolution.credentials
+                    credentialSource = resolution.source
                     if service.protocol == .companion, credentials == nil {
+                        credentialSource = .none
                         throw ATVError.noCredentials("Companion requires pairing credentials")
                     }
                     if service.pairingRequirement == .mandatory, credentials == nil {
+                        credentialSource = .none
                         throw ATVError.noCredentials(
                             "\(service.protocol) service requires pairing credentials"
                         )
                     }
                 }
-                if let airPlayCredentialCandidates {
+                if let airPlayCredentialResolution {
                     try await setupAirPlayProtocol(
                         facade,
                         service: service,
-                        credentialCandidates: airPlayCredentialCandidates,
-                        requestTimeout: options.requestTimeout
+                        credentialCandidates: airPlayCredentialResolution.candidates,
+                        requestTimeout: options.requestTimeout,
+                        runtimeRequestTimeout: options.runtimeRequestTimeout
                     )
                 } else {
                     try await setupProtocol(
                         facade,
                         service: service,
                         credentials: credentials,
-                        requestTimeout: options.requestTimeout
+                        requestTimeout: options.requestTimeout,
+                        runtimeRequestTimeout: options.runtimeRequestTimeout
                     )
                 }
-                attempts.append(ConnectAttempt(protocol: service.protocol, port: service.port))
+                attempts.append(
+                    connectAttempt(
+                        service: service,
+                        credentialSource: credentialSource,
+                        preflight: preflight
+                    )
+                )
                 connectedAnyProtocol = true
                 if options.strategy == .firstUsable {
                     return try connectResult(facade: facade, attempts: attempts)
                 }
             } catch let error as ATVError {
                 failedAttempts.append(
-                    ConnectionAttemptError(protocol: service.protocol, port: service.port, error: error)
+                    connectionAttemptError(
+                        service: service,
+                        credentialSource: credentialSource,
+                        preflight: preflight,
+                        error: error
+                    )
                 )
-                attempts.append(ConnectAttempt(protocol: service.protocol, port: service.port, error: error))
+                attempts.append(
+                    connectAttempt(
+                        service: service,
+                        credentialSource: credentialSource,
+                        preflight: preflight,
+                        error: error
+                    )
+                )
             } catch {
                 let wrapped = ATVError.wrap(error)
                 failedAttempts.append(
-                    ConnectionAttemptError(protocol: service.protocol, port: service.port, error: wrapped)
+                    connectionAttemptError(
+                        service: service,
+                        credentialSource: credentialSource,
+                        preflight: preflight,
+                        error: wrapped
+                    )
                 )
-                attempts.append(ConnectAttempt(protocol: service.protocol, port: service.port, error: wrapped))
+                attempts.append(
+                    connectAttempt(
+                        service: service,
+                        credentialSource: credentialSource,
+                        preflight: preflight,
+                        error: wrapped
+                    )
+                )
             }
         }
 
@@ -394,7 +487,8 @@ public enum ATVClient {
         _ facade: FacadeAppleTV,
         service: ServiceInfo,
         credentials: HAPCredentials?,
-        requestTimeout: TimeInterval
+        requestTimeout: TimeInterval,
+        runtimeRequestTimeout: TimeInterval
     ) async throws(ATVError) {
         if let override = protocolSetupOverrideStore.get() {
             do {
@@ -409,7 +503,8 @@ public enum ATVClient {
         try await facade.setupProtocol(
             service,
             credentials: credentials,
-            requestTimeout: requestTimeout
+            requestTimeout: requestTimeout,
+            runtimeRequestTimeout: runtimeRequestTimeout
         )
     }
 
@@ -417,7 +512,8 @@ public enum ATVClient {
         _ facade: FacadeAppleTV,
         service: ServiceInfo,
         credentialCandidates: [HAPCredentials],
-        requestTimeout: TimeInterval
+        requestTimeout: TimeInterval,
+        runtimeRequestTimeout: TimeInterval
     ) async throws(ATVError) {
         if let override = protocolSetupOverrideStore.get() {
             do {
@@ -432,7 +528,8 @@ public enum ATVClient {
         try await facade.setupAirPlayMRPTunnel(
             service,
             credentialCandidates: credentialCandidates,
-            requestTimeout: requestTimeout
+            requestTimeout: requestTimeout,
+            runtimeRequestTimeout: runtimeRequestTimeout
         )
     }
 
@@ -452,18 +549,76 @@ public enum ATVClient {
         )
     }
 
+    private static func connectAttempt(
+        service: ServiceInfo,
+        credentialSource: ConnectCredentialSource,
+        preflight: ServiceConnectability,
+        error: ATVError? = nil
+    ) -> ConnectAttempt {
+        ConnectAttempt(
+            protocol: service.protocol,
+            port: service.port,
+            serviceIdentifier: service.identifier,
+            isDerivedAirPlayTunnel: AirPlaySupport.isCompanionDerivedService(service),
+            credentialSource: credentialSource,
+            preflightStatus: preflight.status,
+            preflightDiagnostic: preflight.diagnostic,
+            error: error
+        )
+    }
+
+    private static func connectionAttemptError(
+        service: ServiceInfo,
+        credentialSource: ConnectCredentialSource,
+        preflight: ServiceConnectability,
+        error: ATVError
+    ) -> ConnectionAttemptError {
+        ConnectionAttemptError(
+            protocol: service.protocol,
+            port: service.port,
+            serviceIdentifier: service.identifier,
+            isDerivedAirPlayTunnel: AirPlaySupport.isCompanionDerivedService(service),
+            credentialSource: credentialSource,
+            preflightStatus: preflight.status,
+            preflightDiagnostic: preflight.diagnostic,
+            error: error
+        )
+    }
+
     internal static func resolvedCredentials(
         for service: ServiceInfo,
         settings: ATVSettings
     ) throws(ATVError) -> HAPCredentials? {
-        guard let serialized = settings.credentials(for: service.protocol) ?? service.credentials else {
-            return nil
+        try resolvedCredentialsWithSource(for: service, settings: settings).credentials
+    }
+
+    internal static func resolvedCredentialsWithSource(
+        for service: ServiceInfo,
+        settings: ATVSettings
+    ) throws(ATVError) -> CredentialResolution {
+        let source: ConnectCredentialSource
+        let serialized: String?
+        if let settingsCredentials = settings.credentials(for: service.protocol) {
+            source = .settings(service.protocol)
+            serialized = settingsCredentials
+        } else if let serviceCredentials = service.credentials {
+            source = .service(service.protocol)
+            serialized = serviceCredentials
+        } else {
+            return CredentialResolution(credentials: nil, source: .notRequired)
+        }
+
+        guard let serialized else {
+            return CredentialResolution(credentials: nil, source: .notRequired)
         }
         guard !serialized.isEmpty else {
             throw ATVError.invalidCredentials("Empty \(service.protocol) credentials")
         }
         do {
-            return try HAPCredentials.parse(serialized)
+            return CredentialResolution(
+                credentials: try HAPCredentials.parse(serialized),
+                source: source
+            )
         } catch {
             throw ATVError.invalidCredentials(
                 "Invalid \(service.protocol) credentials: \(String(describing: error))"
@@ -476,26 +631,45 @@ public enum ATVClient {
         configuration: AppleTVConfiguration,
         settings: ATVSettings
     ) throws(ATVError) -> [HAPCredentials] {
-        var serializedValues: [String] = []
-        func append(_ value: String?) {
-            guard let value, !serializedValues.contains(value) else { return }
-            serializedValues.append(value)
+        try resolvedAirPlayTunnelCredentials(
+            for: service,
+            configuration: configuration,
+            settings: settings
+        ).candidates
+    }
+
+    internal static func resolvedAirPlayTunnelCredentials(
+        for service: ServiceInfo,
+        configuration: AppleTVConfiguration,
+        settings: ATVSettings
+    ) throws(ATVError) -> AirPlayTunnelCredentialResolution {
+        var serializedValues: [(value: String, source: ConnectCredentialSource)] = []
+        func append(_ value: String?, source: ConnectCredentialSource) {
+            guard let value,
+                !serializedValues.contains(where: { $0.value == value })
+            else { return }
+            serializedValues.append((value, source))
         }
 
-        append(settings.protocols.airplay.credentials)
-        append(service.credentials)
-        append(settings.protocols.companion.credentials)
-        append(configuration.service(for: .companion)?.credentials)
+        let serviceCredentialSource: ConnectCredentialSource =
+            AirPlaySupport.isCompanionDerivedService(service) ? .service(.companion) : .service(.airPlay)
+
+        append(settings.protocols.airplay.credentials, source: .settings(.airPlay))
+        append(service.credentials, source: serviceCredentialSource)
+        append(settings.protocols.companion.credentials, source: .settings(.companion))
+        append(configuration.service(for: .companion)?.credentials, source: .service(.companion))
 
         var candidates: [HAPCredentials] = []
+        var firstSource: ConnectCredentialSource?
         var firstParseError: ATVError?
-        for serialized in serializedValues {
-            guard !serialized.isEmpty else {
+        for item in serializedValues {
+            guard !item.value.isEmpty else {
                 firstParseError = firstParseError ?? .invalidCredentials("Empty AirPlay tunnel credentials")
                 continue
             }
             do {
-                candidates.append(try HAPCredentials.parse(serialized))
+                candidates.append(try HAPCredentials.parse(item.value))
+                firstSource = firstSource ?? item.source
             } catch let err as ATVError {
                 firstParseError = firstParseError ?? err
             } catch {
@@ -504,7 +678,10 @@ public enum ATVClient {
         }
 
         if !candidates.isEmpty {
-            return candidates
+            return AirPlayTunnelCredentialResolution(
+                candidates: candidates,
+                source: firstSource ?? .notRequired
+            )
         }
         if let firstParseError {
             throw firstParseError

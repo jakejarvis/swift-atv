@@ -6,10 +6,10 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 
 - **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS, including live TXT resolution, Companion-only identifiers, sleep-proxy deep-sleep discovery, and optional scan diagnostics
 - **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion, direct MRP, and AirPlay 2 links, with protocol-agnostic pairing code direction metadata and pairing results
-- **Credential Persistence** -- Pairing results can be applied directly to `ATVSettings`, and connection setup can use credentials from settings or enriched services
-- **Connect Metadata** -- `ConnectOptions` and `ConnectResult` expose protocol order, setup strategy, primary protocol, active protocols, per-protocol attempts, and setup diagnostics
-- **Timeout-Bounded Setup** -- Connection setup applies structured timeouts to protocol TCP connects and setup exchanges
-- **Preflight Helpers** -- Query effective pairing status, connectable protocols, and the preferred pairing service before opening network connections
+- **Credential Persistence** -- Pairing results can be applied directly to `ATVSettings`, and `ATVSettingsVault` stores settings by any known Apple TV identifier
+- **Connect Metadata** -- `ConnectOptions` and `ConnectResult` expose protocol order, setup/runtime timeouts, primary protocol, active protocols, enriched per-protocol attempts, and setup diagnostics
+- **Timeout-Bounded Requests** -- Connection setup and post-connect command exchanges apply structured timeouts and cancellation cleanup
+- **Preflight Helpers** -- Query effective pairing status, connectable protocols, and the preferred pairing service before opening network connections, including AirPlay MRP tunnel credential requirements
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
 - **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to direct or tunneled MRP push updates
 - **Connection Events** -- Observe primary connection loss and explicit-close events from the unified device facade
@@ -159,7 +159,8 @@ await atv.close()
 ### Pair with a Device
 
 ```swift
-var settings = ATVSettings()
+var vault = try keychain.loadSettingsVault() ?? ATVSettingsVault()
+var settings = vault.settings(for: device)
 settings.clientIdentity.name = "Clicker"
 
 let handler = try await ATVClient.pair(
@@ -182,11 +183,8 @@ case .clientProvided(let pin):
 
 // Complete pair-setup and persist the result into the matching protocol bucket.
 let pairing = try await handler.finish()
-settings.apply(pairing)
-
-if let identifier = device.mainIdentifier {
-    try keychain.store(settings, for: identifier)
-}
+vault.savePairing(pairing, configuration: device, baseSettings: settings)
+try keychain.store(vault)
 
 await handler.close()
 ```
@@ -194,12 +192,15 @@ await handler.close()
 Use `.mrp` instead of `.companion` to pair against the direct Media Remote
 Protocol service. Use `.airPlay` to pair for AirPlay 2 HAP credentials used by
 the MRP tunnel. `settings.apply(pairing)` copies the paired service identifier
-and HAP credentials into the correct protocol settings.
+and HAP credentials into the correct protocol settings; `vault.savePairing`
+does the same before storing the settings under every known device identifier.
 
 `ATVClient.connect` tries enabled services in the `ConnectOptions.protocols`
 order and returns `ConnectResult` when a usable protocol connects. The default
 order is direct MRP, then the AirPlay 2 MRP tunnel, then Companion. Pass
-`ConnectOptions(protocols: [.mrp])` for strict direct MRP, or
+`ConnectOptions(protocols: [.mrp])` for strict direct MRP,
+`ConnectOptions(protocols: [.companion, .mrp], strategy: .allAllowed)` when
+Companion should be the primary facade route, or
 `ConnectOptions(strategy: .allAllowed)` when you want SwiftATV to attach every
 usable allowed protocol before returning. The tunnel uses AirPlay credentials
 first, then Companion credentials when AirPlay credentials are absent.
@@ -208,17 +209,23 @@ available, SwiftATV can still try the AirPlay MRP tunnel on the default AirPlay
 port.
 `ConnectOptions(requestTimeout:)` bounds direct MRP and Companion TCP setup,
 setup request/response exchanges, and AirPlay HTTP/RTSP setup.
+`ConnectOptions(runtimeRequestTimeout:)` bounds post-connect MRP and Companion
+command request/response exchanges.
 Companion always requires credentials. When both settings and a service contain
 credentials for the same protocol, `ATVSettings` wins. When auto-connect
 exhausts all options, the thrown `ATVError.connectionFailed` contains
-`ConnectionAttemptError` entries for every attempted protocol.
+`ConnectionAttemptError` entries for every attempted protocol, including
+service identifier, credential source, derived AirPlay-tunnel flag, and
+preflight status.
 
 Use `device.connectableProtocols(settings:)`,
 `device.preferredPairingService(settings:)`, and
 `service.effectivePairingStatus(settings:)` to apply SwiftATV's protocol policy
 before starting pairing or connect UI. `connectableProtocols` defaults to
 `ConnectOptions.defaultProtocolOrder`; pass `protocols:` to use the same order
-as a custom connect button or fallback strategy.
+as a custom connect button or fallback strategy. AirPlay services that Bonjour
+reports as not needing pairing can still report missing credentials when the
+MRP tunnel needs reusable HAP credentials.
 
 ### Check Capability Availability
 
@@ -280,7 +287,8 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
            (high)          (low)
 ```
 
-**Relayer priority order**: MRP > AirPlay > Companion.
+**Relayer priority order**: by default MRP > AirPlay > Companion; connected
+facades use the `ConnectOptions.protocols` order supplied to `ATVClient.connect`.
 Connection setup is driven by `ConnectOptions`: by default it returns after
 the first usable protocol connects, trying direct MRP first,
 AirPlay-tunneled MRP next, then Companion. `ConnectStrategy.allAllowed`
@@ -295,8 +303,8 @@ event. A primary or last-active protocol close still emits `connectionLost`.
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
-| **MRP** | Media Remote Protocol: direct protobuf TCP connection with timeout-bounded setup, pair-setup/pair-verify, remote control, metadata, push updates, power, audio, output-device mutation | Implemented |
-| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch, NoOp keepalive, timeout-bounded setup, full pair-setup (SRP-6a), and pair-verify | Implemented, except output-device mutation |
+| **MRP** | Media Remote Protocol: direct protobuf TCP connection with timeout-bounded setup/runtime requests, pair-setup/pair-verify, remote control, metadata, push updates, power, audio, output-device mutation | Implemented |
+| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch, NoOp keepalive, timeout-bounded setup/runtime requests, full pair-setup (SRP-6a), and pair-verify | Implemented, except output-device mutation |
 | **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel, including timeout-bounded HTTP/RTSP setup and MRP output-device mutation | Tunnel implemented |
 
 ## Project Structure
@@ -308,7 +316,7 @@ Sources/SwiftATV/
 ├── Errors.swift                 # ATVError, TimeoutContext, ConnectionAttemptError + wrap() factory
 ├── Interfaces.swift             # Swift protocols (all throws(ATVError))
 ├── Configuration.swift          # AppleTVConfiguration, ServiceInfo, connectability helpers
-├── Settings.swift               # Local client identity, pairing apply helper, per-protocol settings
+├── Settings.swift               # Local client identity, settings vault, pairing apply helper, per-protocol settings
 ├── DeviceInfo.swift             # Device model/OS lookup tables
 ├── DiscoveryIdentifiers.swift   # Bonjour TXT identifier lookup priority
 ├── SwiftATV.docc/               # DocC catalog
@@ -319,7 +327,7 @@ Sources/SwiftATV/
 │   ├── ChaCha20Cipher.swift    # ChaCha20-Poly1305 encryption
 │   └── HAPSession.swift        # AirPlay 2 HAP transport encryption
 ├── Core/
-│   ├── Relayer.swift           # Priority-based protocol routing
+│   ├── Relayer.swift           # Priority-based protocol routing, using facade protocol order
 │   ├── Facade.swift            # FacadeAppleTV unified implementation
 │   ├── MessageDispatcher.swift # Generic actor-based pub-sub
 │   └── Scanner.swift           # Bonjour/mDNS discovery, TXT resolution, sleep-proxy discovery
@@ -360,8 +368,8 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 316 XCTest cases covering pyatv ports and SwiftATV-specific
-integration logic, plus 57 Swift Testing cases:
+The test suite covers pyatv ports and SwiftATV-specific integration logic across
+XCTest and Swift Testing:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
 every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
@@ -375,9 +383,11 @@ Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
 resolution, scan diagnostics, sleep-proxy deep-sleep discovery, identity
 merging, deterministic first-usable connect, all-allowed multi-protocol
 connect, connect-result metadata, aggregate connection errors, credential
-selection including AirPlay tunnel ordering, pairing-result settings
-persistence, preflight connectability helpers, structured timeout context,
-direct protocol setup timeouts, pyatv-compatible HAP credential parsing,
+selection including AirPlay tunnel ordering, facade routing from custom
+protocol order, pairing-result settings persistence, settings-vault alias
+merging, preflight connectability helpers, structured timeout and cancellation
+context, direct protocol setup timeouts, runtime request timeout plumbing,
+pyatv-compatible HAP credential parsing,
 unsupported metadata errors, Companion touch-start timeout resilience, facade
 device events including secondary-protocol close isolation, timeout conversion,
 strict TLV8 auth decoding,
@@ -391,7 +401,8 @@ M3 output against canned M2, error-TLV surfacing, state ordering),
 `Playing.description` edge cases, Companion auth envelopes, Companion encrypted
 frame AAD, Companion connection race handling, Companion RTI text-input
 binary-plist encoding/decoding, AirPlay feature/pairing parsing, HAP transport
-encryption, and AirPlay DataStream MRP frame extraction.
+encryption, AirPlay DataStream MRP frame extraction, and cancellation-aware
+request waiter cleanup.
 
 CI runs the full suite on `macos-26` (Swift 6.3) and `swift:6.3-jammy`
 on `ubuntu-24.04`, plus a Swift 6.3 `swift format lint --strict` job on

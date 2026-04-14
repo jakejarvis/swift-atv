@@ -173,6 +173,38 @@ final class SwiftATVConnectTests: XCTestCase {
         XCTAssertTrue(result.attempts.allSatisfy(\.succeeded))
     }
 
+    func testConnectCustomProtocolOrderDrivesPrimaryAndActiveProtocolOrder() async throws {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "01:02:03:04"
+        let recorder = AttemptRecorder()
+
+        let result = try await ATVClient.withProtocolSetupOverride(
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
+            },
+            operation: {
+                try await ATVClient.connect(
+                    config,
+                    options: ConnectOptions(protocols: [.companion, .mrp], strategy: .allAllowed),
+                    settings: settings
+                )
+            }
+        )
+
+        XCTAssertEqual(recorder.protocols, [.companion, .mrp])
+        XCTAssertEqual(result.primaryProtocol, .companion)
+        XCTAssertEqual(result.activeProtocols, [.companion, .mrp])
+        XCTAssertEqual(result.attempts.map(\.protocol), [.companion, .mrp])
+    }
+
     func testConnectAttemptsAirPlayTunnelBeforeCompanionAfterMRPFailure() async throws {
         let credentials = "01:02:03:04"
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
@@ -283,6 +315,7 @@ final class SwiftATVConnectTests: XCTestCase {
             ServiceInfo(
                 protocol: .companion,
                 port: 49153,
+                identifier: "companion-id",
                 credentials: companionCredentials,
                 properties: ["rpMd": "AppleTV11,1", "rpVr": "18.4"],
                 pairingRequirement: .mandatory
@@ -310,6 +343,11 @@ final class SwiftATVConnectTests: XCTestCase {
         XCTAssertEqual(recorder.credentials(for: .airPlay), companionCredentials)
         XCTAssertEqual(result.primaryProtocol, .airPlay)
         XCTAssertEqual(result.activeProtocols, [.airPlay])
+        XCTAssertEqual(result.attempts.count, 1)
+        XCTAssertTrue(result.attempts[0].isDerivedAirPlayTunnel)
+        XCTAssertEqual(result.attempts[0].serviceIdentifier, "companion-id")
+        XCTAssertEqual(result.attempts[0].credentialSource, .service(.companion))
+        XCTAssertEqual(result.attempts[0].preflightStatus, .connectable)
     }
 
     func testConnectabilityIncludesCompanionDerivedAirPlayTunnel() {

@@ -25,11 +25,12 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
 - **Per-protocol lifecycle**: The facade tracks active and primary protocols separately. Secondary protocol setup/close failures unregister only that protocol; primary or last-active closes emit terminal device events.
-- **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > AirPlay > Companion)
-- **Connect setup priority**: `ATVClient.connect` takes `ConnectOptions`, attempts implemented control protocols deterministically by option order (default direct MRP > AirPlay-tunneled MRP > Companion), can derive an AirPlay tunnel attempt on port 7000 from a Companion-only discovery when reusable HAP credentials exist, returns `ConnectResult` with primary/active protocols and attempts, and aggregates per-protocol errors if none connect. Single-protocol options stay strict; `ConnectStrategy.allAllowed` attaches every usable allowed protocol.
-- **Setup timeouts**: `ConnectOptions.requestTimeout` applies to direct MRP and Companion TCP connects and setup request/response exchanges, plus AirPlay HTTP/RTSP setup.
-- **Pairing/settings persistence**: `PairingHandler.finish()` returns `PairingResult`; `ATVSettings.apply(_:)` copies the paired service identifier and credentials into the correct protocol bucket.
-- **Preflight policy helpers**: `AppleTVConfiguration.connectability(settings:)`, `connectableProtocols(settings:protocols:)`, `preferredPairingService(...)`, and `ServiceInfo.effectivePairingStatus(settings:)` expose local pairing/connectability policy for apps before opening network sessions. Connectable protocol results follow the supplied protocol order.
+- **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol. Default priority is MRP > AirPlay > Companion, and connected facades use the caller's `ConnectOptions.protocols` order.
+- **Connect setup priority**: `ATVClient.connect` takes `ConnectOptions`, attempts implemented control protocols deterministically by option order (default direct MRP > AirPlay-tunneled MRP > Companion), can derive an AirPlay tunnel attempt on port 7000 from a Companion-only discovery when reusable HAP credentials exist, returns `ConnectResult` with primary/active protocols and enriched attempts, and aggregates enriched per-protocol errors if none connect. Single-protocol options stay strict; `ConnectStrategy.allAllowed` attaches every usable allowed protocol.
+- **Setup and runtime timeouts**: `ConnectOptions.requestTimeout` applies to direct MRP and Companion TCP connects and setup request/response exchanges, plus AirPlay HTTP/RTSP setup. `ConnectOptions.runtimeRequestTimeout` applies to post-connect MRP and Companion request/response exchanges.
+- **Pairing/settings persistence**: `PairingHandler.finish()` returns `PairingResult`; `ATVSettings.apply(_:)` copies the paired service identifier and credentials into the correct protocol bucket. `ATVSettingsVault` stores settings under any known device identifier and merges alias records without owning the app's storage backend.
+- **Preflight policy helpers**: `AppleTVConfiguration.connectability(settings:)`, `connectableProtocols(settings:protocols:)`, `preferredPairingService(...)`, and `ServiceInfo.effectivePairingStatus(settings:)` expose local pairing/connectability policy for apps before opening network sessions. Connectable protocol results follow the supplied protocol order, and AirPlay `.notNeeded` still reports missing credentials when the MRP tunnel cannot connect without reusable HAP credentials.
+- **Request waiters**: Direct MRP and AirPlay-tunneled MRP match waiters by request identifier plus expected response type. Direct MRP, AirPlay-tunneled MRP, AirPlay TCP, Companion request, and scanner waiters remove owned continuations on task cancellation.
 - **State-backed capabilities**: Companion and MRP capability providers report unavailable until setup, protocol events, or successful requests prove optional/stateful surfaces are usable. MRP output-device list and mutation capabilities become available after route state arrives from direct MRP or AirPlay-tunneled MRP. Companion and MRP optional setup failures are exposed with capability diagnostics when a public capability is affected. Relayed state prefers `.available` over `.unavailable` across protocols.
 - **Media commands**: `MediaCommandController` exposes broad MediaRemote command discovery and sending. Direct MRP maps `SupportedCommands` into `MediaCommandInfo`; commands requiring unmodeled queue/session/language payloads stay unsupported.
 - **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records. Filtered and unfiltered scans include `_sleep-proxy._udp` and mark matching configurations `deepSleep`.
@@ -46,7 +47,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   - `Configuration.swift` -- `AppleTVConfiguration`, `ServiceInfo`, pairing status, and connectability helpers
   - `DiscoveryIdentifiers.swift` -- Bonjour TXT identifier lookup priority
   - `Errors.swift` -- `ATVError`, `TimeoutContext`, and `ConnectionAttemptError` (all public API is `throws(ATVError)`)
-  - `Settings.swift` -- `ATVSettings`, local `ClientIdentitySettings`, pairing-result apply helper, and protocol-specific credential settings
+  - `Settings.swift` -- `ATVSettings`, `ATVSettingsVault`, local `ClientIdentitySettings`, pairing-result apply helper, and protocol-specific credential settings
   - `Support/` -- Binary codecs: OPACK, TLV8, BinaryPlistArchive, ChaCha20-Poly1305, AirPlay HAP session encryption
   - `Core/` -- Relayer, Facade, Scanner (NWBrowser plus NetService TXT resolution, filtered/unfiltered sleep-proxy discovery, identifier-first merge, and diagnostics), MessageDispatcher
   - `Auth/`
@@ -137,9 +138,9 @@ Most tests are ported from pyatv's test suite (XCTest):
   model/version metadata coverage.
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
 - `CompanionServiceTests.swift` -- Companion setup resilience when optional
-  `_sessionStart` / `_touchStart` requests time out after credentialed
-  pair-verify and required setup succeeds, setup diagnostics, plus Companion
-  NoOp keepalive.
+  `_sessionStart` / `_touchStart` requests time out or `_sessionStart` is
+  malformed after credentialed pair-verify and required setup succeeds, setup
+  diagnostics, plus Companion NoOp keepalive.
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
   Companion identifier extraction, NetService TXT resolver path, scan timeout
   validation, diagnostics, sleep-proxy deep-sleep discovery, and
@@ -147,14 +148,15 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
   malformed-credential, deterministic first-usable priority, service-credential,
   mandatory-credential, Companion credential requirements, all-allowed strategy,
-  Companion-derived AirPlay tunnel attempts, connect-result metadata, aggregate
-  failures, and client-identity collision checks.
+  custom facade routing priority, Companion-derived AirPlay tunnel attempts,
+  enriched connect-result metadata, aggregate failures, and client-identity
+  collision checks.
 - `FacadeEventTests.swift` -- facade connection-closed, connection-lost, and
   per-protocol primary/secondary close behavior plus unsupported metadata
   errors.
 - `ErrorsTests.swift` -- structured `ATVError.operationTimeout` context.
-- `SettingsTests.swift` -- settings Codable/accessors and pairing-result
-  persistence helpers.
+- `SettingsTests.swift` -- settings Codable/accessors, settings-vault alias
+  merging, and pairing-result persistence helpers.
 - `TimingTests.swift` -- shared timeout-to-nanoseconds conversion guards and
   direct Companion/MRP connect-timeout validation.
 - `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus
@@ -164,8 +166,8 @@ Most tests are ported from pyatv's test suite (XCTest):
   coverage.
 - `ConsumerCompileTests.swift` -- consumer-style imports proving
   module-qualified types such as `SwiftATV.ATVProtocol`, typed capabilities,
-  media command options, and scan diagnostics compile alongside `ATVClient`
-  facade calls.
+  media command options, settings vaults, enriched connect attempts, and scan
+  diagnostics compile alongside `ATVClient` facade calls.
 
 New work uses Swift Testing (`import Testing`, `@Test`, `@Suite`) — both
 frameworks coexist in the same target. Current Swift Testing suites:
@@ -184,5 +186,8 @@ frameworks coexist in the same target. Current Swift Testing suites:
   binary-plist encoding/decoding for `_tiStart` and `_tiC` payloads.
 - `AirPlayTests.swift` -- Swift Testing coverage for AirPlay feature parsing,
   pairing requirement parsing, pairing handler creation, HAP session
-  chunking/authentication, and DataStream protobuf payload parsing.
+  chunking/authentication, and DataStream protobuf payload parsing including the
+  ambiguous leading-`0x08` length-prefixed case.
+- `RequestWaiterTests.swift` -- Swift Testing coverage for MRP/AirPlay
+  response-type-aware waiter matching and cancellation-aware waiter cleanup.
 - `TestHelpers.swift` -- shared `Data(hex:)` / `.hex` helpers.

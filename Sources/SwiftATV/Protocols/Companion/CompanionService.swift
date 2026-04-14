@@ -22,6 +22,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private let requestTimeout: TimeInterval
+    private let runtimeRequestTimeout: TimeInterval
     private let touchStartTimeout: TimeInterval
     private let keepAliveInterval: TimeInterval
     private let stateStore = CompanionStateStore()
@@ -109,6 +110,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings(),
         requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.init(
@@ -117,6 +119,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             credentials: credentials,
             settings: settings,
             requestTimeout: requestTimeout,
+            runtimeRequestTimeout: runtimeRequestTimeout,
             touchStartTimeout: requestTimeout,
             onConnectionClosed: onConnectionClosed
         )
@@ -128,15 +131,20 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings(),
         requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         touchStartTimeout: TimeInterval,
         keepAliveInterval: TimeInterval = 30,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = CompanionConnection(host: host, port: port, connectTimeout: requestTimeout)
-        self.protocolHandler = CompanionProtocolHandler(connection: connection)
+        self.protocolHandler = CompanionProtocolHandler(
+            connection: connection,
+            defaultRequestTimeout: runtimeRequestTimeout
+        )
         self.credentials = credentials
         self.settings = settings
         self.requestTimeout = requestTimeout
+        self.runtimeRequestTimeout = runtimeRequestTimeout
         self.touchStartTimeout = touchStartTimeout
         self.keepAliveInterval = keepAliveInterval
         self.onConnectionClosed = onConnectionClosed
@@ -146,9 +154,9 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     /// Connect and set up the Companion protocol.
     ///
     /// TCP connection, pair-verify, system info, and event subscription are
-    /// required. Session and touch setup are optional: a `_sessionStart` or
-    /// `_touchStart` timeout leaves dependent surfaces unavailable but does not
-    /// fail the connection.
+    /// required. Session and touch setup are optional: a `_sessionStart`
+    /// timeout or malformed response, or a `_touchStart` timeout, leaves
+    /// dependent surfaces unavailable but does not fail the connection.
     public func setup() async throws(ATVError) {
         guard let credentials else {
             throw ATVError.noCredentials("Companion requires pairing credentials")
@@ -252,6 +260,9 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             return context.protocol == .companion
                 && context.operation == "request"
                 && context.requestID == "_sessionStart"
+        }
+        if case .invalidResponse(let message) = error {
+            return message.hasPrefix("Companion session")
         }
         return false
     }

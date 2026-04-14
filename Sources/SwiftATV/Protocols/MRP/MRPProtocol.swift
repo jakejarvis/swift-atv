@@ -160,12 +160,31 @@ extension MRPTransport {
 }
 
 private final class PendingMRPWaiter: @unchecked Sendable {
-    let id = UUID()
+    let id: UUID
     let continuation: CheckedContinuation<ProtocolMessageMessage, Error>
     var timeoutTask: Task<Void, Never>?
 
-    init(_ continuation: CheckedContinuation<ProtocolMessageMessage, Error>) {
+    init(id: UUID = UUID(), _ continuation: CheckedContinuation<ProtocolMessageMessage, Error>) {
+        self.id = id
         self.continuation = continuation
+    }
+}
+
+private struct MRPWaiterKey: Hashable, Sendable, CustomStringConvertible {
+    let identifier: String?
+    let type: ProtocolMessageMessage.TypeEnum
+
+    init(identifier: String?, type: ProtocolMessageMessage.TypeEnum) {
+        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.identifier = trimmed?.isEmpty == false ? trimmed : nil
+        self.type = type
+    }
+
+    var description: String {
+        if let identifier {
+            return "id:\(identifier):type:\(type.rawValue)"
+        }
+        return "type:\(type.rawValue)"
     }
 }
 
@@ -185,7 +204,7 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
     private var channel: Channel?
     private var cipher: ChaCha20Cipher8ByteNonce?
     private var receiveBuffer = Data()
-    private var waiters: [String: PendingMRPWaiter] = [:]
+    private var waiters: [MRPWaiterKey: PendingMRPWaiter] = [:]
     private var messageContinuation: AsyncStream<ProtocolMessageMessage>.Continuation?
     private var _messageStream: AsyncStream<ProtocolMessageMessage>?
     private var isClosed = false
@@ -347,67 +366,29 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
             outbound.identifier = UUID().uuidString
         }
 
-        let waitKey = Self.waiterKey(
+        let waitKey = MRPWaiterKey(
             identifier: outbound.identifier,
             type: responseType ?? outbound.type
         )
         let messageToSend = outbound
+        let waiterID = UUID()
+        let context = TimeoutContext(
+            protocol: .mrp,
+            operation: "request",
+            requestID: waitKey.description,
+            duration: timeout
+        )
 
         do {
-            return try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<ProtocolMessageMessage, Error>) in
-                let waiter = PendingMRPWaiter(continuation)
-                let waiterID = waiter.id
-
-                switch installWaiter(key: waitKey, waiter: waiter) {
-                case .closed:
-                    continuation.resume(throwing: ATVError.connectionLost("Connection is closed"))
-                    return
-                case .duplicate:
-                    continuation.resume(
-                        throwing: ATVError.invalidState("MRP waiter already registered for \(waitKey)")
-                    )
-                    return
-                case .installed:
-                    break
-                }
-
-                let task = Task { [weak self] in
-                    guard let self else { return }
-                    do {
-                        try await self.send(messageToSend)
-                    } catch {
-                        if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
-                            removed.continuation.resume(throwing: error)
-                        }
-                        return
-                    }
-
-                    do {
-                        try await Task.sleep(nanoseconds: timeoutNs)
-                    } catch {
-                        return
-                    }
-
-                    if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
-                        removed.continuation.resume(
-                            throwing: ATVError.operationTimeout(
-                                TimeoutContext(
-                                    protocol: .mrp,
-                                    operation: "request",
-                                    requestID: waitKey,
-                                    duration: timeout
-                                )
-                            )
-                        )
-                    }
-                }
-
-                lock.withLock {
-                    if waiters[waitKey]?.id == waiterID {
-                        waiter.timeoutTask = task
-                    }
-                }
+            return try await waitForResponse(
+                key: waitKey,
+                waiterID: waiterID,
+                timeout: timeout,
+                timeoutNs: timeoutNs,
+                context: context
+            ) { [weak self] in
+                guard let self else { return }
+                try await self.send(messageToSend)
             }
         } catch let err as ATVError {
             throw err
@@ -451,7 +432,77 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
         case closed
     }
 
-    private func installWaiter(key: String, waiter: PendingMRPWaiter) -> WaiterInstallResult {
+    private func waitForResponse(
+        key waitKey: MRPWaiterKey,
+        waiterID: UUID,
+        timeout: TimeInterval,
+        timeoutNs: UInt64,
+        context: TimeoutContext,
+        sendOperation: @escaping @Sendable () async throws -> Void
+    ) async throws -> ProtocolMessageMessage {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<ProtocolMessageMessage, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: ATVError.operationCancelled(context))
+                    return
+                }
+
+                let waiter = PendingMRPWaiter(id: waiterID, continuation)
+
+                switch installWaiter(key: waitKey, waiter: waiter) {
+                case .closed:
+                    continuation.resume(throwing: ATVError.connectionLost("Connection is closed"))
+                    return
+                case .duplicate:
+                    continuation.resume(
+                        throwing: ATVError.invalidState("MRP waiter already registered for \(waitKey)")
+                    )
+                    return
+                case .installed:
+                    break
+                }
+
+                let task = Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await sendOperation()
+                    } catch {
+                        if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
+                            removed.continuation.resume(throwing: error)
+                        }
+                        return
+                    }
+
+                    do {
+                        try await Task.sleep(nanoseconds: timeoutNs)
+                    } catch {
+                        return
+                    }
+
+                    if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
+                        removed.continuation.resume(throwing: ATVError.operationTimeout(context))
+                    }
+                }
+
+                lock.withLock {
+                    if waiters[waitKey]?.id == waiterID {
+                        waiter.timeoutTask = task
+                    } else {
+                        task.cancel()
+                    }
+                }
+            }
+        } onCancel: { [weak self] in
+            guard let removed = self?.removeWaiterIfOwned(key: waitKey, id: waiterID) else {
+                return
+            }
+            removed.timeoutTask?.cancel()
+            removed.continuation.resume(throwing: ATVError.operationCancelled(context))
+        }
+    }
+
+    private func installWaiter(key: MRPWaiterKey, waiter: PendingMRPWaiter) -> WaiterInstallResult {
         lock.withLock {
             if isClosed { return .closed }
             if waiters[key] != nil { return .duplicate }
@@ -460,7 +511,7 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
         }
     }
 
-    private func removeWaiterIfOwned(key: String, id: UUID) -> PendingMRPWaiter? {
+    private func removeWaiterIfOwned(key: MRPWaiterKey, id: UUID) -> PendingMRPWaiter? {
         lock.withLock {
             guard let waiter = waiters[key], waiter.id == id else {
                 return nil
@@ -469,18 +520,44 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
         }
     }
 
+    internal func _testWaitForResponse(
+        identifier: String,
+        type: ProtocolMessageMessage.TypeEnum,
+        timeout: TimeInterval = 60
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let key = MRPWaiterKey(identifier: identifier, type: type)
+        let waiterID = UUID()
+        let context = TimeoutContext(
+            protocol: .mrp,
+            operation: "testRequest",
+            requestID: key.description,
+            duration: timeout
+        )
+        do {
+            return try await waitForResponse(
+                key: key,
+                waiterID: waiterID,
+                timeout: timeout,
+                timeoutNs: timeoutNs,
+                context: context
+            ) {}
+        } catch let err as ATVError {
+            throw err
+        } catch {
+            throw ATVError.wrap(error)
+        }
+    }
+
+    internal var _testPendingWaiterCount: Int {
+        lock.withLock { waiters.count }
+    }
+
     private func resume(_ drained: [PendingMRPWaiter], with error: ATVError) {
         for waiter in drained {
             waiter.timeoutTask?.cancel()
             waiter.continuation.resume(throwing: error)
         }
-    }
-
-    private static func waiterKey(identifier: String, type: ProtocolMessageMessage.TypeEnum) -> String {
-        if !identifier.isEmpty {
-            return "id:\(identifier)"
-        }
-        return "type:\(type.rawValue)"
     }
 
     internal func handleReceivedData(_ data: Data) {
@@ -529,9 +606,14 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
                 return
             }
 
-            let idKey = Self.waiterKey(identifier: message.identifier, type: message.type)
-            let typeKey = Self.waiterKey(identifier: "", type: message.type)
-            let waiter = waiters.removeValue(forKey: idKey) ?? waiters.removeValue(forKey: typeKey)
+            let idKey = MRPWaiterKey(identifier: message.identifier, type: message.type)
+            let typeKey = MRPWaiterKey(identifier: nil, type: message.type)
+            let waiter =
+                if message.hasIdentifier, !message.identifier.isEmpty {
+                    waiters.removeValue(forKey: idKey)
+                } else {
+                    waiters.removeValue(forKey: typeKey)
+                }
             let cont = messageContinuation
             lock.unlock()
 

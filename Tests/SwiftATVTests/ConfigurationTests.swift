@@ -116,6 +116,24 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(service.effectivePairingStatus(settings: settings), .paired)
     }
 
+    func testAirPlayNotNeededPairingStatusReflectsTunnelCredentials() {
+        let service = ServiceInfo(
+            protocol: .airPlay,
+            port: port1,
+            pairingRequirement: .notNeeded
+        )
+        var settings = ATVSettings()
+
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .credentialsMissing)
+
+        settings.protocols.airplay.credentials = "01:02:03:04"
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .paired)
+
+        settings.protocols.airplay.credentials = nil
+        settings.protocols.companion.credentials = "01:02:03:04"
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .paired)
+    }
+
     func testConnectabilityAndPreferredPairingHelpers() {
         var config = makeConfig()
         config.addService(ServiceInfo(protocol: .mrp, port: port2, pairingRequirement: .optional))
@@ -136,6 +154,27 @@ final class ConfigurationTests: XCTestCase {
         settings.protocols.companion.credentials = "01:02:03:04"
         XCTAssertEqual(config.connectableProtocols(settings: settings), [.mrp, .companion])
         XCTAssertEqual(config.preferredPairingService(settings: settings)?.protocol, .mrp)
+    }
+
+    func testAirPlayPreferredPairingFollowsTunnelPreflight() {
+        var config = makeConfig()
+        config.addService(
+            ServiceInfo(
+                protocol: .airPlay,
+                port: port1,
+                properties: ["features": "0x4000000000", "model": "AppleTV11,1", "osvers": "16.0"],
+                pairingRequirement: .notNeeded
+            )
+        )
+
+        XCTAssertEqual(config.connectability().map(\.status), [.missingCredentials])
+        XCTAssertEqual(config.preferredPairingService(protocols: [.airPlay])?.protocol, .airPlay)
+
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "01:02:03:04"
+
+        XCTAssertEqual(config.connectability(settings: settings).map(\.status), [.connectable])
+        XCTAssertNil(config.preferredPairingService(settings: settings, protocols: [.airPlay]))
     }
 
     func testConnectableProtocolsUsesRequestedProtocolOrder() {

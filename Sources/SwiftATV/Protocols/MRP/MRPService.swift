@@ -266,6 +266,7 @@ public final class MRPService: @unchecked Sendable {
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private let requestTimeout: TimeInterval
+    private let runtimeRequestTimeout: TimeInterval
     private var credentials: HAPCredentials?
 
     private var _remoteControl: MRPRemoteControl?
@@ -311,6 +312,7 @@ public final class MRPService: @unchecked Sendable {
         credentials: HAPCredentials? = nil,
         settings: ATVSettings,
         requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         let connection = MRPConnection(host: host, port: port, connectTimeout: requestTimeout)
@@ -321,12 +323,14 @@ public final class MRPService: @unchecked Sendable {
             stateStore: stateStore,
             authenticationMode: .directPairVerify,
             heartbeatMode: .genericMessage,
+            runtimeRequestTimeout: runtimeRequestTimeout,
             onConnectionClosed: onConnectionClosed
         )
         self.credentials = credentials
         self.settings = settings
         self.onConnectionClosed = onConnectionClosed
         self.requestTimeout = requestTimeout
+        self.runtimeRequestTimeout = runtimeRequestTimeout
         self.connection.delegate = protocolHandler
     }
 
@@ -337,6 +341,7 @@ public final class MRPService: @unchecked Sendable {
         authenticationMode: MRPAuthenticationMode,
         heartbeatMode: MRPHeartbeatMode,
         requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = transport
@@ -346,6 +351,7 @@ public final class MRPService: @unchecked Sendable {
             stateStore: stateStore,
             authenticationMode: authenticationMode,
             heartbeatMode: heartbeatMode,
+            runtimeRequestTimeout: runtimeRequestTimeout,
             onConnectionClosed: onConnectionClosed
         )
         self.protocolHandler = handler
@@ -353,6 +359,7 @@ public final class MRPService: @unchecked Sendable {
         self.settings = settings
         self.onConnectionClosed = onConnectionClosed
         self.requestTimeout = requestTimeout
+        self.runtimeRequestTimeout = runtimeRequestTimeout
         self.connection.delegate = handler
     }
 
@@ -391,6 +398,7 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
     private let stateStore: MRPStateStore
     private let authenticationMode: MRPAuthenticationMode
     private let heartbeatMode: MRPHeartbeatMode
+    private let runtimeRequestTimeout: TimeInterval
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var heartbeatTask: Task<Void, Never>?
 
@@ -406,6 +414,7 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         stateStore: MRPStateStore,
         authenticationMode: MRPAuthenticationMode,
         heartbeatMode: MRPHeartbeatMode,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = connection
@@ -413,6 +422,7 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         self.stateStore = stateStore
         self.authenticationMode = authenticationMode
         self.heartbeatMode = heartbeatMode
+        self.runtimeRequestTimeout = runtimeRequestTimeout
         self.onConnectionClosed = onConnectionClosed
     }
 
@@ -478,14 +488,19 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         _ message: ProtocolMessageMessage,
         responseType: ProtocolMessageMessage.TypeEnum? = nil
     ) async throws(ATVError) -> ProtocolMessageMessage {
-        try await connection.sendAndReceive(message, responseType: responseType)
+        try await connection.sendAndReceive(
+            message,
+            responseType: responseType,
+            timeout: runtimeRequestTimeout
+        )
     }
 
     func sendCommand(_ command: Command, options: CommandOptions? = nil) async throws(ATVError) {
         let path = await playerState.activePlayerPath
         let response = try await connection.sendAndReceive(
             MRPMessages.command(command, options: options, playerPath: path),
-            responseType: .sendCommandResultMessage
+            responseType: .sendCommandResultMessage,
+            timeout: runtimeRequestTimeout
         )
         try Self.validateCommandResult(response.sendCommandResultMessage, command: command)
     }

@@ -225,27 +225,35 @@ internal final class AirPlayDataStreamChannel: @unchecked Sendable {
     }
 
     internal static func messages(fromDataField data: Data) throws(ATVError) -> [ProtocolMessageMessage] {
+        do {
+            return try lengthPrefixedMessages(fromDataField: data)
+        } catch let prefixedError {
+            do {
+                return [
+                    try ProtocolMessageMessage(
+                        serializedBytes: data,
+                        extensions: mrpProtocolExtensionMap
+                    )
+                ]
+            } catch {
+                throw ATVError.wrap(prefixedError)
+            }
+        }
+    }
+
+    private static func lengthPrefixedMessages(
+        fromDataField data: Data
+    ) throws(ATVError) -> [ProtocolMessageMessage] {
         var messages: [ProtocolMessageMessage] = []
         var offset = 0
 
         while offset < data.count {
-            if data[offset] == 0x08 {
-                do {
-                    messages.append(
-                        try ProtocolMessageMessage(
-                            serializedBytes: Data(data[offset...]),
-                            extensions: mrpProtocolExtensionMap
-                        )
-                    )
-                } catch {
-                    throw ATVError.wrap(error)
-                }
-                break
-            }
-
             let lengthOffset = offset
             guard let length = try MRPVarint.decode(data, offset: &offset) else {
                 throw ATVError.invalidData("AirPlay data stream has incomplete MRP varint")
+            }
+            guard length > 0 else {
+                throw ATVError.invalidData("AirPlay data stream has empty MRP payload")
             }
             guard data.count - offset >= length else {
                 throw ATVError.invalidData("AirPlay data stream has incomplete MRP payload")

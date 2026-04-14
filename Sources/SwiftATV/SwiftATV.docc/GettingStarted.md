@@ -94,7 +94,8 @@ SRP-6a pair-setup handshake for you; all you need is the `begin` → `pin` →
 `finish` flow.
 
 ```swift
-var settings = ATVSettings()
+var vault = try keychain.loadSettingsVault() ?? ATVSettingsVault()
+var settings = vault.settings(for: device)
 settings.clientIdentity.name = "Clicker"
 
 let handler = try await ATVClient.pair(
@@ -116,34 +117,31 @@ case .clientProvided(let pin):
 }
 
 let pairing = try await handler.finish()
-settings.apply(pairing)
-
-if let identifier = device.mainIdentifier {
-    try keychain.store(settings, for: identifier)
-}
+vault.savePairing(pairing, configuration: device, baseSettings: settings)
+try keychain.store(vault)
 
 await handler.close()
 ```
 
-Store the updated settings under one of the device's identifiers
-(``AppleTVConfiguration/mainIdentifier`` or ``AppleTVConfiguration/allIdentifiers``)
-so you can restore the protocol credentials on the next connection.
+``ATVSettingsVault`` stores settings under every known identifier from
+``AppleTVConfiguration/allIdentifiers`` and merges alias records when discovery
+later reports a different identifier for the same device. It is a pure Codable
+value; your app still chooses whether the encoded bytes live in Keychain, a
+file, iCloud, or another storage backend.
 
 To pair through direct MRP, request `.mrp` and store the credentials for
 `.mrp`:
 
 ```swift
-var settings = ATVSettings()
+var vault = try keychain.loadSettingsVault() ?? ATVSettingsVault()
+var settings = vault.settings(for: device)
 let handler = try await ATVClient.pair(device, protocol: .mrp, settings: settings)
 
 try await handler.begin()
 try await handler.pin(userEnteredPIN)
 let pairing = try await handler.finish()
-settings.apply(pairing)
-
-if let identifier = device.mainIdentifier {
-    try keychain.store(settings, for: identifier)
-}
+vault.savePairing(pairing, configuration: device, baseSettings: settings)
+try keychain.store(vault)
 
 await handler.close()
 ```
@@ -152,7 +150,8 @@ To pair for the AirPlay 2 MRP tunnel, request `.airPlay` and store the
 credentials for `.airPlay`:
 
 ```swift
-var settings = ATVSettings()
+var vault = try keychain.loadSettingsVault() ?? ATVSettingsVault()
+var settings = vault.settings(for: device)
 settings.clientIdentity.name = "Clicker"
 settings.protocols.airplay.airPlayVersion = .v2
 
@@ -165,25 +164,20 @@ let handler = try await ATVClient.pair(
 try await handler.begin()
 try await handler.pin(userEnteredPIN)
 let pairing = try await handler.finish()
-settings.apply(pairing)
-
-if let identifier = device.mainIdentifier {
-    try keychain.store(settings, for: identifier)
-}
+vault.savePairing(pairing, configuration: device, baseSettings: settings)
+try keychain.store(vault)
 
 await handler.close()
 ```
 
 ## Connect and issue commands
 
-Once paired, connect by loading the stored credentials into
-``ATVSettings`` and calling ``ATVClient/connect(_:options:settings:)``:
+Once paired, connect by loading the stored settings and calling
+``ATVClient/connect(_:options:settings:)``:
 
 ```swift
-var settings = ATVSettings()
-settings.clientIdentity.name = "Clicker"
-settings.setCredentials(storedCredentialsString, for: .companion)
-// Use `.mrp` here when you stored credentials from MRPPairingHandler.
+let vault = try keychain.loadSettingsVault() ?? ATVSettingsVault()
+let settings = vault.settings(for: device)
 
 let connection = try await ATVClient.connect(device, settings: settings)
 let atv = connection.device
@@ -215,8 +209,10 @@ await atv.close()
 ``ConnectOptions/protocols`` order and returns ``ConnectResult`` when a usable
 protocol connects. The default order is direct MRP first, then the AirPlay 2
 MRP tunnel, then Companion. Use `ConnectOptions(protocols: [.mrp])` for strict
-direct MRP, or `ConnectOptions(strategy: .allAllowed)` to attach every usable
-allowed protocol before returning.
+direct MRP, `ConnectOptions(protocols: [.companion, .mrp], strategy: .allAllowed)`
+when Companion should be the primary facade route, or
+`ConnectOptions(strategy: .allAllowed)` to attach every usable allowed protocol
+before returning. The same protocol order drives facade routing after connect.
 
 Credentials in ``ATVSettings`` take precedence. If settings do not contain
 credentials for a protocol, SwiftATV falls back to the matching
@@ -227,13 +223,20 @@ credentials are available, SwiftATV can still try the AirPlay MRP tunnel on the
 default AirPlay port. Companion connections always require credentials.
 Use ``ConnectOptions/requestTimeout`` to bound direct MRP and Companion TCP
 setup, setup request/response exchanges, and AirPlay HTTP/RTSP setup.
+Use ``ConnectOptions/runtimeRequestTimeout`` to bound post-connect MRP and
+Companion command request/response exchanges. `ConnectResult.attempts` and
+`ATVError.connectionFailed` attempt entries include the service identifier,
+credential source, derived AirPlay-tunnel flag, and preflight status for
+diagnostics.
 
 Use ``AppleTVConfiguration/connectableProtocols(settings:)``,
 ``AppleTVConfiguration/preferredPairingService(settings:protocols:)``, and
 ``ServiceInfo/effectivePairingStatus(settings:)`` to apply SwiftATV's protocol
 policy before opening connect or pairing UI. `connectableProtocols` defaults to
 ``ConnectOptions/defaultProtocolOrder``; pass `protocols:` when UI should mirror
-a custom connection order.
+a custom connection order. AirPlay services that Bonjour reports as not needing
+pairing can still report missing credentials when the MRP tunnel needs reusable
+HAP credentials.
 
 ``ATVSettings/clientIdentity`` describes your local app or controller. Do not
 copy identifiers from the scanned Apple TV into this field; SwiftATV validates

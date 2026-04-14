@@ -27,19 +27,20 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private var mrpServices: [ATVProtocol: MRPService] = [:]
     private var activeProtocols: Set<ATVProtocol> = []
     private var primaryProtocol: ATVProtocol?
+    private let protocolPriority: [ATVProtocol]
 
     // Relayers for each interface (internally thread-safe)
-    private let remoteControlRelayer = Relayer<RemoteControl>()
-    private let metadataRelayer = Relayer<ATVMetadata>()
-    private let pushUpdaterRelayer = Relayer<PushUpdater>()
-    private let appsRelayer = Relayer<AppsController>()
-    private let userAccountsRelayer = Relayer<UserAccountsController>()
-    private let powerRelayer = Relayer<PowerController>()
-    private let audioRelayer = Relayer<AudioController>()
-    private let keyboardRelayer = Relayer<KeyboardController>()
-    private let touchRelayer = Relayer<TouchController>()
-    private let capabilityRelayer = Relayer<CapabilityProvider>()
-    private let mediaCommandRelayer = Relayer<MediaCommandController>()
+    private let remoteControlRelayer: Relayer<RemoteControl>
+    private let metadataRelayer: Relayer<ATVMetadata>
+    private let pushUpdaterRelayer: Relayer<PushUpdater>
+    private let appsRelayer: Relayer<AppsController>
+    private let userAccountsRelayer: Relayer<UserAccountsController>
+    private let powerRelayer: Relayer<PowerController>
+    private let audioRelayer: Relayer<AudioController>
+    private let keyboardRelayer: Relayer<KeyboardController>
+    private let touchRelayer: Relayer<TouchController>
+    private let capabilityRelayer: Relayer<CapabilityProvider>
+    private let mediaCommandRelayer: Relayer<MediaCommandController>
 
     // Event stream
     private var eventContinuation: AsyncStream<DeviceEvent>.Continuation?
@@ -47,9 +48,25 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private var pendingEvents: [DeviceEvent] = []
     private var eventStreamFinished = false
 
-    public init(configuration: AppleTVConfiguration, settings: ATVSettings) {
+    public init(
+        configuration: AppleTVConfiguration,
+        settings: ATVSettings,
+        protocolPriority: [ATVProtocol] = Relayer<RemoteControl>.defaultPriorities
+    ) {
         self.configuration = configuration
         self._settings = settings
+        self.protocolPriority = protocolPriority
+        self.remoteControlRelayer = Relayer(priorities: protocolPriority)
+        self.metadataRelayer = Relayer(priorities: protocolPriority)
+        self.pushUpdaterRelayer = Relayer(priorities: protocolPriority)
+        self.appsRelayer = Relayer(priorities: protocolPriority)
+        self.userAccountsRelayer = Relayer(priorities: protocolPriority)
+        self.powerRelayer = Relayer(priorities: protocolPriority)
+        self.audioRelayer = Relayer(priorities: protocolPriority)
+        self.keyboardRelayer = Relayer(priorities: protocolPriority)
+        self.touchRelayer = Relayer(priorities: protocolPriority)
+        self.capabilityRelayer = Relayer(priorities: protocolPriority)
+        self.mediaCommandRelayer = Relayer(priorities: protocolPriority)
     }
 
     // MARK: - AppleTVDevice
@@ -231,7 +248,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     internal var connectedActiveProtocols: [ATVProtocol] {
         lock.withLock {
-            Relayer<RemoteControl>.defaultPriorities.filter { activeProtocols.contains($0) }
+            protocolPriority.filter { activeProtocols.contains($0) }
         }
     }
 
@@ -298,7 +315,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     public func setupProtocol(
         _ service: ServiceInfo,
         credentials resolvedCredentials: HAPCredentials? = nil,
-        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout
     ) async throws(ATVError) {
         try ATVClient.validateClientIdentity(settings: _settings, for: configuration)
 
@@ -316,7 +334,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             try await setupAirPlayMRPTunnel(
                 service,
                 credentialCandidates: candidates,
-                requestTimeout: requestTimeout
+                requestTimeout: requestTimeout,
+                runtimeRequestTimeout: runtimeRequestTimeout
             )
             return
         }
@@ -344,13 +363,15 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             try await setupCompanion(
                 service,
                 credentials: credentials,
-                requestTimeout: requestTimeout
+                requestTimeout: requestTimeout,
+                runtimeRequestTimeout: runtimeRequestTimeout
             )
         case .mrp:
             try await setupMRP(
                 service,
                 credentials: credentials,
-                requestTimeout: requestTimeout
+                requestTimeout: requestTimeout,
+                runtimeRequestTimeout: runtimeRequestTimeout
             )
         case .airPlay:
             preconditionFailure("AirPlay setup is handled before credential resolution")
@@ -360,7 +381,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private func setupCompanion(
         _ service: ServiceInfo,
         credentials: HAPCredentials?,
-        requestTimeout: TimeInterval
+        requestTimeout: TimeInterval,
+        runtimeRequestTimeout: TimeInterval
     ) async throws(ATVError) {
         let companion = CompanionService(
             host: configuration.address,
@@ -368,6 +390,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             credentials: credentials,
             settings: _settings,
             requestTimeout: requestTimeout,
+            runtimeRequestTimeout: runtimeRequestTimeout,
             onConnectionClosed: { [weak self] error in
                 self?.protocolConnectionDidClose(error, protocol: .companion)
             }
@@ -419,7 +442,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     internal func setupAirPlayMRPTunnel(
         _ service: ServiceInfo,
         credentialCandidates: [HAPCredentials],
-        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        runtimeRequestTimeout: TimeInterval = defaultProtocolRequestTimeout
     ) async throws(ATVError) {
         try ATVClient.validateClientIdentity(settings: _settings, for: configuration)
 
@@ -440,6 +464,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             authenticationMode: .alreadySecure,
             heartbeatMode: .disabled,
             requestTimeout: requestTimeout,
+            runtimeRequestTimeout: runtimeRequestTimeout,
             onConnectionClosed: { [weak self] error in
                 self?.protocolConnectionDidClose(error, protocol: .airPlay)
             }
@@ -457,7 +482,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private func setupMRP(
         _ service: ServiceInfo,
         credentials: HAPCredentials?,
-        requestTimeout: TimeInterval
+        requestTimeout: TimeInterval,
+        runtimeRequestTimeout: TimeInterval
     ) async throws(ATVError) {
         let mrp = MRPService(
             host: configuration.address,
@@ -465,6 +491,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             credentials: credentials,
             settings: _settings,
             requestTimeout: requestTimeout,
+            runtimeRequestTimeout: runtimeRequestTimeout,
             onConnectionClosed: { [weak self] error in
                 self?.protocolConnectionDidClose(error, protocol: .mrp)
             }
