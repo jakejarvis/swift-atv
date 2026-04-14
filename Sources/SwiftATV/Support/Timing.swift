@@ -12,3 +12,8 @@ internal func timeoutNanoseconds(from seconds: TimeInterval, parameterName: Stri
 
     return UInt64(nanoseconds)
 }
+
+internal func isLikelyTimeoutError(_ error: Error) -> Bool {
+    let description = String(describing: error).lowercased()
+    return description.contains("timeout") || description.contains("timed out")
+}

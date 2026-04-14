@@ -64,8 +64,7 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         do {
             connected = try await bootstrap.connect(host: host, port: port).get()
         } catch {
-            let description = String(describing: error).lowercased()
-            if description.contains("timeout") || description.contains("timed out") {
+            if isLikelyTimeoutError(error) {
                 throw ATVError.operationTimeout(
                     timeoutContext
                         ?? TimeoutContext(

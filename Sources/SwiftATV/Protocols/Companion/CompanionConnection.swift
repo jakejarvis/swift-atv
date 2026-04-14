@@ -82,6 +82,7 @@ public final class CompanionConnection: @unchecked Sendable {
 
     private let host: String
     private let port: Int
+    private let connectTimeout: TimeInterval
     private let group: EventLoopGroup
     private let ownsGroup: Bool
     private let lock = NSLock()
@@ -135,9 +136,22 @@ public final class CompanionConnection: @unchecked Sendable {
         return stream
     }
 
-    public init(host: String, port: Int, group: EventLoopGroup? = nil) {
+    /// Create a low-level Companion TCP connection.
+    ///
+    /// - Parameters:
+    ///   - host: Device host name or IP address.
+    ///   - port: Companion service port.
+    ///   - connectTimeout: Maximum time to wait for the TCP connect.
+    ///   - group: Optional NIO event-loop group. If omitted, the connection owns one.
+    public init(
+        host: String,
+        port: Int,
+        connectTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        group: EventLoopGroup? = nil
+    ) {
         self.host = host
         self.port = port
+        self.connectTimeout = connectTimeout
         if let group {
             self.group = group
             self.ownsGroup = false
@@ -158,9 +172,12 @@ public final class CompanionConnection: @unchecked Sendable {
         guard !alreadyClosed else {
             throw ATVError.connectionLost("Connection has been closed")
         }
+        let timeoutNs = try timeoutNanoseconds(from: connectTimeout, parameterName: "connectTimeout")
+        let timeoutMs = Int64(timeoutNs / 1_000_000)
 
         let bootstrap = ClientBootstrap(group: group)
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
+            .channelOption(ChannelOptions.connectTimeout, value: .milliseconds(timeoutMs))
             .channelInitializer { [self] channel in
                 channel.pipeline.addHandler(CompanionFrameHandler(connection: self))
             }
@@ -169,6 +186,16 @@ public final class CompanionConnection: @unchecked Sendable {
         do {
             ch = try await bootstrap.connect(host: host, port: port).get()
         } catch {
+            if isLikelyTimeoutError(error) {
+                throw ATVError.operationTimeout(
+                    TimeoutContext(
+                        protocol: .companion,
+                        operation: "connect",
+                        requestID: "tcp",
+                        duration: connectTimeout
+                    )
+                )
+            }
             throw ATVError.wrap(error)
         }
         lock.withLock {

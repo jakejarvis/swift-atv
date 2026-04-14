@@ -313,12 +313,15 @@ public actor CompanionProtocolHandler {
     // MARK: - Session Management
 
     /// Send system info to the device (required after pair-verify).
+    ///
+    /// - Parameter timeout: Maximum time to wait for the `_systemInfo` response.
     public func sendSystemInfo(
         name: String = "SwiftATV",
         model: String = "iPhone14,2",
         rapportIdentifier: String? = nil,
         clientID: String? = nil,
-        deviceID: String? = nil
+        deviceID: String? = nil,
+        timeout: TimeInterval = defaultCompanionTimeout
     ) async throws(ATVError) {
         let rpID = rapportIdentifier ?? ClientIdentitySettings.makeRapportIdentifier()
         let idsID = clientID ?? UUID().uuidString
@@ -337,11 +340,13 @@ public actor CompanionProtocolHandler {
             ("name", .string(name)),
         ])
 
-        _ = try await sendRequest("_systemInfo", content: content)
+        _ = try await sendRequest("_systemInfo", content: content, timeout: timeout)
     }
 
     /// Start a session with the device.
-    public func startSession() async throws(ATVError) {
+    ///
+    /// - Parameter timeout: Maximum time to wait for the `_sessionStart` response.
+    public func startSession(timeout: TimeInterval = defaultCompanionTimeout) async throws(ATVError) {
         let localSID = UInt64.random(in: 0..<UInt64(UInt32.max))
 
         let content = OPACK.Value.dictionary([
@@ -349,7 +354,7 @@ public actor CompanionProtocolHandler {
             ("_sid", .uint(localSID)),
         ])
 
-        let response = try await sendRequest("_sessionStart", content: content)
+        let response = try await sendRequest("_sessionStart", content: content, timeout: timeout)
         if let remoteSID = response["_c"]?["_sid"]?.intValue {
             sessionID = (UInt64(remoteSID) << 32) | localSID
         }

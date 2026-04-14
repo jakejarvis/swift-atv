@@ -341,20 +341,33 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
         switch service.protocol {
         case .companion:
-            try await setupCompanion(service, credentials: credentials)
+            try await setupCompanion(
+                service,
+                credentials: credentials,
+                requestTimeout: requestTimeout
+            )
         case .mrp:
-            try await setupMRP(service, credentials: credentials)
+            try await setupMRP(
+                service,
+                credentials: credentials,
+                requestTimeout: requestTimeout
+            )
         case .airPlay:
             preconditionFailure("AirPlay setup is handled before credential resolution")
         }
     }
 
-    private func setupCompanion(_ service: ServiceInfo, credentials: HAPCredentials?) async throws(ATVError) {
+    private func setupCompanion(
+        _ service: ServiceInfo,
+        credentials: HAPCredentials?,
+        requestTimeout: TimeInterval
+    ) async throws(ATVError) {
         let companion = CompanionService(
             host: configuration.address,
             port: service.port,
             credentials: credentials,
             settings: _settings,
+            requestTimeout: requestTimeout,
             onConnectionClosed: { [weak self] error in
                 self?.protocolConnectionDidClose(error, protocol: .companion)
             }
@@ -426,6 +439,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             settings: _settings,
             authenticationMode: .alreadySecure,
             heartbeatMode: .disabled,
+            requestTimeout: requestTimeout,
             onConnectionClosed: { [weak self] error in
                 self?.protocolConnectionDidClose(error, protocol: .airPlay)
             }
@@ -440,12 +454,17 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         registerMRP(mrp, for: .airPlay)
     }
 
-    private func setupMRP(_ service: ServiceInfo, credentials: HAPCredentials?) async throws(ATVError) {
+    private func setupMRP(
+        _ service: ServiceInfo,
+        credentials: HAPCredentials?,
+        requestTimeout: TimeInterval
+    ) async throws(ATVError) {
         let mrp = MRPService(
             host: configuration.address,
             port: service.port,
             credentials: credentials,
             settings: _settings,
+            requestTimeout: requestTimeout,
             onConnectionClosed: { [weak self] error in
                 self?.protocolConnectionDidClose(error, protocol: .mrp)
             }

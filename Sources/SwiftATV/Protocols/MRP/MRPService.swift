@@ -265,6 +265,7 @@ public final class MRPService: @unchecked Sendable {
     private let lock = NSLock()
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
+    private let requestTimeout: TimeInterval
     private var credentials: HAPCredentials?
 
     private var _remoteControl: MRPRemoteControl?
@@ -301,14 +302,18 @@ public final class MRPService: @unchecked Sendable {
     }
 
     /// Create an MRP service for a host and port.
+    ///
+    /// - Parameter requestTimeout: Maximum time for the TCP connect and setup
+    ///   request/response exchanges.
     public init(
         host: String,
         port: Int,
         credentials: HAPCredentials? = nil,
         settings: ATVSettings,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
-        let connection = MRPConnection(host: host, port: port)
+        let connection = MRPConnection(host: host, port: port, connectTimeout: requestTimeout)
         self.connection = connection
         self.protocolHandler = MRPProtocolHandler(
             connection: connection,
@@ -321,6 +326,7 @@ public final class MRPService: @unchecked Sendable {
         self.credentials = credentials
         self.settings = settings
         self.onConnectionClosed = onConnectionClosed
+        self.requestTimeout = requestTimeout
         self.connection.delegate = protocolHandler
     }
 
@@ -330,6 +336,7 @@ public final class MRPService: @unchecked Sendable {
         settings: ATVSettings,
         authenticationMode: MRPAuthenticationMode,
         heartbeatMode: MRPHeartbeatMode,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = transport
@@ -345,12 +352,17 @@ public final class MRPService: @unchecked Sendable {
         self.credentials = credentials
         self.settings = settings
         self.onConnectionClosed = onConnectionClosed
+        self.requestTimeout = requestTimeout
         self.connection.delegate = handler
     }
 
     /// Connect, authenticate if credentials are present, and initialize MRP.
     public func setup() async throws(ATVError) {
-        try await protocolHandler.start(settings: settings, credentials: credentials)
+        try await protocolHandler.start(
+            settings: settings,
+            credentials: credentials,
+            requestTimeout: requestTimeout
+        )
         lock.withLock {
             _remoteControl = MRPRemoteControl(protocol: protocolHandler)
             _metadata = MRPMetadata(
@@ -404,26 +416,32 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         self.onConnectionClosed = onConnectionClosed
     }
 
-    func start(settings: ATVSettings, credentials: HAPCredentials?) async throws(ATVError) {
+    func start(
+        settings: ATVSettings,
+        credentials: HAPCredentials?,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
+    ) async throws(ATVError) {
         try await connection.connect()
 
         let deviceInfo = try await connection.sendAndReceive(
             MRPMessages.deviceInformation(settings: settings),
-            responseType: .deviceInfoMessage
+            responseType: .deviceInfoMessage,
+            timeout: requestTimeout
         )
         await playerState.process(deviceInfo)
         stateStore.update(message: deviceInfo)
         await syncMetadataSnapshot()
 
         if let credentials, authenticationMode == .directPairVerify {
-            try await verify(credentials: credentials)
+            try await verify(credentials: credentials, requestTimeout: requestTimeout)
         }
 
         try await connection.send(MRPMessages.setConnectionState())
         do {
             _ = try await connection.sendAndReceive(
                 MRPMessages.clientUpdatesConfig(),
-                responseType: .clientUpdatesConfigMessage
+                responseType: .clientUpdatesConfigMessage,
+                timeout: requestTimeout
             )
             stateStore.markClientUpdatesConfigured()
         } catch {
@@ -435,7 +453,8 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         do {
             _ = try await connection.sendAndReceive(
                 MRPMessages.getKeyboardSession(),
-                responseType: .getKeyboardSessionMessage
+                responseType: .getKeyboardSessionMessage,
+                timeout: requestTimeout
             )
         } catch {
             // MRP keyboard setup is optional and SwiftATV does not expose an
@@ -548,17 +567,19 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         onConnectionClosed?(error)
     }
 
-    private func verify(credentials: HAPCredentials) async throws(ATVError) {
+    private func verify(credentials: HAPCredentials, requestTimeout: TimeInterval) async throws(ATVError) {
         let verifier = HAPPairVerifyHandler(credentials: credentials)
         let step1 = try verifier.step1()
-        let step1Response = try await exchange(
+        let step1Response = try await connection.sendAndReceive(
             MRPMessages.cryptoPairing(step1),
-            responseType: .cryptoPairingMessage
+            responseType: .cryptoPairingMessage,
+            timeout: requestTimeout
         )
         let step2 = try verifier.step2(step1Response.cryptoPairingMessage.pairingData)
-        let step2Response = try await exchange(
+        let step2Response = try await connection.sendAndReceive(
             MRPMessages.cryptoPairing(step2),
-            responseType: .cryptoPairingMessage
+            responseType: .cryptoPairingMessage,
+            timeout: requestTimeout
         )
         try Self.validatePairVerifyFinalResponse(
             step2Response.cryptoPairingMessage.pairingData

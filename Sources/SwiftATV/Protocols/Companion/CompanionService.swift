@@ -21,6 +21,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     private let lock = NSLock()
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
+    private let requestTimeout: TimeInterval
     private let touchStartTimeout: TimeInterval
     private let keepAliveInterval: TimeInterval
     private let stateStore = CompanionStateStore()
@@ -98,11 +99,16 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         }
     }
 
+    /// Create a Companion service for a host and port.
+    ///
+    /// - Parameter requestTimeout: Maximum time for the TCP connect, pair-verify
+    ///   frames, and required setup request/response exchanges.
     public convenience init(
         host: String,
         port: Int,
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings(),
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.init(
@@ -110,7 +116,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             port: port,
             credentials: credentials,
             settings: settings,
-            touchStartTimeout: defaultCompanionTimeout,
+            requestTimeout: requestTimeout,
+            touchStartTimeout: requestTimeout,
             onConnectionClosed: onConnectionClosed
         )
     }
@@ -120,14 +127,16 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         port: Int,
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings(),
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         touchStartTimeout: TimeInterval,
         keepAliveInterval: TimeInterval = 30,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
-        self.connection = CompanionConnection(host: host, port: port)
+        self.connection = CompanionConnection(host: host, port: port, connectTimeout: requestTimeout)
         self.protocolHandler = CompanionProtocolHandler(connection: connection)
         self.credentials = credentials
         self.settings = settings
+        self.requestTimeout = requestTimeout
         self.touchStartTimeout = touchStartTimeout
         self.keepAliveInterval = keepAliveInterval
         self.onConnectionClosed = onConnectionClosed
@@ -152,14 +161,15 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             connection: connection,
             credentials: credentials
         )
-        try await verifier.verify()
+        try await verifier.verify(timeout: requestTimeout)
 
         try await protocolHandler.sendSystemInfo(
             name: settings.clientIdentity.name,
             model: settings.clientIdentity.model,
             rapportIdentifier: settings.clientIdentity.rapportIdentifier,
             clientID: Self.utf8String(from: credentials.clientIdentifier),
-            deviceID: settings.clientIdentity.deviceID
+            deviceID: settings.clientIdentity.deviceID,
+            timeout: requestTimeout
         )
         let sessionStarted = try await startSessionIfAvailable()
         let touchAvailable = sessionStarted ? try await startTouchIfAvailable() : false
@@ -219,7 +229,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
 
     private func startSessionIfAvailable() async throws(ATVError) -> Bool {
         do {
-            try await protocolHandler.startSession()
+            try await protocolHandler.startSession(timeout: requestTimeout)
             return true
         } catch let error {
             guard Self.isRecoverableSessionStartFailure(error) else {

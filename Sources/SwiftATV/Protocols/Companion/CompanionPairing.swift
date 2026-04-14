@@ -74,8 +74,10 @@ public final class CompanionPairVerifyHandler: @unchecked Sendable {
     }
 
     /// Perform the full pair-verify exchange.
+    ///
+    /// - Parameter timeout: Maximum time to wait for each auth-frame response.
     /// On success, encryption is enabled on the connection.
-    public func verify() async throws(ATVError) {
+    public func verify(timeout: TimeInterval = defaultCompanionTimeout) async throws(ATVError) {
         // Step 1: PV_Start carries `{_pd, _auTy: 4}`. Device replies with
         // its public key + encrypted proof on PV_Next.
         let step1TLV = try hapVerifier.step1()
@@ -86,7 +88,8 @@ public final class CompanionPairVerifyHandler: @unchecked Sendable {
         )
         let step1ResponseBytes = try await connection.sendAndReceive(
             type: .pvStart,
-            payload: step1Payload
+            payload: step1Payload,
+            timeout: timeout
         )
         let step1Response = try unwrapCompanionAuthEnvelope(step1ResponseBytes)
 
@@ -96,7 +99,8 @@ public final class CompanionPairVerifyHandler: @unchecked Sendable {
         let step2Payload = wrapCompanionAuthEnvelope(innerTLV: step2TLV)
         let step2ResponseBytes = try await connection.sendAndReceive(
             type: .pvNext,
-            payload: step2Payload
+            payload: step2Payload,
+            timeout: timeout
         )
         // Inner TLV is checked for error in unwrap; nothing else to do.
         _ = try unwrapCompanionAuthEnvelope(step2ResponseBytes)

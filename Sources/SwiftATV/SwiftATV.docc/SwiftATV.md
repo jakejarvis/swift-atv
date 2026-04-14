@@ -19,7 +19,9 @@ connects unless ``ConnectStrategy/allAllowed`` is requested. Companion-only
 discoveries with reusable HAP credentials can still attempt AirPlay-tunneled MRP
 on the default AirPlay port. The result
 describes the primary protocol, active protocols, setup attempts, and optional
-setup diagnostics.
+setup diagnostics. ``ConnectOptions/requestTimeout`` bounds protocol TCP
+connects and setup exchanges so a stalled service can fail and let fallback
+continue.
 
 The facade tracks lifecycle per protocol. Closing or failing a non-primary
 secondary protocol unregisters only that protocol; the device emits

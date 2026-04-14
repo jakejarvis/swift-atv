@@ -8,6 +8,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion, direct MRP, and AirPlay 2 links, with protocol-agnostic pairing code direction metadata and pairing results
 - **Credential Persistence** -- Pairing results can be applied directly to `ATVSettings`, and connection setup can use credentials from settings or enriched services
 - **Connect Metadata** -- `ConnectOptions` and `ConnectResult` expose protocol order, setup strategy, primary protocol, active protocols, per-protocol attempts, and setup diagnostics
+- **Timeout-Bounded Setup** -- Connection setup applies structured timeouts to protocol TCP connects and setup exchanges
 - **Preflight Helpers** -- Query effective pairing status, connectable protocols, and the preferred pairing service before opening network connections
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
 - **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to direct or tunneled MRP push updates
@@ -205,6 +206,8 @@ first, then Companion credentials when AirPlay credentials are absent.
 When discovery only returns Companion but reusable HAP credentials are
 available, SwiftATV can still try the AirPlay MRP tunnel on the default AirPlay
 port.
+`ConnectOptions(requestTimeout:)` bounds direct MRP and Companion TCP setup,
+setup request/response exchanges, and AirPlay HTTP/RTSP setup.
 Companion always requires credentials. When both settings and a service contain
 credentials for the same protocol, `ATVSettings` wins. When auto-connect
 exhausts all options, the thrown `ATVError.connectionFailed` contains
@@ -292,8 +295,8 @@ event. A primary or last-active protocol close still emits `connectionLost`.
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
-| **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio, output-device mutation | Implemented |
-| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch, and NoOp keepalive. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
+| **MRP** | Media Remote Protocol: direct protobuf TCP connection with timeout-bounded setup, pair-setup/pair-verify, remote control, metadata, push updates, power, audio, output-device mutation | Implemented |
+| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch, NoOp keepalive, timeout-bounded setup, full pair-setup (SRP-6a), and pair-verify | Implemented, except output-device mutation |
 | **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel, including timeout-bounded HTTP/RTSP setup and MRP output-device mutation | Tunnel implemented |
 
 ## Project Structure
@@ -374,6 +377,7 @@ merging, deterministic first-usable connect, all-allowed multi-protocol
 connect, connect-result metadata, aggregate connection errors, credential
 selection including AirPlay tunnel ordering, pairing-result settings
 persistence, preflight connectability helpers, structured timeout context,
+direct protocol setup timeouts, pyatv-compatible HAP credential parsing,
 unsupported metadata errors, Companion touch-start timeout resilience, facade
 device events including secondary-protocol close isolation, timeout conversion,
 strict TLV8 auth decoding,

@@ -53,14 +53,14 @@ final class HAPCredentialsTests: XCTestCase {
     }
 
     func testSerializeAndParse2Component() throws {
-        // Legacy format
+        // Legacy pyatv format: clientIdentifier:ltsk.
         let serialized = "aabbcc:ddeeff"
         let parsed = try HAPCredentials.parse(serialized)
 
-        XCTAssertEqual(parsed.ltpk, Data([0xAA, 0xBB, 0xCC]))
+        XCTAssertEqual(parsed.ltpk, Data())
         XCTAssertEqual(parsed.ltsk, Data([0xDD, 0xEE, 0xFF]))
         XCTAssertEqual(parsed.atvIdentifier, Data())
-        XCTAssertEqual(parsed.clientIdentifier, Data())
+        XCTAssertEqual(parsed.clientIdentifier, Data([0xAA, 0xBB, 0xCC]))
     }
 
     func testParseBadComponentCount() {
@@ -79,7 +79,10 @@ final class HAPCredentialsTests: XCTestCase {
 
     func testTransientCredentials() {
         let transient = HAPCredentials.transient
-        XCTAssertEqual(transient.atvIdentifier, Data("transient".utf8))
+        XCTAssertEqual(transient.ltpk, Data("transient".utf8))
+        XCTAssertEqual(transient.ltsk, Data())
+        XCTAssertEqual(transient.atvIdentifier, Data())
+        XCTAssertEqual(transient.clientIdentifier, Data())
     }
 
     // MARK: - Codable

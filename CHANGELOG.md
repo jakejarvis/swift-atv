@@ -56,8 +56,14 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.
+- Direct MRP and Companion setup now apply `ConnectOptions.requestTimeout` to
+  TCP connects and setup request/response exchanges, preventing a reachable
+  host with a stalled protocol service from hanging connection fallback.
 - AirPlay HTTP/RTSP response timeouts now cover the full response deadline
   instead of resetting after every partial socket read.
+- `HAPCredentials.parse(_:)` now matches pyatv's two-component legacy
+  credential format (`clientIdentifier:ltsk`), and
+  `HAPCredentials.transient` now uses the pyatv-compatible sentinel layout.
 - Companion request timeout tasks are cancelled when their request succeeds,
   matching the lower-level Companion and MRP waiter lifecycle and avoiding
   stale sleeper tasks.

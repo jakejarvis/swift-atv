@@ -19,7 +19,7 @@ public struct ConnectOptions: Sendable, Hashable {
     public var protocols: [ATVProtocol]
     /// Whether to return after one connection or attach every usable protocol.
     public var strategy: ConnectStrategy
-    /// Timeout used by AirPlay HTTP/RTSP setup requests.
+    /// Timeout used by protocol setup TCP connects and setup request/response exchanges.
     public var requestTimeout: TimeInterval
 
     public init(

@@ -225,6 +225,8 @@ tunnel tries AirPlay credentials first, then Companion credentials when AirPlay
 credentials are absent. When discovery only returns Companion but reusable HAP
 credentials are available, SwiftATV can still try the AirPlay MRP tunnel on the
 default AirPlay port. Companion connections always require credentials.
+Use ``ConnectOptions/requestTimeout`` to bound direct MRP and Companion TCP
+setup, setup request/response exchanges, and AirPlay HTTP/RTSP setup.
 
 Use ``AppleTVConfiguration/connectableProtocols(settings:)``,
 ``AppleTVConfiguration/preferredPairingService(settings:protocols:)``, and

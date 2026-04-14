@@ -177,6 +177,7 @@ private final class PendingMRPWaiter: @unchecked Sendable {
 public final class MRPConnection: @unchecked Sendable, MRPTransport {
     private let host: String
     private let port: Int
+    private let connectTimeout: TimeInterval
     private let group: EventLoopGroup
     private let ownsGroup: Bool
     private let lock = NSLock()
@@ -214,9 +215,22 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
         return stream
     }
 
-    public init(host: String, port: Int, group: EventLoopGroup? = nil) {
+    /// Create a low-level direct-MRP TCP connection.
+    ///
+    /// - Parameters:
+    ///   - host: Device host name or IP address.
+    ///   - port: MRP service port.
+    ///   - connectTimeout: Maximum time to wait for the TCP connect.
+    ///   - group: Optional NIO event-loop group. If omitted, the connection owns one.
+    public init(
+        host: String,
+        port: Int,
+        connectTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        group: EventLoopGroup? = nil
+    ) {
         self.host = host
         self.port = port
+        self.connectTimeout = connectTimeout
         if let group {
             self.group = group
             self.ownsGroup = false
@@ -234,8 +248,11 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
         }
 
         lock.withLock { state = .connecting }
+        let timeoutNs = try timeoutNanoseconds(from: connectTimeout, parameterName: "connectTimeout")
+        let timeoutMs = Int64(timeoutNs / 1_000_000)
         let bootstrap = ClientBootstrap(group: group)
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
+            .channelOption(ChannelOptions.connectTimeout, value: .milliseconds(timeoutMs))
             .channelInitializer { [self] channel in
                 channel.pipeline.addHandler(MRPFrameHandler(connection: self))
             }
@@ -245,6 +262,16 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
             ch = try await bootstrap.connect(host: host, port: port).get()
         } catch {
             lock.withLock { state = .disconnected }
+            if isLikelyTimeoutError(error) {
+                throw ATVError.operationTimeout(
+                    TimeoutContext(
+                        protocol: .mrp,
+                        operation: "connect",
+                        requestID: "tcp",
+                        duration: connectTimeout
+                    )
+                )
+            }
             throw ATVError.wrap(error)
         }
 

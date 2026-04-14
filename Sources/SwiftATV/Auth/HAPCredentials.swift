@@ -36,9 +36,9 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
 
     /// Sentinel for transient credentials (no persistent pairing).
     public static let transient = HAPCredentials(
-        ltpk: Data(),
+        ltpk: Data([0x74, 0x72, 0x61, 0x6E, 0x73, 0x69, 0x65, 0x6E, 0x74]),  // "transient"
         ltsk: Data(),
-        atvIdentifier: Data([0x74, 0x72, 0x61, 0x6E, 0x73, 0x69, 0x65, 0x6E, 0x74]),  // "transient"
+        atvIdentifier: Data(),
         clientIdentifier: Data()
     )
 
@@ -50,6 +50,10 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
     }
 
     /// Parse from a colon-separated hex string.
+    ///
+    /// Four-component strings use the modern pyatv format:
+    /// `ltpk:ltsk:atvIdentifier:clientIdentifier`. Two-component strings
+    /// use pyatv's legacy format: `clientIdentifier:ltsk`.
     public static func parse(_ string: String) throws -> HAPCredentials {
         let parts = string.split(separator: ":").map(String.init)
 
@@ -61,12 +65,12 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
                 clientIdentifier: try Data(hexString: parts[3])
             )
         } else if parts.count == 2 {
-            // Legacy format: ltpk:ltsk
+            // Legacy pyatv format: clientIdentifier:ltsk.
             return HAPCredentials(
-                ltpk: try Data(hexString: parts[0]),
+                ltpk: Data(),
                 ltsk: try Data(hexString: parts[1]),
                 atvIdentifier: Data(),
-                clientIdentifier: Data()
+                clientIdentifier: try Data(hexString: parts[0])
             )
         }
 
