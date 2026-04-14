@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-SwiftATV is a Swift port of [pyatv](https://github.com/postlund/pyatv), a Python library for controlling Apple TV and AirPlay devices. It uses a multi-protocol facade architecture to provide a unified interface across 5 communication protocols (MRP, DMAP, Companion, AirPlay, RAOP).
+SwiftATV is a Swift port of [pyatv](https://github.com/postlund/pyatv), a Python library for controlling Apple TV and AirPlay devices. It uses a multi-protocol facade architecture to provide a unified interface across direct MRP, AirPlay-tunneled MRP, and Companion.
 
 ## Build & Test
 
@@ -24,7 +24,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 ### Key Design Patterns
 
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
-- **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > DMAP > Companion > AirPlay > RAOP)
+- **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > AirPlay > Companion)
 - **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (direct MRP > AirPlay-tunneled MRP > Companion) and falls back across unfiltered failures. Explicit `.mrp` stays strict; explicit `.airPlay` opens the tunnel.
 - **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
@@ -58,9 +58,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 |----------|--------|-------|
 | Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus/text entry, touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is not implemented yet |
 | MRP | Implemented | Direct TCP/protobuf connection plus AirPlay 2 DataStream tunnel transport, pair-setup, pair-verify for direct MRP, remote, actively refreshed metadata, push, power, audio, connection-lost events |
-| DMAP | Not started | Legacy protocol |
 | AirPlay | Partially implemented | AirPlay 2 HAP pair-setup, pair-verify, encrypted control/event/data channels, MRP tunneling. Media streaming is not implemented yet |
-| RAOP | Not started | Audio streaming |
 
 ## Code Conventions
 
@@ -69,7 +67,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 - The public facade is `ATVClient`; do not add a public type named `SwiftATV`,
   because consumers use `SwiftATV` as the module qualifier.
 - All public types conform to `Sendable`
-- Enum raw values match pyatv's `const.py` exactly (important for wire compatibility)
+- `ATVProtocol` only contains supported connection/pairing surfaces; do not add compatibility-only protocol cases without implementation
 - `Codable` on all settings/config types for JSON persistence
 - `AsyncStream` replaces Python callback-based listeners
 
@@ -126,7 +124,7 @@ Most tests are ported from pyatv's test suite (XCTest):
   Companion identifier extraction, NetService TXT resolver path, scan timeout
   validation, diagnostics, and identifier-first scan-result merging.
 - `SwiftATVConnectTests.swift` -- connect-path validation for requested,
-  unsupported, malformed-credential, deterministic-priority, service-credential,
+  malformed-credential, deterministic-priority, service-credential,
   mandatory-credential, and fallback service setup.
 - `FacadeEventTests.swift` -- facade connection-closed and connection-lost
   event propagation.

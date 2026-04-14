@@ -16,6 +16,9 @@ Pre-1.0: minor version bumps may contain breaking changes.
   remote control, metadata, push, power, and audio over the AirPlay data
   stream. Default connection setup tries direct MRP first, then the AirPlay MRP
   tunnel when available, then Companion.
+- Removed the unimplemented legacy/audio compatibility surface from public
+  protocol enums, settings, scanner service mappings, connect validation,
+  tests, and documentation.
 - Companion `KeyboardController` now implements text get, clear, append, and
   set using the `_tiStart` / `_tiC` RTI text-input flow, including native UID
   binary-plist payloads for insert and atomic replace operations.
@@ -172,8 +175,9 @@ before 1.0.
   higher-priority implementation throws `.notSupported`, so direct MRP no
   longer hides Companion-only commands such as channel, guide, and control
   center. Feature reporting now merges lower-priority providers for features
-  the higher-priority provider marks unsupported, and public setup of DMAP,
-  AirPlay, or RAOP now fails fast instead of silently doing nothing.
+  the higher-priority provider marks unsupported, and public setup of
+  unimplemented protocol services now fails fast instead of silently doing
+  nothing.
 - **Double-waiter guard on `CompanionConnection.waitForFrame`.**
   Attempts to register a second concurrent waiter for the same frame
   type now throw `.invalidState` instead of silently clobbering the
@@ -384,9 +388,8 @@ Supporting changes that landed with the fixes above:
 
 ### Known limitations
 
-- **DMAP, AirPlay, RAOP** protocols are not yet implemented. Direct MRP and
-  Companion are functional for control-oriented workflows. AirPlay/RAOP
-  streaming and legacy DMAP are future work.
+- AirPlay media streaming is not implemented. Direct MRP and Companion are
+  functional for control-oriented workflows.
 
 [Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.2.2...HEAD
 [0.2.2]: https://github.com/jakejarvis/swift-atv/compare/0.2.1...0.2.2

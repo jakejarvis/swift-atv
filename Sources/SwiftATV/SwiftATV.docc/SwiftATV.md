@@ -13,8 +13,7 @@ HAP pairing; AirPlay 2 can pair with HAP and tunnel MRP remote-control traffic
 when direct MRP is unavailable; Companion provides modern app, keyboard text
 input/focus, touch, power, audio-volume, and remote-control support. Connection
 setup is deterministic for implemented control protocols (direct MRP, then
-AirPlay-tunneled MRP, then Companion), while DMAP and RAOP remain discoverable
-but planned as control backends. AirPlay media streaming is still planned.
+AirPlay-tunneled MRP, then Companion). AirPlay media streaming is still planned.
 
 Discovery resolves Bonjour TXT records with each live service, merges services
 by stable device identifiers, including Companion-only TXT identifiers, and can
@@ -39,8 +38,8 @@ try await atv.remoteControl.play()
 await atv.close()
 ```
 
-> Important: SwiftATV is pre-1.0. The API may change as DMAP, AirPlay, and
-> RAOP protocols come online. Pin a release version or exact revision in
+> Important: SwiftATV is pre-1.0. The API may change as AirPlay media streaming
+> and protocol internals evolve. Pin a release version or exact revision in
 > your `Package.swift` and review the [CHANGELOG](https://github.com/jakejarvis/swift-atv/blob/main/CHANGELOG.md)
 > before upgrading.
 

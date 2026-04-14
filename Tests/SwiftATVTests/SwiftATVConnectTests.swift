@@ -41,51 +41,6 @@ final class SwiftATVConnectTests: XCTestCase {
         }
     }
 
-    func testConnectRequestedUnsupportedProtocolThrowsNotSupported() async {
-        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
-        config.addService(ServiceInfo(protocol: .raop, port: 7000))
-
-        do {
-            _ = try await ATVClient.connect(config, protocol: .raop)
-            XCTFail("Expected connect to throw")
-        } catch let error {
-            guard case ATVError.notSupported = error else {
-                XCTFail("Expected notSupported, got \(error)")
-                return
-            }
-        }
-    }
-
-    func testConnectOnlyUnsupportedServicesThrowsNoService() async {
-        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
-        config.addService(ServiceInfo(protocol: .raop, port: 7000))
-
-        do {
-            _ = try await ATVClient.connect(config)
-            XCTFail("Expected connect to throw")
-        } catch let error {
-            guard case ATVError.noService = error else {
-                XCTFail("Expected noService, got \(error)")
-                return
-            }
-        }
-    }
-
-    func testFacadeSetupUnsupportedProtocolThrowsNotSupported() async {
-        let config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
-        let facade = FacadeAppleTV(configuration: config, settings: ATVSettings())
-
-        do {
-            try await facade.setupProtocol(ServiceInfo(protocol: .raop, port: 7000))
-            XCTFail("Expected setupProtocol to throw")
-        } catch let error {
-            guard case ATVError.notSupported = error else {
-                XCTFail("Expected notSupported, got \(error)")
-                return
-            }
-        }
-    }
-
     func testConnectCompanionWithMalformedCredentialsThrowsInvalidCredentials() async {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
         config.addService(ServiceInfo(protocol: .companion, port: 49153))
@@ -405,7 +360,7 @@ final class SwiftATVConnectTests: XCTestCase {
         }
         XCTAssertThrowsError(
             try ATVClient.validatePairingService(
-                ServiceInfo(protocol: .raop, port: 7000, pairingRequirement: .notNeeded)
+                ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .notNeeded)
             )
         ) { error in
             guard case ATVError.notSupported = error else {

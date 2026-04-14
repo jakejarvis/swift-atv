@@ -9,19 +9,15 @@ final class ConstantsTests: XCTestCase {
     // MARK: - Protocol (test_convert.py::test_protocol_str)
 
     func testProtocolRawValues() {
-        XCTAssertEqual(ATVProtocol.dmap.rawValue, 1)
-        XCTAssertEqual(ATVProtocol.mrp.rawValue, 2)
-        XCTAssertEqual(ATVProtocol.airPlay.rawValue, 3)
-        XCTAssertEqual(ATVProtocol.companion.rawValue, 4)
-        XCTAssertEqual(ATVProtocol.raop.rawValue, 5)
+        XCTAssertEqual(ATVProtocol.mrp.rawValue, 1)
+        XCTAssertEqual(ATVProtocol.airPlay.rawValue, 2)
+        XCTAssertEqual(ATVProtocol.companion.rawValue, 3)
     }
 
     func testProtocolDescription() {
         XCTAssertEqual(ATVProtocol.mrp.description, "MRP")
-        XCTAssertEqual(ATVProtocol.dmap.description, "DMAP")
         XCTAssertEqual(ATVProtocol.airPlay.description, "AirPlay")
         XCTAssertEqual(ATVProtocol.companion.description, "Companion")
-        XCTAssertEqual(ATVProtocol.raop.description, "RAOP")
     }
 
     // MARK: - MediaType (test_convert.py::test_media_type_to_string)

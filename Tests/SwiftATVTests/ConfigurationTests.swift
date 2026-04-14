@@ -23,10 +23,6 @@ final class ConfigurationTests: XCTestCase {
         AppleTVConfiguration(address: address1, name: deviceName, deepSleep: true)
     }
 
-    func dmapService() -> ServiceInfo {
-        ServiceInfo(protocol: .dmap, port: port1, identifier: identifier1)
-    }
-
     func mrpService() -> ServiceInfo {
         ServiceInfo(protocol: .mrp, port: port2, identifier: identifier2, properties: ["foo": "bar"])
     }
@@ -36,11 +32,7 @@ final class ConfigurationTests: XCTestCase {
     }
 
     func companionService() -> ServiceInfo {
-        ServiceInfo(protocol: .companion, port: port3)
-    }
-
-    func raopService() -> ServiceInfo {
-        ServiceInfo(protocol: .raop, port: port4, identifier: identifier4)
+        ServiceInfo(protocol: .companion, port: port3, identifier: identifier1)
     }
 
     // MARK: - test_address_and_name
@@ -55,23 +47,19 @@ final class ConfigurationTests: XCTestCase {
 
     func testAddServicesAndGet() {
         var config = makeConfig()
-        config.addService(dmapService())
         config.addService(mrpService())
         config.addService(airPlayService())
         config.addService(companionService())
-        config.addService(raopService())
 
-        XCTAssertEqual(config.services.count, 5)
+        XCTAssertEqual(config.services.count, 3)
 
-        XCTAssertNotNil(config.service(for: .dmap))
         XCTAssertNotNil(config.service(for: .mrp))
         XCTAssertNotNil(config.service(for: .airPlay))
         XCTAssertNotNil(config.service(for: .companion))
-        XCTAssertNotNil(config.service(for: .raop))
 
-        XCTAssertEqual(config.service(for: .dmap)?.port, port1)
         XCTAssertEqual(config.service(for: .mrp)?.port, port2)
-        XCTAssertEqual(config.service(for: .raop)?.port, port4)
+        XCTAssertEqual(config.service(for: .airPlay)?.port, port1)
+        XCTAssertEqual(config.service(for: .companion)?.port, port3)
     }
 
     // MARK: - test_identifier_order
@@ -81,12 +69,11 @@ final class ConfigurationTests: XCTestCase {
 
         XCTAssertNil(config.mainIdentifier)
 
-        config.addService(raopService())
-        XCTAssertEqual(config.mainIdentifier, identifier4)
+        config.addService(companionService())
+        XCTAssertEqual(config.mainIdentifier, identifier1)
 
-        config.addService(dmapService())
-        // After adding DMAP, first service identifier is returned if no MRP
-        // (behavior depends on implementation order)
+        config.addService(airPlayService())
+        // Before MRP is present, the first service identifier is returned.
         XCTAssertNotNil(config.mainIdentifier)
 
         config.addService(mrpService())
@@ -98,7 +85,7 @@ final class ConfigurationTests: XCTestCase {
 
     func testIdentifierMissingForService() {
         var config = makeConfig()
-        config.addService(dmapService())
+        config.addService(companionService())
         config.addService(ServiceInfo(protocol: .mrp, port: 0))
 
         // MRP identifier is nil, should fall back
@@ -131,23 +118,23 @@ final class ConfigurationTests: XCTestCase {
     func testSetCredentialsMissing() {
         let config = makeConfig()
         // No service to set credentials on
-        XCTAssertNil(config.service(for: .dmap))
+        XCTAssertNil(config.service(for: .mrp))
     }
 
     // MARK: - test_set_credentials
 
     func testSetCredentials() {
         var config = makeConfig()
-        config.addService(dmapService())
+        config.addService(companionService())
 
-        XCTAssertNil(config.service(for: .dmap)?.credentials)
+        XCTAssertNil(config.service(for: .companion)?.credentials)
 
         // Merge a new service with credentials
-        var updated = dmapService()
+        var updated = companionService()
         updated.credentials = "dummy"
         config.addService(updated)
 
-        XCTAssertEqual(config.service(for: .dmap)?.credentials, "dummy")
+        XCTAssertEqual(config.service(for: .companion)?.credentials, "dummy")
     }
 
     // MARK: - test_to_str
@@ -156,7 +143,7 @@ final class ConfigurationTests: XCTestCase {
         var config = makeConfig()
         config.addService(
             ServiceInfo(
-                protocol: .dmap, port: 3689, identifier: identifier1, credentials: "LOGIN_ID"
+                protocol: .companion, port: port3, identifier: identifier1, credentials: "LOGIN_ID"
             ))
         config.addService(ServiceInfo(protocol: .mrp, port: port2, identifier: identifier2))
 
@@ -168,8 +155,8 @@ final class ConfigurationTests: XCTestCase {
     // MARK: - test_service_merge_password
 
     func testServiceMergePasswordFirstHas() {
-        let service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1", password: "pass1")
-        let service2 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id2")
+        let service1 = ServiceInfo(protocol: .airPlay, port: 0, identifier: "id1", password: "pass1")
+        let service2 = ServiceInfo(protocol: .airPlay, port: 0, identifier: "id2")
 
         // Merge service2 into config containing service1
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "test")
@@ -177,23 +164,23 @@ final class ConfigurationTests: XCTestCase {
         config.addService(service2)
 
         // Password from service1 should be preserved since service2 has none
-        XCTAssertEqual(config.service(for: .dmap)?.password, "pass1")
+        XCTAssertEqual(config.service(for: .airPlay)?.password, "pass1")
     }
 
     func testServiceMergePasswordSecondHas() {
-        let service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1")
-        let service2 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id2", password: "pass2")
+        let service1 = ServiceInfo(protocol: .airPlay, port: 0, identifier: "id1")
+        let service2 = ServiceInfo(protocol: .airPlay, port: 0, identifier: "id2", password: "pass2")
 
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "test")
         config.addService(service1)
         config.addService(service2)
 
-        XCTAssertEqual(config.service(for: .dmap)?.password, "pass2")
+        XCTAssertEqual(config.service(for: .airPlay)?.password, "pass2")
     }
 
     func testServiceMergePasswordBothHave() {
-        let service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1", password: "pass1")
-        let service2 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id2", password: "pass2")
+        let service1 = ServiceInfo(protocol: .airPlay, port: 0, identifier: "id1", password: "pass1")
+        let service2 = ServiceInfo(protocol: .airPlay, port: 0, identifier: "id2", password: "pass2")
 
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "test")
         config.addService(service1)
@@ -201,31 +188,31 @@ final class ConfigurationTests: XCTestCase {
         config.addService(service2)
 
         // The newer service's password takes precedence
-        XCTAssertEqual(config.service(for: .dmap)?.password, "pass2")
+        XCTAssertEqual(config.service(for: .airPlay)?.password, "pass2")
     }
 
     // MARK: - test_service_merge_credentials
 
     func testServiceMergeCredentialsFirstHas() {
-        let service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1", credentials: "creds1")
-        let service2 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id2")
+        let service1 = ServiceInfo(protocol: .companion, port: 0, identifier: "id1", credentials: "creds1")
+        let service2 = ServiceInfo(protocol: .companion, port: 0, identifier: "id2")
 
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "test")
         config.addService(service1)
         config.addService(service2)
 
-        XCTAssertEqual(config.service(for: .dmap)?.credentials, "creds1")
+        XCTAssertEqual(config.service(for: .companion)?.credentials, "creds1")
     }
 
     func testServiceMergeCredentialsSecondHas() {
-        let service1 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id1")
-        let service2 = ServiceInfo(protocol: .dmap, port: 0, identifier: "id2", credentials: "creds2")
+        let service1 = ServiceInfo(protocol: .companion, port: 0, identifier: "id1")
+        let service2 = ServiceInfo(protocol: .companion, port: 0, identifier: "id2", credentials: "creds2")
 
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "test")
         config.addService(service1)
         config.addService(service2)
 
-        XCTAssertEqual(config.service(for: .dmap)?.credentials, "creds2")
+        XCTAssertEqual(config.service(for: .companion)?.credentials, "creds2")
     }
 
     // MARK: - Deep sleep
@@ -242,18 +229,18 @@ final class ConfigurationTests: XCTestCase {
 
     func testServiceDisabled() {
         var config = makeConfig()
-        var service = dmapService()
+        var service = companionService()
         service.enabled = false
         config.addService(service)
 
-        XCTAssertFalse(config.service(for: .dmap)!.enabled)
+        XCTAssertFalse(config.service(for: .companion)!.enabled)
     }
 
     // MARK: - Codable round-trip
 
     func testConfigurationCodable() throws {
         var config = makeConfig()
-        config.addService(dmapService())
+        config.addService(companionService())
         config.addService(mrpService())
 
         let data = try JSONEncoder().encode(config)

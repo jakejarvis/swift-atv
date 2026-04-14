@@ -52,19 +52,6 @@ public struct CompanionSettings: Codable, Sendable {
     }
 }
 
-// MARK: - DMAP Settings
-
-/// Settings for the DMAP protocol.
-public struct DmapSettings: Codable, Sendable {
-    public var identifier: String?
-    public var credentials: String?
-
-    public init(identifier: String? = nil, credentials: String? = nil) {
-        self.identifier = identifier
-        self.credentials = credentials
-    }
-}
-
 // MARK: - MRP Settings
 
 /// Settings for the MRP protocol.
@@ -75,34 +62,6 @@ public struct MrpSettings: Codable, Sendable {
     public init(identifier: String? = nil, credentials: String? = nil) {
         self.identifier = identifier
         self.credentials = credentials
-    }
-}
-
-// MARK: - RAOP Settings
-
-/// Settings for the RAOP protocol.
-public struct RaopSettings: Codable, Sendable {
-    public var identifier: String?
-    public var credentials: String?
-    public var password: String?
-    public var airPlayVersion: AirPlayVersion
-    public var timingServerPort: Int
-    public var controlServerPort: Int
-
-    public init(
-        identifier: String? = nil,
-        credentials: String? = nil,
-        password: String? = nil,
-        airPlayVersion: AirPlayVersion = .auto,
-        timingServerPort: Int = 0,
-        controlServerPort: Int = 0
-    ) {
-        self.identifier = identifier
-        self.credentials = credentials
-        self.password = password
-        self.airPlayVersion = airPlayVersion
-        self.timingServerPort = timingServerPort
-        self.controlServerPort = controlServerPort
     }
 }
 
@@ -140,22 +99,16 @@ public struct InfoSettings: Codable, Sendable {
 public struct ProtocolSettings: Codable, Sendable {
     public var airplay: AirPlaySettings
     public var companion: CompanionSettings
-    public var dmap: DmapSettings
     public var mrp: MrpSettings
-    public var raop: RaopSettings
 
     public init(
         airplay: AirPlaySettings = AirPlaySettings(),
         companion: CompanionSettings = CompanionSettings(),
-        dmap: DmapSettings = DmapSettings(),
-        mrp: MrpSettings = MrpSettings(),
-        raop: RaopSettings = RaopSettings()
+        mrp: MrpSettings = MrpSettings()
     ) {
         self.airplay = airplay
         self.companion = companion
-        self.dmap = dmap
         self.mrp = mrp
-        self.raop = raop
     }
 }
 
@@ -179,9 +132,7 @@ public struct ATVSettings: Codable, Sendable {
         switch `protocol` {
         case .airPlay: return protocols.airplay.credentials
         case .companion: return protocols.companion.credentials
-        case .dmap: return protocols.dmap.credentials
         case .mrp: return protocols.mrp.credentials
-        case .raop: return protocols.raop.credentials
         }
     }
 
@@ -190,9 +141,7 @@ public struct ATVSettings: Codable, Sendable {
         switch `protocol` {
         case .airPlay: protocols.airplay.credentials = credentials
         case .companion: protocols.companion.credentials = credentials
-        case .dmap: protocols.dmap.credentials = credentials
         case .mrp: protocols.mrp.credentials = credentials
-        case .raop: protocols.raop.credentials = credentials
         }
     }
 }

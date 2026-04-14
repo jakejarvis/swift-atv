@@ -346,10 +346,10 @@
                     txtRecord: [:]
                 ),
                 DiscoveredService(
-                    serviceType: .raop,
+                    serviceType: .companion,
                     name: "Living Room",
                     host: "192.168.1.10",
-                    port: 7000,
+                    port: 49153,
                     txtRecord: [:]
                 ),
             ]
@@ -357,7 +357,7 @@
             let configs = ATVScanner.configurations(from: services)
 
             XCTAssertEqual(configs.count, 1)
-            XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.airPlay, .raop])
+            XCTAssertEqual(Set(configs[0].services.map(\.protocol)), [.airPlay, .companion])
         }
 
         private func resolveBonjourEndpoint(

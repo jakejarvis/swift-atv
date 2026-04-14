@@ -8,8 +8,6 @@
         case mrp = "_mediaremotetv._tcp"
         case companion = "_companion-link._tcp"
         case airPlay = "_airplay._tcp"
-        case raop = "_raop._tcp"
-        case dmap = "_touch-able._tcp"
         case deviceInfo = "_device-info._tcp"
         case sleepProxy = "_sleep-proxy._udp"
 
@@ -19,8 +17,6 @@
             case .mrp: return .mrp
             case .companion: return .companion
             case .airPlay: return .airPlay
-            case .raop: return .raop
-            case .dmap: return .dmap
             case .deviceInfo, .sleepProxy: return nil
             }
         }
@@ -31,8 +27,6 @@
             case .mrp: return ServiceInfo.defaultMRPPort
             case .companion: return ServiceInfo.defaultCompanionPort
             case .airPlay: return ServiceInfo.defaultAirPlayPort
-            case .raop: return ServiceInfo.defaultRAOPPort
-            case .dmap: return ServiceInfo.defaultDMAPPort
             case .deviceInfo, .sleepProxy: return nil
             }
         }
@@ -104,7 +98,7 @@
 
         /// Service types to scan for protocol discovery.
         private static let protocolServiceTypes: [BonjourServiceType] = [
-            .mrp, .companion, .airPlay, .raop, .dmap,
+            .mrp, .companion, .airPlay,
         ]
 
         /// Scan the local network for Apple TV devices.
@@ -249,13 +243,6 @@
 
             case .airPlay:
                 return AirPlaySupport.pairingRequirement(from: properties)
-
-            case .raop:
-                let passwordRequired = property(properties, keys: ["pw"])?.lowercased() == "true"
-                return passwordRequired ? .mandatory : .notNeeded
-
-            case .dmap:
-                return .unsupported
             }
         }
 

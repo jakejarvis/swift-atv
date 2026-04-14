@@ -221,8 +221,6 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             try await setupCompanion(service, credentials: credentials)
         case .mrp:
             try await setupMRP(service, credentials: credentials)
-        case .dmap, .raop:
-            throw ATVError.notSupported("Connection not yet implemented for \(service.protocol)")
         case .airPlay:
             preconditionFailure("AirPlay setup is handled before credential resolution")
         }

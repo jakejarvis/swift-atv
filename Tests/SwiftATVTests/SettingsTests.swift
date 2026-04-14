@@ -12,9 +12,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(settings.info.name)
         XCTAssertNil(settings.protocols.companion.credentials)
         XCTAssertNil(settings.protocols.mrp.credentials)
-        XCTAssertNil(settings.protocols.dmap.credentials)
         XCTAssertNil(settings.protocols.airplay.credentials)
-        XCTAssertNil(settings.protocols.raop.credentials)
     }
 
     func testSettingsCodable() throws {
@@ -22,7 +20,6 @@ final class SettingsTests: XCTestCase {
         settings.protocols.companion.credentials = "test-cred"
         settings.protocols.airplay.airPlayVersion = .v2
         settings.protocols.airplay.mrpTunnelMode = .force
-        settings.protocols.raop.timingServerPort = 1234
         settings.info.name = "My Device"
         settings.info.model = .gen4K
 
@@ -32,7 +29,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.protocols.companion.credentials, "test-cred")
         XCTAssertEqual(decoded.protocols.airplay.airPlayVersion, .v2)
         XCTAssertEqual(decoded.protocols.airplay.mrpTunnelMode, .force)
-        XCTAssertEqual(decoded.protocols.raop.timingServerPort, 1234)
         XCTAssertEqual(decoded.info.name, "My Device")
         XCTAssertEqual(decoded.info.model, .gen4K)
     }
@@ -43,15 +39,11 @@ final class SettingsTests: XCTestCase {
         var settings = ATVSettings()
         settings.protocols.mrp.credentials = "mrp-cred"
         settings.protocols.companion.credentials = "comp-cred"
-        settings.protocols.dmap.credentials = "dmap-cred"
         settings.protocols.airplay.credentials = "airplay-cred"
-        settings.protocols.raop.credentials = "raop-cred"
 
         XCTAssertEqual(settings.credentials(for: .mrp), "mrp-cred")
         XCTAssertEqual(settings.credentials(for: .companion), "comp-cred")
-        XCTAssertEqual(settings.credentials(for: .dmap), "dmap-cred")
         XCTAssertEqual(settings.credentials(for: .airPlay), "airplay-cred")
-        XCTAssertEqual(settings.credentials(for: .raop), "raop-cred")
     }
 
     func testCredentialsSet() {
@@ -61,7 +53,6 @@ final class SettingsTests: XCTestCase {
 
         XCTAssertEqual(settings.credentials(for: .mrp), "mrp-cred")
         XCTAssertEqual(settings.credentials(for: .companion), "comp-cred")
-        XCTAssertNil(settings.credentials(for: .dmap))
     }
 
     // MARK: - Protocol-specific settings
@@ -73,13 +64,6 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(settings.password)
         XCTAssertEqual(settings.airPlayVersion, .auto)
         XCTAssertEqual(settings.mrpTunnelMode, .auto)
-    }
-
-    func testRaopSettingsDefaults() {
-        let settings = RaopSettings()
-        XCTAssertEqual(settings.airPlayVersion, .auto)
-        XCTAssertEqual(settings.timingServerPort, 0)
-        XCTAssertEqual(settings.controlServerPort, 0)
     }
 
     func testInfoSettingsRemotePairingID() {

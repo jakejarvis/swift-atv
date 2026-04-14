@@ -17,49 +17,24 @@ final class RelayerTests: XCTestCase {
         XCTAssertEqual(relayer.main, "mrp-impl")
     }
 
-    func testRelayerDMAPHigherThanCompanion() {
+    func testRelayerAirPlayHigherThanCompanion() {
         let relayer = Relayer<String>()
 
         relayer.register("companion-impl", for: .companion)
-        relayer.register("dmap-impl", for: .dmap)
-
-        // DMAP has higher priority than Companion
-        XCTAssertEqual(relayer.main, "dmap-impl")
-    }
-
-    func testRelayerCompanionHigherThanAirPlay() {
-        let relayer = Relayer<String>()
-
-        relayer.register("airplay-impl", for: .airPlay)
-        relayer.register("companion-impl", for: .companion)
-
-        // Companion has higher priority than AirPlay
-        XCTAssertEqual(relayer.main, "companion-impl")
-    }
-
-    func testRelayerAirPlayHigherThanRAOP() {
-        let relayer = Relayer<String>()
-
-        relayer.register("raop-impl", for: .raop)
         relayer.register("airplay-impl", for: .airPlay)
 
+        // AirPlay has higher priority than Companion
         XCTAssertEqual(relayer.main, "airplay-impl")
     }
 
     func testRelayerFullPriorityOrder() {
         let relayer = Relayer<String>()
 
-        relayer.register("raop-impl", for: .raop)
-        XCTAssertEqual(relayer.main, "raop-impl")
-
-        relayer.register("airplay-impl", for: .airPlay)
-        XCTAssertEqual(relayer.main, "airplay-impl")
-
         relayer.register("companion-impl", for: .companion)
         XCTAssertEqual(relayer.main, "companion-impl")
 
-        relayer.register("dmap-impl", for: .dmap)
-        XCTAssertEqual(relayer.main, "dmap-impl")
+        relayer.register("airplay-impl", for: .airPlay)
+        XCTAssertEqual(relayer.main, "airplay-impl")
 
         relayer.register("mrp-impl", for: .mrp)
         XCTAssertEqual(relayer.main, "mrp-impl")
@@ -75,7 +50,7 @@ final class RelayerTests: XCTestCase {
 
         XCTAssertEqual(relayer.get(for: .mrp), "mrp-impl")
         XCTAssertEqual(relayer.get(for: .companion), "companion-impl")
-        XCTAssertNil(relayer.get(for: .dmap))
+        XCTAssertNil(relayer.get(for: .airPlay))
     }
 
     // MARK: - Takeover

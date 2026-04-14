@@ -57,10 +57,6 @@ extension ServiceInfo {
     public static let defaultCompanionPort = 49153
     /// Default port for AirPlay protocol.
     public static let defaultAirPlayPort = 7000
-    /// Default port for RAOP protocol.
-    public static let defaultRAOPPort = 7000
-    /// Default port for DMAP protocol.
-    public static let defaultDMAPPort = 3689
 }
 
 // MARK: - Apple TV Configuration

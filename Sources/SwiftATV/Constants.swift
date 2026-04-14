@@ -2,19 +2,15 @@
 
 /// Communication protocols supported for Apple TV interaction.
 public enum ATVProtocol: Int, Codable, Sendable, Hashable, CaseIterable, CustomStringConvertible {
-    case dmap = 1
-    case mrp = 2
-    case airPlay = 3
-    case companion = 4
-    case raop = 5
+    case mrp = 1
+    case airPlay = 2
+    case companion = 3
 
     public var description: String {
         switch self {
-        case .dmap: return "DMAP"
         case .mrp: return "MRP"
         case .airPlay: return "AirPlay"
         case .companion: return "Companion"
-        case .raop: return "RAOP"
         }
     }
 }

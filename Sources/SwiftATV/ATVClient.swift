@@ -4,14 +4,14 @@ import Foundation
 ///
 /// Port of the Python pyatv library to idiomatic Swift.
 /// Supports device discovery, pairing, and remote control via
-/// MRP, DMAP, AirPlay, Companion, and RAOP protocols.
+/// MRP, AirPlay, and Companion protocols.
 public enum ATVClient {
 
     /// Library version.
     public static let version = "0.2.2"
 
     fileprivate static let connectProtocolPriority: [ATVProtocol] = [
-        .mrp, .airPlay, .companion, .raop, .dmap,
+        .mrp, .airPlay, .companion,
     ]
 
     internal typealias ProtocolSetupOverride =
@@ -153,21 +153,10 @@ public enum ATVClient {
 
         var setupCount = 0
         var bestError: ATVError?
-        var sawUnsupportedService = false
         let requestedSpecificProtocol = `protocol` != nil
         var directMRPConnected = false
 
         for service in prioritizedServices {
-            guard service.protocol.isConnectSupported else {
-                let error = ATVError.notSupported("Connection not yet implemented for \(service.protocol)")
-                if requestedSpecificProtocol {
-                    await facade.close()
-                    throw error
-                }
-                sawUnsupportedService = true
-                continue
-            }
-
             do {
                 let credentials: HAPCredentials?
                 var airPlayCredentialCandidates: [HAPCredentials]?
@@ -236,9 +225,6 @@ public enum ATVClient {
             if let bestError {
                 throw bestError
             }
-            if sawUnsupportedService {
-                throw ATVError.noService("No supported enabled services in configuration")
-            }
             throw ATVError.noService("No usable enabled services in configuration")
         }
 
@@ -306,8 +292,6 @@ public enum ATVClient {
                 service: service,
                 settings: deviceSettings
             )
-        default:
-            throw ATVError.notSupported("Pairing not yet implemented for \(`protocol`)")
         }
     }
 
@@ -426,15 +410,6 @@ public enum ATVClient {
 extension ATVProtocol {
     fileprivate var connectPriority: Int {
         ATVClient.connectProtocolPriority.firstIndex(of: self) ?? Int.max
-    }
-
-    fileprivate var isConnectSupported: Bool {
-        switch self {
-        case .mrp, .airPlay, .companion:
-            return true
-        case .raop, .dmap:
-            return false
-        }
     }
 }
 

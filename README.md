@@ -18,7 +18,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
-- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion, with DMAP, AirPlay streaming, and RAOP planned
+- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion; AirPlay media streaming is planned separately
 
 ## Requirements
 
@@ -223,16 +223,15 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
                    │ Relayer │  (priority routing)
                    └────┬────┘
                         │
-        ┌───────┬───────┼───────┬───────┐
-        │       │       │       │       │
-       MRP    DMAP  Companion AirPlay  RAOP
-     (high)                          (low)
+              ┌───────┼───────┐
+              │       │       │
+             MRP   AirPlay Companion
+           (high)          (low)
 ```
 
-**Relayer priority order**: MRP > DMAP > Companion > AirPlay > RAOP.
+**Relayer priority order**: MRP > AirPlay > Companion.
 Connection setup uses direct MRP first, AirPlay-tunneled MRP as the MRP fallback,
-then Companion. RAOP and DMAP remain discoverable but are not control backends
-yet, and AirPlay media streaming is still planned.
+then Companion. AirPlay media streaming is still planned.
 
 ### Protocols
 
@@ -241,8 +240,6 @@ yet, and AirPlay media streaming is still planned.
 | **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
 | **Companion** | Modern control, apps, keyboard text input/focus, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
 | **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel; media streaming remains separate | Tunnel implemented, streaming planned |
-| **DMAP** | Legacy Digital Media Access Protocol | Planned |
-| **RAOP** | Remote Audio Output Protocol | Planned |
 
 ## Project Structure
 
@@ -305,7 +302,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 291 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 285 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for

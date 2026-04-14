@@ -11,7 +11,7 @@ public final class Relayer<Interface>: @unchecked Sendable {
 
     /// Default protocol priority order (highest first).
     public static var defaultPriorities: [ATVProtocol] {
-        [.mrp, .dmap, .companion, .airPlay, .raop]
+        [.mrp, .airPlay, .companion]
     }
 
     private struct Registration {
