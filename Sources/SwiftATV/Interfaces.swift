@@ -324,7 +324,11 @@ public protocol AppsController: Sendable {
 
 // MARK: - Keyboard Protocol
 
-/// Interface for virtual keyboard input.
+/// Interface for virtual keyboard focus and text input.
+///
+/// Text mutation methods operate on the text field currently focused on the
+/// Apple TV. Implementations return `nil` from `textGet()` or throw
+/// `.invalidState` from mutation methods when no editable field is active.
 public protocol KeyboardController: Sendable {
     var textFocusState: KeyboardFocusState { get async }
     var focusStateStream: AsyncStream<KeyboardFocusState> { get }

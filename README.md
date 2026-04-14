@@ -15,7 +15,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Power Control** -- Turn devices on/off and monitor power state
 - **Audio Control** -- Adjust volume and manage output devices over direct MRP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures
-- **Virtual Keyboard Hooks** -- Expose keyboard focus state; text entry is planned
+- **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion and MRP pair-verified links
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
 - **Multi-Protocol** -- Unified facade across MRP and Companion, with DMAP, AirPlay, and RAOP planned
@@ -135,6 +135,11 @@ try await atv.apps.launchApp(bundleID: "com.apple.TVMovies")
 // Power
 try await atv.power.turnOff()
 
+// Keyboard text entry, when a text field is focused on the Apple TV
+if atv.features.isAvailable(.textSet) {
+    try await atv.keyboard.textSet("Movie title")
+}
+
 // Clean up
 await atv.close()
 ```
@@ -230,7 +235,7 @@ AirPlay, RAOP, and DMAP remain discoverable but are not control backends yet.
 | Protocol | Purpose | Status |
 |----------|---------|--------|
 | **MRP** | Media Remote Protocol: protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
-| **Companion** | Modern control, apps, keyboard focus, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except text entry and output-device mutation |
+| **Companion** | Modern control, apps, keyboard text input/focus, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
 | **DMAP** | Legacy Digital Media Access Protocol | Planned |
 | **AirPlay** | Audio/video streaming | Planned |
 | **RAOP** | Remote Audio Output Protocol | Planned |
@@ -249,6 +254,7 @@ Sources/SwiftATV/
 ├── DiscoveryIdentifiers.swift   # Bonjour TXT identifier lookup priority
 ├── SwiftATV.docc/               # DocC catalog
 ├── Support/
+│   ├── BinaryPlistArchive.swift # Binary plist writer with native UID support
 │   ├── OPACK.swift             # OPACK binary serialization codec
 │   ├── TLV8.swift              # TLV8 encoding for HAP auth
 │   └── ChaCha20Cipher.swift    # ChaCha20-Poly1305 encryption
@@ -266,6 +272,7 @@ Sources/SwiftATV/
     ├── Companion/              # Full Companion protocol implementation
     │   ├── CompanionConnection.swift
     │   ├── CompanionProtocol.swift
+    │   ├── CompanionTextInputSession.swift # RTI text-input archive codec
     │   ├── CompanionPairing.swift     # OPACK-wrapped PS_Start/PS_Next flow
     │   ├── CompanionInterfaces.swift
     │   └── CompanionService.swift
@@ -287,7 +294,7 @@ swift test
 ```
 
 The test suite runs 288 XCTest cases covering pyatv ports and SwiftATV-specific
-integration logic, plus 44 Swift Testing cases:
+integration logic, plus 48 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
 every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
@@ -308,7 +315,8 @@ canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,
 and matches A/M1/K byte-for-byte), HAP pair-setup state machine (M1 encoding,
 M3 output against canned M2, error-TLV surfacing, state ordering),
 `Playing.description` edge cases, Companion auth envelopes, Companion encrypted
-frame AAD, and Companion connection race handling.
+frame AAD, Companion connection race handling, and Companion RTI text-input
+binary-plist encoding/decoding.
 
 CI runs the full suite on `macos-26` (Swift 6.3) and `swift:6.3-jammy`
 on `ubuntu-24.04`, plus a Swift 6.3 `swift format lint --strict` job on

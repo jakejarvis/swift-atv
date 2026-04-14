@@ -224,6 +224,29 @@ public actor CompanionProtocolHandler {
         pendingRequests.removeValue(forKey: xid)
     }
 
+    /// Send an OPACK request without registering a response waiter.
+    ///
+    /// Some Companion cleanup requests, such as `_tiStop`, should be sent with
+    /// request framing but must not delay teardown while waiting for a response
+    /// that may never arrive during connection close.
+    internal func sendRequestWithoutResponse(
+        _ identifier: String,
+        content: OPACK.Value = .dict([])
+    ) async throws(ATVError) {
+        xid += 1
+        let currentXID = xid
+
+        let message = OPACK.Value.dict([
+            (.string("_i"), .string(identifier)),
+            (.string("_t"), .uint(UInt64(CompanionMessageType.request.rawValue))),
+            (.string("_c"), content),
+            (.string("_x"), .uint(UInt64(currentXID))),
+        ])
+
+        let data = OPACK.encode(message)
+        try await connection.send(type: .eOPACK, payload: data)
+    }
+
     /// Send an OPACK event (no response expected).
     public func sendEvent(
         _ identifier: String,

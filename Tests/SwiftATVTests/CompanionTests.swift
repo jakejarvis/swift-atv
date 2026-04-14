@@ -111,6 +111,13 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.accountList).state, .available)
         XCTAssertEqual(features.featureInfo(.switchAccount).state, .available)
 
+        // Keyboard
+        XCTAssertEqual(features.featureInfo(.textGet).state, .available)
+        XCTAssertEqual(features.featureInfo(.textClear).state, .available)
+        XCTAssertEqual(features.featureInfo(.textAppend).state, .available)
+        XCTAssertEqual(features.featureInfo(.textSet).state, .available)
+        XCTAssertEqual(features.featureInfo(.textFocusState).state, .available)
+
         // Touch
         XCTAssertEqual(features.featureInfo(.swipe).state, .available)
         XCTAssertEqual(features.featureInfo(.action).state, .available)

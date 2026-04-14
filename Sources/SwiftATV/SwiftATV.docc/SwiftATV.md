@@ -9,8 +9,8 @@ SwiftATV is a Swift port of [pyatv](https://github.com/postlund/pyatv). It
 exposes a unified ``AppleTVDevice`` interface that routes each command to the
 highest-priority protocol that supports it. MRP provides protobuf-based direct
 remote control, actively refreshed metadata, push updates, power, audio, and
-HAP pairing; Companion provides modern app, keyboard-focus, touch, power,
-audio-volume, and remote-control support. Connection setup is deterministic for
+HAP pairing; Companion provides modern app, keyboard text input/focus, touch,
+power, audio-volume, and remote-control support. Connection setup is deterministic for
 implemented control protocols (MRP, then Companion), while DMAP, AirPlay, and
 RAOP remain discoverable but planned as control backends.
 
@@ -91,6 +91,14 @@ await atv.close()
 - ``CompanionService``
 - ``CompanionProtocolHandler``
 - ``CompanionConnection``
+- ``CompanionKeyboard``
+- ``CompanionRemoteControl``
+- ``CompanionApps``
+- ``CompanionUserAccounts``
+- ``CompanionPower``
+- ``CompanionAudio``
+- ``CompanionTouch``
+- ``CompanionFeatures``
 - ``MRPService``
 - ``MRPConnection``
 - ``MRPPlayerState``

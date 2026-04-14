@@ -9,7 +9,11 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- Companion `KeyboardController` now implements text get, clear, append, and
+  set using the `_tiStart` / `_tiC` RTI text-input flow, including native UID
+  binary-plist payloads for insert and atomic replace operations.
 
 ## [0.2.2] - 2026-04-13
 

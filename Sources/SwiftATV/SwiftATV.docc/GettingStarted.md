@@ -161,6 +161,11 @@ try await atv.apps.launchApp(bundleID: "com.apple.TVMovies")
 // Power
 try await atv.power.turnOff()
 
+// Keyboard text entry, when a text field is focused on the Apple TV
+if atv.features.isAvailable(.textSet) {
+    try await atv.keyboard.textSet("Movie title")
+}
+
 // Always close the connection when you're done.
 await atv.close()
 ```

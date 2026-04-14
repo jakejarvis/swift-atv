@@ -284,10 +284,16 @@ public actor CompanionAudio: AudioController {
 
 // MARK: - Keyboard
 
-/// Companion protocol implementation of KeyboardController.
+/// Companion protocol implementation of `KeyboardController`.
+///
+/// Uses Companion RTI text-input messages (`_tiStart`, `_tiC`, `_tiStop`) and
+/// binary keyed archives to mutate the text field currently focused on the
+/// Apple TV.
 public actor CompanionKeyboard: KeyboardController {
     private let handler: CompanionProtocolHandler
     private var _focusState: KeyboardFocusState = .unknown
+    private var sessionUUID: Data?
+    private var currentText: String = ""
     public nonisolated let focusStateStream: AsyncStream<KeyboardFocusState>
     private nonisolated let continuation: AsyncStream<KeyboardFocusState>.Continuation
 
@@ -301,19 +307,96 @@ public actor CompanionKeyboard: KeyboardController {
     public var textFocusState: KeyboardFocusState { _focusState }
 
     public func textGet() async throws(ATVError) -> String? {
-        throw ATVError.notSupported("textGet not yet implemented for Companion")
+        try await refreshSession()?.currentText
     }
 
     public func textClear() async throws(ATVError) {
-        throw ATVError.notSupported("textClear not yet implemented for Companion")
+        let state = try await requireSession()
+        try await sendTextPayload(
+            CompanionTextInputSession.encodeReplaceText("", sessionUUID: state.sessionUUID)
+        )
+        currentText = ""
     }
 
     public func textAppend(_ text: String) async throws(ATVError) {
-        throw ATVError.notSupported("textAppend not yet implemented for Companion")
+        guard !text.isEmpty else { return }
+        let state = try await requireSession()
+        try await sendTextPayload(
+            CompanionTextInputSession.encodeInsertText(text, sessionUUID: state.sessionUUID)
+        )
+        currentText += text
     }
 
     public func textSet(_ text: String) async throws(ATVError) {
-        throw ATVError.notSupported("textSet not yet implemented for Companion")
+        guard let state = try await refreshSession() else {
+            throw ATVError.invalidState("No active Companion text input session")
+        }
+        if text.hasPrefix(currentText) {
+            let suffix = String(text.dropFirst(currentText.count))
+            if !suffix.isEmpty {
+                try await sendTextPayload(
+                    CompanionTextInputSession.encodeInsertText(suffix, sessionUUID: state.sessionUUID)
+                )
+            }
+        } else {
+            try await sendTextPayload(
+                CompanionTextInputSession.encodeReplaceText(text, sessionUUID: state.sessionUUID)
+            )
+        }
+        currentText = text
+    }
+
+    internal func stopTextInput() async throws(ATVError) {
+        guard sessionUUID != nil else {
+            updateFocusState(.unfocused)
+            return
+        }
+        try await handler.sendRequestWithoutResponse("_tiStop")
+        sessionUUID = nil
+        currentText = ""
+        updateFocusState(.unfocused)
+    }
+
+    private func requireSession() async throws(ATVError) -> CompanionTextInputSession.State {
+        if let sessionUUID {
+            return CompanionTextInputSession.State(sessionUUID: sessionUUID, currentText: currentText)
+        }
+        guard let state = try await refreshSession() else {
+            throw ATVError.invalidState("No active Companion text input session")
+        }
+        return state
+    }
+
+    private func refreshSession() async throws(ATVError) -> CompanionTextInputSession.State? {
+        let response = try await handler.sendRequest("_tiStart")
+        guard let payload = response["_c"]?["_tiD"]?.dataValue else {
+            sessionUUID = nil
+            currentText = ""
+            updateFocusState(.unfocused)
+            return nil
+        }
+
+        let state = try CompanionTextInputSession.decodeStartResponse(payload)
+        sessionUUID = state.sessionUUID
+        currentText = state.currentText
+        updateFocusState(.focused)
+        return state
+    }
+
+    private func sendTextPayload(_ payload: Data) async throws(ATVError) {
+        try await handler.sendEvent(
+            "_tiC",
+            content: OPACK.Value.dictionary([
+                ("_tiV", .uint(1)),
+                ("_tiD", .data(payload)),
+            ])
+        )
+    }
+
+    private func updateFocusState(_ state: KeyboardFocusState) {
+        guard _focusState != state else { return }
+        _focusState = state
+        continuation.yield(state)
     }
 }
 
@@ -419,6 +502,7 @@ public struct CompanionFeatures: FeatureProvider, Sendable {
         .appList, .launchApp,
         .accountList, .switchAccount,
         .turnOn, .turnOff, .powerState,
+        .textGet, .textClear, .textAppend, .textSet, .textFocusState,
         .swipe, .action, .click,
     ]
 

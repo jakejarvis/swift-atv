@@ -39,14 +39,14 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   - `Configuration.swift` -- `AppleTVConfiguration` and `ServiceInfo`
   - `DiscoveryIdentifiers.swift` -- Bonjour TXT identifier lookup priority
   - `Errors.swift` -- `ATVError` (all public API is `throws(ATVError)`)
-  - `Support/` -- Binary codecs: OPACK, TLV8, ChaCha20-Poly1305
+  - `Support/` -- Binary codecs: OPACK, TLV8, BinaryPlistArchive, ChaCha20-Poly1305
   - `Core/` -- Relayer, Facade, Scanner (NWBrowser plus NetService TXT resolution with identifier-first merge and diagnostics), MessageDispatcher
   - `Auth/`
     - `HAPCredentials.swift` -- Long-term key storage/serialization
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
-  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume, connection-lost propagation; text entry and output-device mutation are not implemented yet)
+  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume, RTI text entry, connection-lost propagation; output-device mutation is not implemented yet)
   - `Protocols/MRP/` -- Direct MRP implementation (checked-in SwiftProtobuf-generated pyatv messages in `Generated/`, source `.proto` files in `Protobuf/`, TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, connection-lost propagation)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
@@ -55,7 +55,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus, touch, connection-lost events, Bonjour identifiers/metadata. Text entry and output-device mutation are not implemented yet |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus/text entry, touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is not implemented yet |
 | MRP | Implemented | Direct TCP/protobuf connection, pair-setup, pair-verify, remote, actively refreshed metadata, push, power, audio, connection-lost events. AirPlay tunnel/streaming not included |
 | DMAP | Not started | Legacy protocol |
 | AirPlay | Not started | Streaming |
@@ -150,4 +150,6 @@ frameworks coexist in the same target. Current Swift Testing suites:
   OPACK envelope shape and auth error surfacing.
 - `CompanionConnectionTests.swift` -- Companion auth frame routing,
   encrypted-frame AAD, close/drain races, and pending-request drain behavior.
+- `CompanionTextInputSessionTests.swift` -- Companion RTI text-input
+  binary-plist encoding/decoding for `_tiStart` and `_tiC` payloads.
 - `TestHelpers.swift` -- shared `Data(hex:)` / `.hex` helpers.

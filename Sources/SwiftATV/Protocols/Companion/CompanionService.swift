@@ -121,6 +121,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
 
     /// Close the Companion protocol connection.
     public func close() async {
+        let keyboard = lock.withLock { _keyboard }
+        try? await keyboard?.stopTextInput()
         await protocolHandler.stop()
         await connection.close()
     }
