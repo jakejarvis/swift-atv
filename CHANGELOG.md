@@ -9,6 +9,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-14
+
 ### Added
 
 - `ConnectionAttemptError` records every protocol attempted by auto-connect
@@ -427,7 +429,8 @@ Supporting changes that landed with the fixes above:
 
 - Direct MRP and Companion are functional for control-oriented workflows.
 
-[Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.2.2...HEAD
+[Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/jakejarvis/swift-atv/compare/0.2.2...0.3.0
 [0.2.2]: https://github.com/jakejarvis/swift-atv/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/jakejarvis/swift-atv/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/jakejarvis/swift-atv/compare/0.1.0...0.2.0
