@@ -484,9 +484,13 @@ public struct CompanionTouch: TouchController, Sendable {
 // MARK: - Features
 
 /// Companion protocol implementation of FeatureProvider.
+///
+/// Touch features are reported unavailable when Companion setup could not
+/// initialize the optional touch interface.
 /// Immutable -- all properties are `let`. Naturally Sendable.
 public struct CompanionFeatures: FeatureProvider, Sendable {
     private let isConnected: Bool
+    private let touchAvailable: Bool
 
     /// Features supported by the Companion protocol.
     private static let supportedFeatures: Set<FeatureName> = [
@@ -503,14 +507,21 @@ public struct CompanionFeatures: FeatureProvider, Sendable {
         .accountList, .switchAccount,
         .turnOn, .turnOff, .powerState,
         .textGet, .textClear, .textAppend, .textSet, .textFocusState,
+    ]
+
+    private static let touchFeatures: Set<FeatureName> = [
         .swipe, .action, .click,
     ]
 
-    public init(isConnected: Bool = true) {
+    public init(isConnected: Bool = true, touchAvailable: Bool = true) {
         self.isConnected = isConnected
+        self.touchAvailable = touchAvailable
     }
 
     public func featureInfo(_ feature: FeatureName) -> FeatureInfo {
+        if Self.touchFeatures.contains(feature) {
+            return FeatureInfo(state: isConnected && touchAvailable ? .available : .unavailable)
+        }
         if Self.supportedFeatures.contains(feature) {
             return FeatureInfo(state: isConnected ? .available : .unavailable)
         }

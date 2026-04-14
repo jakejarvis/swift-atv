@@ -27,6 +27,15 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 - Installation snippets no longer hard-code the current release number, so
   release bumps only update `ATVClient.version` and changelog metadata.
+- Documentation now describes AirPlay support as the implemented AirPlay 2 MRP
+  tunnel instead of as a broader AirPlay media surface.
+
+### Fixed
+
+- Companion setup no longer fails the whole connection when `_touchStart`
+  times out after pair-verify and `_systemInfo` succeed. Touch support is left
+  unavailable, while remote control, apps, power, audio, and keyboard
+  interfaces continue to register.
 
 ## [0.2.2] - 2026-04-13
 
@@ -393,8 +402,7 @@ Supporting changes that landed with the fixes above:
 
 ### Known limitations
 
-- AirPlay media streaming is not implemented. Direct MRP and Companion are
-  functional for control-oriented workflows.
+- Direct MRP and Companion are functional for control-oriented workflows.
 
 [Unreleased]: https://github.com/jakejarvis/swift-atv/compare/0.2.2...HEAD
 [0.2.2]: https://github.com/jakejarvis/swift-atv/compare/0.2.1...0.2.2

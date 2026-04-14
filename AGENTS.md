@@ -46,8 +46,8 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
-  - `Protocols/AirPlay/` -- AirPlay 2 support (HAP pair-setup, pair-verify over `/pair-verify`, encrypted control/event/data channels, RTSP SETUP/RECORD, DataStream MRP tunnel, feedback keepalive; media streaming is not implemented yet)
-  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, touch, power, audio volume, RTI text entry, connection-lost propagation; output-device mutation is not implemented yet)
+  - `Protocols/AirPlay/` -- AirPlay 2 support (HAP pair-setup, pair-verify over `/pair-verify`, encrypted control/event/data channels, RTSP SETUP/RECORD, DataStream MRP tunnel, feedback keepalive)
+  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, best-effort touch, power, audio volume, RTI text entry, connection-lost propagation; output-device mutation is not implemented yet)
   - `Protocols/MRP/` -- MRP implementation (checked-in SwiftProtobuf-generated pyatv messages in `Generated/`, source `.proto` files in `Protobuf/`, transport abstraction, direct TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, connection-lost propagation)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
@@ -56,9 +56,9 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus/text entry, touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is not implemented yet |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus/text entry, best-effort touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is not implemented yet |
 | MRP | Implemented | Direct TCP/protobuf connection plus AirPlay 2 DataStream tunnel transport, pair-setup, pair-verify for direct MRP, remote, actively refreshed metadata, push, power, audio, connection-lost events |
-| AirPlay | Partially implemented | AirPlay 2 HAP pair-setup, pair-verify, encrypted control/event/data channels, MRP tunneling. Media streaming is not implemented yet |
+| AirPlay | Implemented | AirPlay 2 HAP pair-setup, pair-verify, encrypted control/event/data channels, and MRP tunneling |
 
 ## Code Conventions
 
@@ -125,6 +125,8 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `DeviceInfoTests` <- `tests/support/test_device_info.py` plus Companion TXT
   model/version metadata coverage.
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
+- `CompanionServiceTests.swift` -- Companion setup resilience when `_touchStart`
+  times out after required setup succeeds.
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
   Companion identifier extraction, NetService TXT resolver path, scan timeout
   validation, diagnostics, and identifier-first scan-result merging.

@@ -3,7 +3,9 @@ import Foundation
 /// Setup and lifecycle management for the Companion protocol.
 ///
 /// Provides the entry point for creating a Companion connection,
-/// performing pair-verify, and initializing all protocol interfaces.
+/// performing pair-verify, and initializing protocol interfaces. Touch setup
+/// is best-effort so devices that do not answer `_touchStart` can still expose
+/// remote, app, power, audio, and keyboard functionality.
 ///
 /// Thread safety: Mutable interface references protected by `NSLock`.
 public final class CompanionService: @unchecked Sendable, CompanionConnectionDelegate {
@@ -17,6 +19,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     private let lock = NSLock()
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
+    private let touchStartTimeout: TimeInterval
     private var credentials: HAPCredentials?
 
     private var _remoteControl: CompanionRemoteControl?
@@ -69,22 +72,45 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         return _features
     }
 
-    public init(
+    public convenience init(
         host: String,
         port: Int,
         credentials: HAPCredentials? = nil,
         settings: ATVSettings = ATVSettings(),
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
+        self.init(
+            host: host,
+            port: port,
+            credentials: credentials,
+            settings: settings,
+            touchStartTimeout: defaultCompanionTimeout,
+            onConnectionClosed: onConnectionClosed
+        )
+    }
+
+    internal init(
+        host: String,
+        port: Int,
+        credentials: HAPCredentials? = nil,
+        settings: ATVSettings = ATVSettings(),
+        touchStartTimeout: TimeInterval,
+        onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
+    ) {
         self.connection = CompanionConnection(host: host, port: port)
         self.protocolHandler = CompanionProtocolHandler(connection: connection)
         self.credentials = credentials
         self.settings = settings
+        self.touchStartTimeout = touchStartTimeout
         self.onConnectionClosed = onConnectionClosed
         self.connection.delegate = self
     }
 
     /// Connect and set up the Companion protocol.
+    ///
+    /// TCP connection, pair-verify, system info, session start, and event
+    /// subscription are required. Touch setup is optional: a `_touchStart`
+    /// timeout leaves touch unavailable but does not fail the connection.
     public func setup() async throws(ATVError) {
         try await connection.connect()
         await protocolHandler.startReceiving()
@@ -103,7 +129,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             clientID: credentials.map(\.clientIdentifier).flatMap(Self.utf8String),
             deviceID: settings.info.deviceID ?? settings.info.macAddress
         )
-        try await protocolHandler.startTouch()
+        let touchAvailable = try await startTouchIfAvailable()
         try await protocolHandler.startSession()
         try await protocolHandler.subscribeEvents(["_iMC"])
 
@@ -114,8 +140,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             _power = CompanionPower(protocol: protocolHandler)
             _audio = CompanionAudio(protocol: protocolHandler)
             _keyboard = CompanionKeyboard(protocol: protocolHandler)
-            _touch = CompanionTouch(protocol: protocolHandler)
-            _features = CompanionFeatures(isConnected: true)
+            _touch = touchAvailable ? CompanionTouch(protocol: protocolHandler) : nil
+            _features = CompanionFeatures(isConnected: true, touchAvailable: touchAvailable)
         }
     }
 
@@ -131,6 +157,25 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
 
     public func connectionDidClose(error: Error?) async {
         onConnectionClosed?(error)
+    }
+
+    private func startTouchIfAvailable() async throws(ATVError) -> Bool {
+        do {
+            try await protocolHandler.startTouch(timeout: touchStartTimeout)
+            return true
+        } catch let error {
+            guard Self.isRecoverableTouchStartFailure(error) else {
+                throw error
+            }
+            return false
+        }
+    }
+
+    private static func isRecoverableTouchStartFailure(_ error: ATVError) -> Bool {
+        if case .operationTimeout(let message) = error {
+            return message.contains("_touchStart")
+        }
+        return false
     }
 
     private static func utf8String(from data: Data) -> String? {

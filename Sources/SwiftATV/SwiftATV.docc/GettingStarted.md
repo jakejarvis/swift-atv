@@ -227,7 +227,8 @@ Task {
 ## Check feature availability
 
 Not every protocol implements every feature. Use ``FeatureProvider`` to check
-what's available on a connected device before calling it:
+what's available on a connected device before calling it. Companion touch
+gestures can be unavailable even when the rest of Companion setup succeeds:
 
 ```swift
 if atv.features.inState([.available], features: .play, .pause, .next) {
@@ -239,5 +240,5 @@ if atv.features.inState([.available], features: .play, .pause, .next) {
 
 - Browse the individual interfaces under **Device control** on the main page.
 - Read the [CHANGELOG](https://github.com/jakejarvis/swift-atv/blob/main/CHANGELOG.md)
-  to see what's implemented and what's planned.
+  to see what's changed.
 - File issues or contribute on [GitHub](https://github.com/jakejarvis/swift-atv).

@@ -14,11 +14,11 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **User Accounts** -- List and switch between user profiles
 - **Power Control** -- Turn devices on/off and monitor power state
 - **Audio Control** -- Adjust volume and manage output devices over direct MRP
-- **Touch/Gesture Input** -- Send swipe, tap, and click gestures
+- **Touch/Gesture Input** -- Send swipe, tap, and click gestures when Companion touch setup is available
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
-- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion; AirPlay media streaming is planned separately
+- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion
 
 ## Requirements
 
@@ -232,15 +232,15 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 
 **Relayer priority order**: MRP > AirPlay > Companion.
 Connection setup uses direct MRP first, AirPlay-tunneled MRP as the MRP fallback,
-then Companion. AirPlay media streaming is still planned.
+then Companion.
 
 ### Protocols
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
 | **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
-| **Companion** | Modern control, apps, keyboard text input/focus, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
-| **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel; media streaming remains separate | Tunnel implemented, streaming planned |
+| **Companion** | Modern control, apps, keyboard text input/focus, best-effort touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
+| **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel | Tunnel implemented |
 
 ## Project Structure
 
@@ -303,7 +303,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 285 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 286 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -315,7 +315,8 @@ MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
 Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
 resolution, scan diagnostics, identity merging, deterministic connect
-fallback/credential selection including AirPlay tunnel ordering, facade device events, timeout conversion,
+fallback/credential selection including AirPlay tunnel ordering, Companion
+touch-start timeout resilience, facade device events, timeout conversion,
 strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, consumer-style module-qualified
 imports, pairing code direction, and `MessageDispatcher` actor behavior.

@@ -320,13 +320,15 @@ public actor CompanionProtocolHandler {
     }
 
     /// Initialize touchpad.
-    public func startTouch() async throws(ATVError) {
+    ///
+    /// - Parameter timeout: Maximum time to wait for the `_touchStart` response.
+    public func startTouch(timeout: TimeInterval = defaultCompanionTimeout) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_height", .uint(1000)),
             ("_tFl", .uint(0)),
             ("_width", .uint(1000)),
         ])
-        _ = try await sendRequest("_touchStart", content: content)
+        _ = try await sendRequest("_touchStart", content: content, timeout: timeout)
     }
 
     /// Stop touchpad.
