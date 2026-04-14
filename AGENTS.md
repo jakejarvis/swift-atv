@@ -28,10 +28,10 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > AirPlay > Companion)
 - **Connect setup priority**: `ATVClient.connect` takes `ConnectOptions`, attempts implemented control protocols deterministically by option order (default direct MRP > AirPlay-tunneled MRP > Companion), can derive an AirPlay tunnel attempt on port 7000 from a Companion-only discovery when reusable HAP credentials exist, returns `ConnectResult` with primary/active protocols and attempts, and aggregates per-protocol errors if none connect. Single-protocol options stay strict; `ConnectStrategy.allAllowed` attaches every usable allowed protocol.
 - **Pairing/settings persistence**: `PairingHandler.finish()` returns `PairingResult`; `ATVSettings.apply(_:)` copies the paired service identifier and credentials into the correct protocol bucket.
-- **Preflight policy helpers**: `AppleTVConfiguration.connectability(settings:)`, `connectableProtocols(settings:)`, `preferredPairingService(...)`, and `ServiceInfo.effectivePairingStatus(settings:)` expose local pairing/connectability policy for apps before opening network sessions.
-- **State-backed capabilities**: Companion and MRP capability providers report unavailable until setup, protocol events, or successful requests prove optional/stateful surfaces are usable. MRP output-device list and mutation capabilities become available after route state arrives from direct MRP or AirPlay-tunneled MRP. Optional setup failures are exposed with capability diagnostics when a public capability is affected. Relayed state prefers `.available` over `.unavailable` across protocols.
+- **Preflight policy helpers**: `AppleTVConfiguration.connectability(settings:)`, `connectableProtocols(settings:protocols:)`, `preferredPairingService(...)`, and `ServiceInfo.effectivePairingStatus(settings:)` expose local pairing/connectability policy for apps before opening network sessions. Connectable protocol results follow the supplied protocol order.
+- **State-backed capabilities**: Companion and MRP capability providers report unavailable until setup, protocol events, or successful requests prove optional/stateful surfaces are usable. MRP output-device list and mutation capabilities become available after route state arrives from direct MRP or AirPlay-tunneled MRP. Companion and MRP optional setup failures are exposed with capability diagnostics when a public capability is affected. Relayed state prefers `.available` over `.unavailable` across protocols.
 - **Media commands**: `MediaCommandController` exposes broad MediaRemote command discovery and sending. Direct MRP maps `SupportedCommands` into `MediaCommandInfo`; commands requiring unmodeled queue/session/language payloads stay unsupported.
-- **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records. Unfiltered scans include `_sleep-proxy._udp` and mark matching configurations `deepSleep`.
+- **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records. Filtered and unfiltered scans include `_sleep-proxy._udp` and mark matching configurations `deepSleep`.
 - **Structured timeouts**: `ATVError.operationTimeout` carries `TimeoutContext` with protocol, operation, request identifier, and duration.
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
@@ -47,7 +47,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   - `Errors.swift` -- `ATVError`, `TimeoutContext`, and `ConnectionAttemptError` (all public API is `throws(ATVError)`)
   - `Settings.swift` -- `ATVSettings`, local `ClientIdentitySettings`, pairing-result apply helper, and protocol-specific credential settings
   - `Support/` -- Binary codecs: OPACK, TLV8, BinaryPlistArchive, ChaCha20-Poly1305, AirPlay HAP session encryption
-  - `Core/` -- Relayer, Facade, Scanner (NWBrowser plus NetService TXT resolution, sleep-proxy discovery, identifier-first merge, and diagnostics), MessageDispatcher
+  - `Core/` -- Relayer, Facade, Scanner (NWBrowser plus NetService TXT resolution, filtered/unfiltered sleep-proxy discovery, identifier-first merge, and diagnostics), MessageDispatcher
   - `Auth/`
     - `HAPCredentials.swift` -- Long-term key storage/serialization
     - `SRPAuth.swift` -- Ed25519/X25519/HKDF primitives
@@ -63,7 +63,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, NoOp keepalive, remote, apps, users, selected media commands, event-backed power/audio/media-control/keyboard state, best-effort touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is intentionally MRP/AirPlay-tunneled MRP only |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, NoOp keepalive, remote, apps, users, selected media commands, event-backed power/audio/media-control/keyboard state, best-effort touch with setup diagnostics, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is intentionally MRP/AirPlay-tunneled MRP only |
 | MRP | Implemented | Direct TCP/protobuf connection plus AirPlay 2 DataStream tunnel transport, pair-setup, pair-verify for direct MRP, remote, broad MediaRemote command query/send, actively refreshed metadata, push, power, audio, output-device state/mutation, optional setup diagnostics, connection-lost events |
 | AirPlay | Implemented | AirPlay 2 HAP pair-setup, pair-verify, encrypted control/event/data channels, timeout-bounded HTTP/RTSP setup, and MRP tunneling including output-device mutation |
 
@@ -122,7 +122,7 @@ from the code are worse than no docs — they silently mislead.
 
 Most tests are ported from pyatv's test suite (XCTest):
 - `ConstantsTests` <- `tests/test_convert.py`
-- `ConfigurationTests` <- `tests/test_conf.py`
+- `ConfigurationTests` <- `tests/test_conf.py` plus connectability ordering.
 - `InterfaceTests` <- `tests/test_interface.py`
 - `OPACKTests` <- `tests/support/test_opack.py` plus SwiftATV object-reference,
   strict-consumption, and integer-overflow regression coverage.
@@ -135,7 +135,8 @@ Most tests are ported from pyatv's test suite (XCTest):
 - `CompanionTests` <- `tests/protocols/companion/test_companion.py`
 - `CompanionServiceTests.swift` -- Companion setup resilience when optional
   `_sessionStart` / `_touchStart` requests time out after credentialed
-  pair-verify and required setup succeeds, plus Companion NoOp keepalive.
+  pair-verify and required setup succeeds, setup diagnostics, plus Companion
+  NoOp keepalive.
 - `ScannerTests.swift` -- SwiftATV Bonjour TXT pairing requirement parsing,
   Companion identifier extraction, NetService TXT resolver path, scan timeout
   validation, diagnostics, sleep-proxy deep-sleep discovery, and

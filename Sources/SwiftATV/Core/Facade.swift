@@ -237,9 +237,13 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     internal var protocolSetupDiagnostics: [ProtocolSetupDiagnostic] {
         lock.withLock {
-            mrpServices.flatMap { registrationProtocol, service in
+            var diagnostics = mrpServices.flatMap { registrationProtocol, service in
                 service.setupDiagnostics(protocol: registrationProtocol)
             }
+            if let companionService {
+                diagnostics.append(contentsOf: companionService.setupDiagnostics(protocol: .companion))
+            }
+            return diagnostics
         }
     }
 

@@ -248,10 +248,22 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
         }
     }
 
-    /// Protocols that can be attempted with the supplied settings.
-    public func connectableProtocols(settings: ATVSettings = ATVSettings()) -> [ATVProtocol] {
-        connectability(settings: settings).compactMap { item in
-            item.status == .connectable ? item.service.protocol : nil
+    /// Protocols that can be attempted with the supplied settings and order.
+    public func connectableProtocols(
+        settings: ATVSettings = ATVSettings(),
+        protocols: [ATVProtocol] = ConnectOptions.defaultProtocolOrder
+    ) -> [ATVProtocol] {
+        let connectable = Set(
+            connectability(settings: settings).compactMap { item in
+                item.status == .connectable ? item.service.protocol : nil
+            }
+        )
+        var seen = Set<ATVProtocol>()
+        return protocols.compactMap { `protocol` in
+            guard connectable.contains(`protocol`), seen.insert(`protocol`).inserted else {
+                return nil
+            }
+            return `protocol`
         }
     }
 

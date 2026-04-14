@@ -57,6 +57,17 @@
             }
         }
 
+        func testFilteredScanStillIncludesDeviceInfoAndSleepProxy() {
+            XCTAssertEqual(
+                ATVScanner.serviceTypes(for: [.companion]),
+                [.companion, .deviceInfo, .sleepProxy]
+            )
+            XCTAssertEqual(
+                ATVScanner.serviceTypes(for: nil),
+                [.mrp, .companion, .airPlay, .deviceInfo, .sleepProxy]
+            )
+        }
+
         func testCompanionOnlyRpMRtIDProducesMainIdentifier() {
             let services = [
                 DiscoveredService(

@@ -107,7 +107,9 @@ for device in devices {
 
 Use `ATVClient.scanWithDiagnostics` when a caller needs to distinguish a clean
 "no devices found" scan from non-fatal Bonjour browser, resolver, or empty-TXT
-failures:
+failures. Filtered and unfiltered scans include sleep-proxy discovery so
+sleeping devices can still be marked with `deepSleep` when Bonjour provides a
+usable identifier:
 
 ```swift
 let result = try await ATVClient.scanWithDiagnostics(timeout: 5.0)
@@ -211,7 +213,9 @@ exhausts all options, the thrown `ATVError.connectionFailed` contains
 Use `device.connectableProtocols(settings:)`,
 `device.preferredPairingService(settings:)`, and
 `service.effectivePairingStatus(settings:)` to apply SwiftATV's protocol policy
-before starting pairing or connect UI.
+before starting pairing or connect UI. `connectableProtocols` defaults to
+`ConnectOptions.defaultProtocolOrder`; pass `protocols:` to use the same order
+as a custom connect button or fallback strategy.
 
 ### Check Capability Availability
 

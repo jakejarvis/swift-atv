@@ -30,6 +30,10 @@
 
             XCTAssertEqual(service.capabilities?.capabilityInfo(.remote(.up)).state, .available)
             XCTAssertEqual(service.capabilities?.capabilityInfo(.touch(.swipe)).state, .unavailable)
+            XCTAssertTrue(
+                service.capabilities?.capabilityInfo(.touch(.swipe)).options["diagnostic"]?
+                    .contains("_touchStart") == true
+            )
             XCTAssertNil(service.touch)
 
             let remote = try XCTUnwrap(service.remoteControl)
@@ -46,6 +50,10 @@
             XCTAssertLessThan(
                 try XCTUnwrap(requests.firstIndex(of: "_sessionStart")),
                 try XCTUnwrap(requests.firstIndex(of: "_touchStart"))
+            )
+            XCTAssertEqual(
+                Set(service.setupDiagnostics(protocol: .companion).map(\.capability)),
+                CompanionStateStore.touchCapabilities
             )
         }
 
@@ -68,6 +76,10 @@
 
             XCTAssertEqual(service.capabilities?.capabilityInfo(.remote(.up)).state, .available)
             XCTAssertEqual(service.capabilities?.capabilityInfo(.touch(.swipe)).state, .unavailable)
+            XCTAssertTrue(
+                service.capabilities?.capabilityInfo(.touch(.swipe)).options["diagnostic"]?
+                    .contains("_sessionStart") == true
+            )
             XCTAssertNil(service.touch)
 
             let remote = try XCTUnwrap(service.remoteControl)
@@ -81,6 +93,59 @@
             XCTAssertFalse(requests.contains("_touchStart"))
             XCTAssertTrue(requests.contains("_interest"))
             XCTAssertEqual(requests.filter { $0 == "_hidC" }.count, 2)
+            XCTAssertEqual(
+                Set(service.setupDiagnostics(protocol: .companion).map(\.capability)),
+                CompanionStateStore.touchCapabilities
+            )
+        }
+
+        func testConnectResultIncludesCompanionSetupDiagnostics() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(
+                ignoredRequests: ["_touchStart"],
+                pairVerify: pairVerify.responder
+            )
+            defer { server.stop() }
+
+            var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+            config.addService(
+                ServiceInfo(
+                    protocol: .companion,
+                    port: server.port,
+                    credentials: pairVerify.credentials.serialize(),
+                    pairingRequirement: .mandatory
+                ))
+
+            let result = try await ATVClient.withProtocolSetupOverride(
+                { facade, service, credentials in
+                    let companion = CompanionService(
+                        host: "127.0.0.1",
+                        port: service.port,
+                        credentials: credentials,
+                        touchStartTimeout: 0.05,
+                        keepAliveInterval: 0
+                    )
+                    try await companion.setup()
+                    facade._testSetCompanionService(companion)
+                    facade._testSetActiveProtocols([.companion], primary: .companion)
+                },
+                operation: {
+                    try await ATVClient.connect(config, options: ConnectOptions(protocols: [.companion]))
+                }
+            )
+
+            XCTAssertEqual(
+                Set(result.setupDiagnostics.map(\.capability)),
+                CompanionStateStore.touchCapabilities
+            )
+            XCTAssertTrue(
+                result.setupDiagnostics.allSatisfy { diagnostic in
+                    diagnostic.protocol == .companion
+                        && diagnostic.info.options["diagnostic"]?.contains("_touchStart") == true
+                }
+            )
+
+            await result.device.close()
         }
 
         func testCompanionSendsNoOpKeepAliveAfterSetup() async throws {

@@ -133,7 +133,8 @@ public enum ATVClient {
         /// Scan the local network for Apple TV devices.
         ///
         /// Uses Bonjour/mDNS to discover Apple TV, HomePod, and AirPlay devices
-        /// on the local network.
+        /// on the local network. Sleep-proxy discovery is included even when a
+        /// protocol filter is supplied so sleeping devices can be marked.
         ///
         /// - Parameters:
         ///   - timeout: Maximum time to scan in seconds. Default is 5.
@@ -164,7 +165,8 @@ public enum ATVClient {
         /// This method preserves discovered devices even when one Bonjour
         /// browser or resolver reports a recoverable failure. Use
         /// ``scan(timeout:identifiers:protocols:)`` when you only need device
-        /// configurations.
+        /// configurations. Sleep-proxy discovery is included even when a
+        /// protocol filter is supplied so sleeping devices can be marked.
         ///
         /// - Parameters:
         ///   - timeout: Maximum time to scan in seconds. Default is 5.

@@ -62,9 +62,10 @@ You can narrow the scan to specific protocols or device identifiers to avoid
 paying for protocol probes you don't need. Identifier filtering matches any
 identifier reported by the device's services, not just the preferred display
 identifier. Companion-only discoveries use the stable Companion TXT identifiers
-reported by `_companion-link._tcp`. Unfiltered scans also include
-`_sleep-proxy._udp`, which can mark configurations as ``AppleTVConfiguration/deepSleep``
-when the sleep-proxy service name carries a matching device identifier:
+reported by `_companion-link._tcp`. Filtered and unfiltered scans also include
+`_sleep-proxy._udp`, which can mark configurations as
+``AppleTVConfiguration/deepSleep`` when the sleep-proxy service name carries a
+matching device identifier:
 
 ```swift
 let companionOnly = try await ATVClient.scan(
@@ -228,7 +229,9 @@ default AirPlay port. Companion connections always require credentials.
 Use ``AppleTVConfiguration/connectableProtocols(settings:)``,
 ``AppleTVConfiguration/preferredPairingService(settings:protocols:)``, and
 ``ServiceInfo/effectivePairingStatus(settings:)`` to apply SwiftATV's protocol
-policy before opening connect or pairing UI.
+policy before opening connect or pairing UI. `connectableProtocols` defaults to
+``ConnectOptions/defaultProtocolOrder``; pass `protocols:` when UI should mirror
+a custom connection order.
 
 ``ATVSettings/clientIdentity`` describes your local app or controller. Do not
 copy identifiers from the scanned Apple TV into this field; SwiftATV validates

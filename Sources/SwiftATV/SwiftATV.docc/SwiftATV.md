@@ -37,9 +37,9 @@ TV's identifiers.
 Discovery resolves Bonjour TXT records with each live service, merges services
 by stable device identifiers, including Companion-only TXT identifiers, and can
 optionally return scan diagnostics for non-fatal browser, resolver, or empty-TXT
-failures. Unfiltered scans also include sleep-proxy discovery so sleeping
-devices can be marked with ``AppleTVConfiguration/deepSleep`` when Bonjour
-provides a usable device identifier.
+failures. Filtered and unfiltered scans include sleep-proxy discovery so
+sleeping devices can be marked with ``AppleTVConfiguration/deepSleep`` when
+Bonjour provides a usable device identifier.
 
 SwiftATV requires Swift 6.3 or newer.
 

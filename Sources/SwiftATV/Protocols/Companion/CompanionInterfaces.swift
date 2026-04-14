@@ -30,6 +30,7 @@ internal final class CompanionStateStore: @unchecked Sendable {
     private var _hasKeyboardFocus = false
     private var _appsAvailable = false
     private var _accountsAvailable = false
+    private var setupDiagnostics: [Capability: CapabilityInfo] = [:]
     private var volumeContinuations: [UUID: AsyncStream<Float>.Continuation] = [:]
     private var powerContinuations: [UUID: AsyncStream<PowerState>.Continuation] = [:]
     private var focusContinuations: [UUID: AsyncStream<KeyboardFocusState>.Continuation] = [:]
@@ -120,6 +121,21 @@ internal final class CompanionStateStore: @unchecked Sendable {
         lock.withLock { _accountsAvailable = true }
     }
 
+    internal func recordSetupFailure(_ message: String, affectedCapabilities: Set<Capability>) {
+        let info = CapabilityInfo(state: .unavailable, options: ["diagnostic": message])
+        lock.withLock {
+            for capability in affectedCapabilities {
+                setupDiagnostics[capability] = info
+            }
+        }
+    }
+
+    internal func setupDiagnosticEntries() -> [(Capability, CapabilityInfo)] {
+        lock.withLock {
+            setupDiagnostics.map { ($0.key, $0.value) }
+        }
+    }
+
     internal func volumeStream() -> AsyncStream<Float> {
         AsyncStream { continuation in
             let id = UUID()
@@ -164,6 +180,9 @@ internal final class CompanionStateStore: @unchecked Sendable {
 
     internal func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
         lock.withLock {
+            if let diagnostic = setupDiagnostics[capability] {
+                return diagnostic
+            }
             guard _isConnected else {
                 if Self.supportedCapabilities.contains(capability) || Self.touchCapabilities.contains(capability) {
                     return CapabilityInfo(state: .unavailable)
@@ -254,7 +273,7 @@ internal final class CompanionStateStore: @unchecked Sendable {
         .accounts(.list), .accounts(.switchAccount),
     ]
 
-    private static let touchCapabilities: Set<Capability> = [
+    internal static let touchCapabilities: Set<Capability> = [
         .touch(.swipe), .touch(.action), .touch(.click),
     ]
 

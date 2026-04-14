@@ -104,6 +104,9 @@
         ]
 
         /// Scan the local network for Apple TV devices.
+        ///
+        /// Device-info and sleep-proxy services are scanned alongside the
+        /// requested protocol services.
         /// - Parameters:
         ///   - timeout: How long to scan in seconds. Default is 5.
         ///   - identifiers: Optional set of device identifiers to filter by.
@@ -122,6 +125,9 @@
         }
 
         /// Scan the local network for Apple TV devices and return non-fatal diagnostics.
+        ///
+        /// Device-info and sleep-proxy services are scanned alongside the
+        /// requested protocol services.
         /// - Parameters:
         ///   - timeout: How long to scan in seconds. Default is 5.
         ///   - identifiers: Optional set of device identifiers to filter by.
@@ -149,21 +155,7 @@
         ) async throws(ATVError) -> ATVScanResult {
             _ = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
 
-            // Determine which service types to scan based on protocol filter
-            let serviceTypes: [BonjourServiceType]
-            if let protocols {
-                serviceTypes = Self.protocolServiceTypes.filter { svc in
-                    guard let proto = svc.atvProtocol else { return false }
-                    return protocols.contains(proto)
-                }
-            } else {
-                serviceTypes = Self.protocolServiceTypes
-            }
-
-            // Also always scan for device info. Sleep proxy is useful only
-            // during normal discovery, not when the caller asks for a
-            // protocol-specific service subset.
-            let allTypes = serviceTypes + [.deviceInfo] + (protocols == nil ? [.sleepProxy] : [])
+            let allTypes = Self.serviceTypes(for: protocols)
 
             // Browse for each service type concurrently
             let browseOutput: BrowseOutput
@@ -196,6 +188,20 @@
                 diagnostics: browseOutput.diagnostics,
                 identifiers: identifiers
             )
+        }
+
+        internal static func serviceTypes(for protocols: Set<ATVProtocol>?) -> [BonjourServiceType] {
+            let serviceTypes: [BonjourServiceType]
+            if let protocols {
+                serviceTypes = Self.protocolServiceTypes.filter { svc in
+                    guard let proto = svc.atvProtocol else { return false }
+                    return protocols.contains(proto)
+                }
+            } else {
+                serviceTypes = Self.protocolServiceTypes
+            }
+
+            return serviceTypes + [.deviceInfo, .sleepProxy]
         }
 
         internal static func configurations(from services: [DiscoveredService]) -> [AppleTVConfiguration] {

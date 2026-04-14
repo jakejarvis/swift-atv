@@ -88,6 +88,16 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         stateStore.isConnected
     }
 
+    func setupDiagnostics(protocol registrationProtocol: ATVProtocol) -> [ProtocolSetupDiagnostic] {
+        stateStore.setupDiagnosticEntries().map { capability, info in
+            ProtocolSetupDiagnostic(
+                protocol: registrationProtocol,
+                capability: capability,
+                info: info
+            )
+        }
+    }
+
     public convenience init(
         host: String,
         port: Int,
@@ -202,6 +212,7 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             guard Self.isRecoverableTouchStartFailure(error) else {
                 throw error
             }
+            recordTouchSetupFailure(error)
             return false
         }
     }
@@ -214,8 +225,16 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             guard Self.isRecoverableSessionStartFailure(error) else {
                 throw error
             }
+            recordTouchSetupFailure(error)
             return false
         }
+    }
+
+    private func recordTouchSetupFailure(_ error: ATVError) {
+        stateStore.recordSetupFailure(
+            error.errorDescription ?? String(describing: error),
+            affectedCapabilities: CompanionStateStore.touchCapabilities
+        )
     }
 
     private static func isRecoverableSessionStartFailure(_ error: ATVError) -> Bool {

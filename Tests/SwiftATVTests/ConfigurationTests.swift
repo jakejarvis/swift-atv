@@ -138,6 +138,24 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(config.preferredPairingService(settings: settings)?.protocol, .mrp)
     }
 
+    func testConnectableProtocolsUsesRequestedProtocolOrder() {
+        var config = makeConfig()
+        config.addService(ServiceInfo(protocol: .companion, port: port3, pairingRequirement: .optional))
+        config.addService(ServiceInfo(protocol: .mrp, port: port2, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "01:02:03:04"
+
+        XCTAssertEqual(config.connectableProtocols(settings: settings), [.mrp, .companion])
+        XCTAssertEqual(
+            config.connectableProtocols(settings: settings, protocols: [.companion, .mrp]),
+            [.companion, .mrp]
+        )
+        XCTAssertEqual(
+            config.connectableProtocols(settings: settings, protocols: [.companion, .companion]),
+            [.companion]
+        )
+    }
+
     // MARK: - test_add_airplay_service
 
     func testAddAirplayService() {

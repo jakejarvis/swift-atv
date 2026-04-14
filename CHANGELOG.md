@@ -20,10 +20,12 @@ Pre-1.0: minor version bumps may contain breaking changes.
   `ATVSettings.apply(_:)` / `applying(_:)` persist the paired service
   identifier and credentials into the correct protocol settings bucket.
 - `AppleTVConfiguration.connectability(settings:)`,
-  `connectableProtocols(settings:)`, `preferredPairingService(...)`, and
-  `ServiceInfo.effectivePairingStatus(settings:)` expose SwiftATV's local
-  pairing/connectability policy to consumers.
-- Discovery now scans `_sleep-proxy._udp` during unfiltered scans and marks
+  `connectableProtocols(settings:protocols:)`, `preferredPairingService(...)`,
+  and `ServiceInfo.effectivePairingStatus(settings:)` expose SwiftATV's local
+  pairing/connectability policy to consumers. Connectable protocol results are
+  returned in the requested protocol order.
+- Discovery now scans `_sleep-proxy._udp` during both filtered and unfiltered
+  scans and marks
   matching configurations as `deepSleep` when a sleep-proxy record can be
   associated with a device identifier.
 - `ClientIdentitySettings.rapportIdentifier` stores the stable local
@@ -64,6 +66,9 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - Companion setup now starts `_sessionStart` before best-effort `_touchStart`
   and treats a `_sessionStart` timeout as non-terminal, so basic Companion
   remote control can still connect when optional session setup stalls.
+- Companion optional `_sessionStart` and `_touchStart` degradation is now
+  surfaced in `ConnectResult.setupDiagnostics` and capability diagnostics for
+  affected touch capabilities.
 - Companion `_systemInfo` now sends a stable per-client Rapport identifier for
   `_i`, matching pyatv's tvOS 18.4+ connection fix.
 - Duplicate sparse service records no longer erase discovered identifiers,
