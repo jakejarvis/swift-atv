@@ -316,6 +316,26 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(playCapabilityState, .available)
     }
 
+    func testSetStateIgnoresNonFinitePlaybackTimes() async {
+        let state = MRPPlayerState()
+        var message = Self.setStateMessage(
+            title: "Bad Time",
+            artist: "Artist",
+            album: "Album",
+            commands: SupportedCommands()
+        )
+        var item = message.setStateMessage.playbackQueue.contentItems[0]
+        item.metadata.duration = .nan
+        item.metadata.elapsedTime = .infinity
+        message.setStateMessage.playbackQueue.contentItems = [item]
+
+        await state.process(message)
+        let playing = await state.currentPlaying
+
+        XCTAssertNil(playing.totalTime)
+        XCTAssertNil(playing.position)
+    }
+
     // MARK: - Message Dispatcher
 
     func testMessageDispatcherRegisterAndDispatch() async {

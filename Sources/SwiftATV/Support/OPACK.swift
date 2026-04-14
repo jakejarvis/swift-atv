@@ -11,6 +11,7 @@ public enum OPACK {
     private static let nilValue: UInt8 = 0x04
     private static let uuidValue: UInt8 = 0x05
     private static let absoluteTime: UInt8 = 0x06
+    private static let negativeOneValue: UInt8 = 0x07
 
     // Integer ranges
     private static let inlineIntBase: UInt8 = 0x08
@@ -274,6 +275,10 @@ public enum OPACK {
     }
 
     private static func encodeNegInt(_ value: Int64, into data: inout Data) {
+        if value == -1 {
+            data.append(negativeOneValue)
+            return
+        }
         let absVal =
             value == Int64.min
             ? UInt64(Int64.max) + 1
@@ -364,6 +369,9 @@ public enum OPACK {
             let val = data.loadLittleEndian(at: offset, as: UInt64.self)
             offset += 8
             return record(.uint(val))
+
+        case negativeOneValue:
+            return record(.int(-1), addToObjectList: false)
 
         // Inline integers (0-39)
         case inlineIntBase...inlineIntMax:

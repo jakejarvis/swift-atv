@@ -82,19 +82,28 @@ public final class ChaCha20Cipher: @unchecked Sendable {
     }
 
     private func makeNonce(counter: UInt64, length: Int) throws(ATVError) -> ChaChaPoly.Nonce {
+        let nonceData = try Self.nonceData(counter: counter, length: length)
+        do {
+            return try ChaChaPoly.Nonce(data: nonceData)
+        } catch {
+            throw ATVError.wrap(error)
+        }
+    }
+
+    internal static func nonceData(counter: UInt64, length: Int) throws(ATVError) -> Data {
         guard length == 8 || length == 12 else {
             throw ATVError.invalidData("ChaCha20 nonce length must be 8 or 12 bytes")
         }
 
         var nonceData = Data(count: 12)
         var le = counter.littleEndian
-        nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
-
-        do {
-            return try ChaChaPoly.Nonce(data: nonceData)
-        } catch {
-            throw ATVError.wrap(error)
+        let counterData = Data(bytes: &le, count: 8)
+        if length == 8 {
+            nonceData.replaceSubrange(4..<12, with: counterData)
+        } else {
+            nonceData.replaceSubrange(0..<8, with: counterData)
         }
+        return nonceData
     }
 }
 
@@ -121,10 +130,7 @@ public final class ChaCha20Cipher8ByteNonce: @unchecked Sendable {
         lock.unlock()
 
         do {
-            var nonceData = Data(count: 12)
-            var le = counter.littleEndian
-            nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
-
+            let nonceData = try ChaCha20Cipher.nonceData(counter: counter, length: 8)
             let nonce = try ChaChaPoly.Nonce(data: nonceData)
             let sealedBox: ChaChaPoly.SealedBox
             if let aad {
@@ -150,10 +156,7 @@ public final class ChaCha20Cipher8ByteNonce: @unchecked Sendable {
         }
 
         do {
-            var nonceData = Data(count: 12)
-            var le = counter.littleEndian
-            nonceData.replaceSubrange(4..<12, with: Data(bytes: &le, count: 8))
-
+            let nonceData = try ChaCha20Cipher.nonceData(counter: counter, length: 8)
             let nonce = try ChaChaPoly.Nonce(data: nonceData)
             let ciphertext = data[data.startIndex..<data.endIndex - 16]
             let tag = data[data.endIndex - 16..<data.endIndex]

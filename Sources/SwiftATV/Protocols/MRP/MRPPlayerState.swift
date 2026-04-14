@@ -287,7 +287,7 @@ public actor MRPPlayerState {
             artist: metadata?.hasTrackArtistName == true ? metadata?.trackArtistName : nil,
             album: metadata?.hasAlbumName == true ? metadata?.albumName : nil,
             genre: metadata?.hasGenre == true ? metadata?.genre : nil,
-            totalTime: metadata?.hasDuration == true ? Int(metadata?.duration ?? 0) : nil,
+            totalTime: metadata?.hasDuration == true ? Self.intValue(metadata?.duration ?? 0) : nil,
             position: playbackPosition(metadata),
             shuffle: shuffleState(snapshot),
             repeatState: repeatState(snapshot),
@@ -331,14 +331,27 @@ public actor MRPPlayerState {
         }
         if metadata.hasElapsedTimeTimestamp {
             let elapsed = metadata.hasElapsedTime ? metadata.elapsedTime : 0
+            guard metadata.elapsedTimeTimestamp.isFinite else {
+                return Self.intValue(elapsed)
+            }
             let cocoaNow = Date().timeIntervalSince1970 - cocoaEpochDelta
             let delta = max(0, cocoaNow - metadata.elapsedTimeTimestamp)
-            return Int(elapsed + delta)
+            return Self.intValue(elapsed + delta)
         }
         if metadata.hasElapsedTime {
-            return Int(metadata.elapsedTime)
+            return Self.intValue(metadata.elapsedTime)
         }
         return nil
+    }
+
+    private static func intValue(_ value: Double) -> Int? {
+        guard value.isFinite,
+            value >= Double(Int.min),
+            value <= Double(Int.max)
+        else {
+            return nil
+        }
+        return Int(value)
     }
 
     private func shuffleState(_ snapshot: MRPPlayerSnapshot) -> ShuffleState? {

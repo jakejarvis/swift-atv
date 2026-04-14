@@ -73,6 +73,25 @@ struct CompanionTextInputSessionTests {
         }
     }
 
+    @Test("Start response decoder rejects negative UID indexes")
+    func decodeStartResponseRejectsNegativeUID() throws {
+        let archive: [String: Any] = [
+            "$archiver": "RTIKeyedArchiver",
+            "$version": 100_000,
+            "$top": ["sessionUUID": CompanionTextInputSession.testUID(-1)] as NSDictionary,
+            "$objects": ["$null"],
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: archive,
+            format: .binary,
+            options: 0
+        )
+
+        #expect(throws: ATVError.self) {
+            _ = try CompanionTextInputSession.decodeStartResponse(data)
+        }
+    }
+
     private func decode(_ data: Data) throws -> [String: Any] {
         try #require(
             PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]

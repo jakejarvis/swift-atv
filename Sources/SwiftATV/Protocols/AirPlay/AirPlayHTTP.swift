@@ -41,7 +41,10 @@ internal enum AirPlayHTTPParser {
         }
 
         let bodyStart = headerEnd + 4
-        let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
+        let contentLength = try contentLength(from: headers, context: "AirPlay response")
+        guard contentLength <= Int.max - bodyStart else {
+            throw ATVError.invalidResponse("AirPlay response Content-Length is too large")
+        }
         let totalLength = bodyStart + contentLength
         guard buffer.count >= totalLength else {
             return nil
@@ -88,7 +91,10 @@ internal enum AirPlayHTTPParser {
         }
 
         let bodyStart = headerEnd + 4
-        let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
+        let contentLength = try contentLength(from: headers, context: "AirPlay event request")
+        guard contentLength <= Int.max - bodyStart else {
+            throw ATVError.invalidResponse("AirPlay event request Content-Length is too large")
+        }
         let totalLength = bodyStart + contentLength
         guard buffer.count >= totalLength else {
             return nil
@@ -119,6 +125,20 @@ internal enum AirPlayHTTPParser {
             }
         }
         return nil
+    }
+
+    private static func contentLength(
+        from headers: [String: String],
+        context: String
+    ) throws(ATVError) -> Int {
+        guard let rawValue = headers["content-length"] else {
+            return 0
+        }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let length = Int(trimmed), length >= 0 else {
+            throw ATVError.invalidResponse("\(context) has invalid Content-Length: \(rawValue)")
+        }
+        return length
     }
 }
 

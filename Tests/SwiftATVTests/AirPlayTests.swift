@@ -57,6 +57,27 @@ struct AirPlaySupportTests {
     }
 }
 
+@Suite("AirPlay HTTP parser")
+struct AirPlayHTTPParserTests {
+    @Test("Response parser rejects negative Content-Length")
+    func responseRejectsNegativeContentLength() {
+        var buffer = Data("HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n".utf8)
+
+        #expect(throws: ATVError.self) {
+            _ = try AirPlayHTTPParser.parseResponse(from: &buffer)
+        }
+    }
+
+    @Test("Request parser rejects invalid Content-Length")
+    func requestRejectsInvalidContentLength() {
+        var buffer = Data("POST /event HTTP/1.1\r\nContent-Length: nope\r\n\r\n".utf8)
+
+        #expect(throws: ATVError.self) {
+            _ = try AirPlayHTTPParser.parseRequest(from: &buffer)
+        }
+    }
+}
+
 @Suite("AirPlay HAP session")
 struct AirPlayHAPSessionTests {
     @Test("HAP session encrypts, chunks, and decrypts partial input")

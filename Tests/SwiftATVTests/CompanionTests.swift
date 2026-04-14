@@ -157,6 +157,18 @@ final class CompanionTests: XCTestCase {
         await connection.close()
     }
 
+    func testCompanionTouchUsesMonotonicElapsedTimestamp() {
+        XCTAssertEqual(CompanionTouch.elapsedNanoseconds(since: 100, now: 250), 150)
+        XCTAssertEqual(CompanionTouch.elapsedNanoseconds(since: 250, now: 100), 0)
+    }
+
+    func testCompanionTouchInterpolatedCoordinateClampsBeforeIntegerConversion() {
+        XCTAssertEqual(CompanionTouch.interpolatedCoordinate(start: Int.min, end: Int.max, progress: 0), 0)
+        XCTAssertEqual(CompanionTouch.interpolatedCoordinate(start: Int.min, end: Int.max, progress: 0.5), 0)
+        XCTAssertEqual(CompanionTouch.interpolatedCoordinate(start: Int.min, end: Int.max, progress: 1), 1000)
+        XCTAssertEqual(CompanionTouch.interpolatedCoordinate(start: 0, end: 1000, progress: 0.25), 250)
+    }
+
     func testCompanionCapabilitiesReflectObservedState() {
         let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
         let capabilities = CompanionCapabilities(stateStore: stateStore)

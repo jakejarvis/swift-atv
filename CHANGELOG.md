@@ -53,6 +53,15 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Fixed
 
+- Companion encryption now uses pyatv-compatible 12-byte nonce layout, so
+  encrypted Companion sessions continue working after the first frame.
+- OPACK now accepts and emits the canonical `0x07` representation for `-1`.
+- Malformed AirPlay `Content-Length` values and Companion text-input UID
+  indexes now throw protocol errors instead of risking parser traps.
+- Non-finite MRP playback timestamps and durations are ignored instead of
+  trapping while building now-playing metadata.
+- Companion touch timestamps now use a monotonic clock, and swipe coordinates
+  are clamped before integer conversion to avoid public-input traps.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.

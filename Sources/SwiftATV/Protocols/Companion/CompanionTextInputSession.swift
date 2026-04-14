@@ -113,7 +113,7 @@ enum CompanionTextInputSession {
         }
 
         guard let sessionIndex = uidValue(top["sessionUUID"]),
-            sessionIndex < objects.count
+            objects.indices.contains(sessionIndex)
         else {
             throw ATVError.invalidResponse("Companion text input response is missing session UUID")
         }
@@ -140,7 +140,7 @@ enum CompanionTextInputSession {
         if let dictionary = value as? [String: Any],
             let uid = dictionary["CF$UID"] as? Int
         {
-            return uid
+            return uid >= 0 ? uid : nil
         }
 
         // PropertyListSerialization reads real binary plist UID objects as a
@@ -152,7 +152,10 @@ enum CompanionTextInputSession {
         else {
             return nil
         }
-        return Int(description[valueRange.upperBound..<end].trimmingCharacters(in: .whitespaces))
+        guard let uid = Int(description[valueRange.upperBound..<end].trimmingCharacters(in: .whitespaces)) else {
+            return nil
+        }
+        return uid >= 0 ? uid : nil
     }
 
     static func testUID(_ index: Int) -> NSDictionary {
@@ -161,13 +164,13 @@ enum CompanionTextInputSession {
 
     private static func documentText(from top: [String: Any], objects: [Any]) -> String {
         guard let documentStateIndex = uidValue(top["documentState"]),
-            documentStateIndex < objects.count,
+            objects.indices.contains(documentStateIndex),
             let documentState = objects[documentStateIndex] as? [String: Any],
             let innerStateIndex = uidValue(documentState["docSt"]),
-            innerStateIndex < objects.count,
+            objects.indices.contains(innerStateIndex),
             let innerState = objects[innerStateIndex] as? [String: Any],
             let textIndex = uidValue(innerState["contextBeforeInput"]),
-            textIndex < objects.count,
+            objects.indices.contains(textIndex),
             let text = objects[textIndex] as? String
         else {
             return ""

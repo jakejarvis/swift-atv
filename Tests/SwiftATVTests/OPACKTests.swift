@@ -88,10 +88,15 @@ final class OPACKTests: XCTestCase {
 
     // MARK: - Negative integers
 
-    func testEncodeNegativeInt8() throws {
+    func testEncodeNegativeOne() throws {
         let encoded = OPACK.encode(.int(-1))
-        XCTAssertEqual(encoded[0], 0x38)  // neg int8 tag
+        XCTAssertEqual(encoded, Data([0x07]))  // canonical -1 tag
         let decoded = try OPACK.decode(encoded)
+        XCTAssertEqual(decoded.intValue, -1)
+    }
+
+    func testDecodeCanonicalNegativeOne() throws {
+        let decoded = try OPACK.decode(Data([0x07]))
         XCTAssertEqual(decoded.intValue, -1)
     }
 

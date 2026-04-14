@@ -748,18 +748,18 @@ public actor CompanionKeyboard: KeyboardController {
 // MARK: - Touch
 
 /// Companion protocol implementation of TouchController.
-/// Stateless wrapper -- timestamp is derived from clock, not mutable state.
+/// Stateless wrapper -- timestamp is derived from a monotonic clock, not mutable state.
 public struct CompanionTouch: TouchController, Sendable {
     private let handler: CompanionProtocolHandler
     private let baseTimestamp: UInt64
 
     public init(protocol handler: CompanionProtocolHandler) {
         self.handler = handler
-        self.baseTimestamp = UInt64(Date().timeIntervalSince1970 * 1_000_000_000)
+        self.baseTimestamp = DispatchTime.now().uptimeNanoseconds
     }
 
     private var currentTimestamp: UInt64 {
-        UInt64(Date().timeIntervalSince1970 * 1_000_000_000) - baseTimestamp
+        Self.elapsedNanoseconds(since: baseTimestamp)
     }
 
     public func swipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMs: Int) async throws(ATVError) {
@@ -768,8 +768,8 @@ public struct CompanionTouch: TouchController, Sendable {
 
         for i in 0...steps {
             let progress = Double(i) / Double(steps)
-            let x = Int(Double(startX) + progress * Double(endX - startX))
-            let y = Int(Double(startY) + progress * Double(endY - startY))
+            let x = Self.interpolatedCoordinate(start: startX, end: endX, progress: progress)
+            let y = Self.interpolatedCoordinate(start: startY, end: endY, progress: progress)
 
             let phase: TouchAction
             if i == 0 { phase = .press } else if i == steps { phase = .release } else { phase = .hold }
@@ -814,6 +814,31 @@ public struct CompanionTouch: TouchController, Sendable {
             ("_tPh", .uint(UInt64(phase.rawValue))),
         ])
         try await handler.sendEvent("_hidT", content: content)
+    }
+
+    internal static func elapsedNanoseconds(
+        since baseTimestamp: UInt64,
+        now: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) -> UInt64 {
+        guard now >= baseTimestamp else { return 0 }
+        return now - baseTimestamp
+    }
+
+    internal static func interpolatedCoordinate(start: Int, end: Int, progress: Double) -> Int {
+        guard progress.isFinite else { return clampedCoordinate(start) }
+        let coordinate = Double(start) + min(max(progress, 0), 1) * (Double(end) - Double(start))
+        return clampedCoordinate(coordinate)
+    }
+
+    private static func clampedCoordinate(_ value: Int) -> Int {
+        min(max(value, 0), 1000)
+    }
+
+    private static func clampedCoordinate(_ value: Double) -> Int {
+        guard value.isFinite else { return 0 }
+        if value <= 0 { return 0 }
+        if value >= 1000 { return 1000 }
+        return Int(value)
     }
 
     private func sendSelectButton(down: Bool) async throws(ATVError) {

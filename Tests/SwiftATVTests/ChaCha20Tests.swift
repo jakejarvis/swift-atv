@@ -9,6 +9,13 @@ final class ChaCha20Tests: XCTestCase {
 
     // MARK: - test_12_bytes_nonce
 
+    func test12ByteNonceUsesLittleEndianCounterWithoutPadding() throws {
+        XCTAssertEqual(
+            try ChaCha20Cipher.nonceData(counter: 1, length: 12),
+            Data([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        )
+    }
+
     func testEncryptDecrypt12ByteNonce() throws {
         let cipher = ChaCha20Cipher(
             encryptKey: fakeKey,
@@ -38,6 +45,13 @@ final class ChaCha20Tests: XCTestCase {
         let decrypted = try cipher.decrypt(encrypted)
 
         XCTAssertEqual(decrypted, plaintext)
+    }
+
+    func test8ByteNonceUsesFourBytePrefixAndLittleEndianCounter() throws {
+        XCTAssertEqual(
+            try ChaCha20Cipher.nonceData(counter: 1, length: 8),
+            Data([0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0])
+        )
     }
 
     // MARK: - test_8_bytes_nonce
