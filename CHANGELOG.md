@@ -65,6 +65,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - Malformed Companion session identifiers, huge MRP push initial delays, and
   invalid MRP message timestamp inputs now fail or clamp instead of trapping on
   integer conversion/overflow.
+- Companion `_sessionStart` responses that omit `_sid` now fail setup as
+  malformed instead of silently leaving the session identifier unset.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.

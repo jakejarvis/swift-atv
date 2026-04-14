@@ -99,6 +99,38 @@
             )
         }
 
+        func testSessionStartMissingSIDFailsSetup() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(
+                responseContent: ["_sessionStart": .dict([])],
+                pairVerify: pairVerify.responder
+            )
+            defer { server.stop() }
+
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                touchStartTimeout: 0.05
+            )
+
+            do {
+                try await service.setup()
+                XCTFail("Expected malformed session start response to fail setup")
+            } catch {
+                guard case .invalidResponse(let message) = error else {
+                    XCTFail("Expected invalidResponse, got \(error)")
+                    await service.close()
+                    return
+                }
+                XCTAssertEqual(message, "Companion session start response missing _sid")
+            }
+
+            await service.close()
+            XCTAssertTrue(server.requests.contains("_sessionStart"))
+            XCTAssertFalse(server.requests.contains("_touchStart"))
+        }
+
         func testConnectResultIncludesCompanionSetupDiagnostics() async throws {
             let pairVerify = FakePairVerifyFixture()
             let server = try await FakeCompanionServer.start(
@@ -207,6 +239,7 @@
         private let listener: NWListener
         private let queue = DispatchQueue(label: "SwiftATVTests.FakeCompanionServer")
         private let ignoredRequests: Set<String>
+        private let responseContent: [String: OPACK.Value]
         private let pairVerify: FakePairVerifyResponder?
         private let lock = NSLock()
         private var connection: NWConnection?
@@ -234,15 +267,25 @@
 
         static func start(
             ignoredRequests: Set<String> = [],
+            responseContent: [String: OPACK.Value] = [:],
             pairVerify: FakePairVerifyResponder? = nil
         ) async throws -> FakeCompanionServer {
-            let server = try FakeCompanionServer(ignoredRequests: ignoredRequests, pairVerify: pairVerify)
+            let server = try FakeCompanionServer(
+                ignoredRequests: ignoredRequests,
+                responseContent: responseContent,
+                pairVerify: pairVerify
+            )
             try await server.start()
             return server
         }
 
-        private init(ignoredRequests: Set<String>, pairVerify: FakePairVerifyResponder?) throws {
+        private init(
+            ignoredRequests: Set<String>,
+            responseContent: [String: OPACK.Value],
+            pairVerify: FakePairVerifyResponder?
+        ) throws {
             self.ignoredRequests = ignoredRequests
+            self.responseContent = responseContent
             self.pairVerify = pairVerify
             self.listener = try NWListener(using: .tcp, on: .any)
         }
@@ -401,11 +444,8 @@
             }
 
             let content: OPACK.Value =
-                if identifier == "_sessionStart" {
-                    .dictionary([("_sid", .uint(1))])
-                } else {
-                    .dict([])
-                }
+                responseContent[identifier]
+                ?? (identifier == "_sessionStart" ? .dictionary([("_sid", .uint(1))]) : .dict([]))
             sendResponse(identifier: identifier, xid: UInt64(xid), content: content, connection: connection)
         }
 

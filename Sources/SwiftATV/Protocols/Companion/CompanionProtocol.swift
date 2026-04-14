@@ -355,9 +355,10 @@ public actor CompanionProtocolHandler {
         ])
 
         let response = try await sendRequest("_sessionStart", content: content, timeout: timeout)
-        if let remoteSID = response["_c"]?["_sid"]?.intValue {
-            sessionID = try Self.sessionIdentifier(localSID: localSID, remoteSID: remoteSID)
+        guard let remoteSID = response["_c"]?["_sid"]?.intValue else {
+            throw ATVError.invalidResponse("Companion session start response missing _sid")
         }
+        sessionID = try Self.sessionIdentifier(localSID: localSID, remoteSID: remoteSID)
     }
 
     internal static func sessionIdentifier(localSID: UInt64, remoteSID: Int64) throws(ATVError) -> UInt64 {
