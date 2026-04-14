@@ -18,6 +18,264 @@ private let featureToHID: [FeatureName: HIDCommand] = [
     .guide: .guide,
 ]
 
+private let companionStateWaitIntervalNanoseconds: UInt64 = 50_000_000
+
+internal struct CompanionMediaControlFlags: OptionSet, Sendable {
+    internal let rawValue: Int64
+
+    internal static let play = Self(rawValue: 0x0001)
+    internal static let pause = Self(rawValue: 0x0002)
+    internal static let nextTrack = Self(rawValue: 0x0004)
+    internal static let previousTrack = Self(rawValue: 0x0008)
+    internal static let fastForward = Self(rawValue: 0x0010)
+    internal static let rewind = Self(rawValue: 0x0020)
+    internal static let volume = Self(rawValue: 0x0100)
+    internal static let skipForward = Self(rawValue: 0x0200)
+    internal static let skipBackward = Self(rawValue: 0x0400)
+}
+
+internal final class CompanionStateStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isConnected: Bool
+    private var _touchAvailable: Bool
+    private var _mediaControlFlags: CompanionMediaControlFlags?
+    private var _volume: Float = 0
+    private var _hasVolume = false
+    private var _volumeRevision = 0
+    private var _powerState: PowerState = .unknown
+    private var _hasPowerState = false
+    private var _focusState: KeyboardFocusState = .unknown
+    private var _hasKeyboardFocus = false
+    private var _appsAvailable = false
+    private var _accountsAvailable = false
+    private var volumeContinuations: [UUID: AsyncStream<Float>.Continuation] = [:]
+    private var powerContinuations: [UUID: AsyncStream<PowerState>.Continuation] = [:]
+    private var focusContinuations: [UUID: AsyncStream<KeyboardFocusState>.Continuation] = [:]
+
+    internal init(isConnected: Bool = true, touchAvailable: Bool = true) {
+        self._isConnected = isConnected
+        self._touchAvailable = touchAvailable
+    }
+
+    internal var isConnected: Bool { lock.withLock { _isConnected } }
+    internal var touchAvailable: Bool { lock.withLock { _touchAvailable } }
+    internal var mediaControlFlags: CompanionMediaControlFlags? { lock.withLock { _mediaControlFlags } }
+    internal var volume: Float { lock.withLock { _volume } }
+    internal var hasVolume: Bool { lock.withLock { _hasVolume } }
+    internal var volumeRevision: Int { lock.withLock { _volumeRevision } }
+    internal var hasVolumeControl: Bool {
+        lock.withLock { _mediaControlFlags?.contains(.volume) ?? false }
+    }
+    internal var powerState: PowerState { lock.withLock { _powerState } }
+    internal var hasPowerState: Bool { lock.withLock { _hasPowerState } }
+    internal var textFocusState: KeyboardFocusState { lock.withLock { _focusState } }
+    internal var hasKeyboardFocus: Bool { lock.withLock { _hasKeyboardFocus } }
+
+    internal func setConnected(_ isConnected: Bool) {
+        lock.withLock { _isConnected = isConnected }
+    }
+
+    internal func setTouchAvailable(_ touchAvailable: Bool) {
+        lock.withLock { _touchAvailable = touchAvailable }
+    }
+
+    internal func setMediaControlFlags(_ flags: CompanionMediaControlFlags) {
+        lock.withLock { _mediaControlFlags = flags }
+    }
+
+    internal func setVolume(_ volume: Float) {
+        let percent = max(0, min(volume, 100))
+        let continuations = lock.withLock {
+            _volume = percent
+            _hasVolume = true
+            _volumeRevision += 1
+            return Array(volumeContinuations.values)
+        }
+        for continuation in continuations {
+            continuation.yield(percent)
+        }
+    }
+
+    internal func clearVolume() {
+        let continuations = lock.withLock {
+            _volume = 0
+            _hasVolume = false
+            _volumeRevision += 1
+            return Array(volumeContinuations.values)
+        }
+        for continuation in continuations {
+            continuation.yield(0)
+        }
+    }
+
+    internal func setPowerState(_ state: PowerState) {
+        let continuations = lock.withLock {
+            _powerState = state
+            _hasPowerState = true
+            return Array(powerContinuations.values)
+        }
+        for continuation in continuations {
+            continuation.yield(state)
+        }
+    }
+
+    internal func setTextFocusState(_ state: KeyboardFocusState) {
+        let continuations = lock.withLock {
+            _focusState = state
+            _hasKeyboardFocus = true
+            return Array(focusContinuations.values)
+        }
+        for continuation in continuations {
+            continuation.yield(state)
+        }
+    }
+
+    internal func markAppsAvailable() {
+        lock.withLock { _appsAvailable = true }
+    }
+
+    internal func markUserAccountsAvailable() {
+        lock.withLock { _accountsAvailable = true }
+    }
+
+    internal func volumeStream() -> AsyncStream<Float> {
+        AsyncStream { continuation in
+            let id = UUID()
+            lock.withLock {
+                volumeContinuations[id] = continuation
+            }
+            continuation.onTermination = { [weak self] _ in
+                _ = self?.lock.withLock {
+                    self?.volumeContinuations.removeValue(forKey: id)
+                }
+            }
+        }
+    }
+
+    internal func powerStateStream() -> AsyncStream<PowerState> {
+        AsyncStream { continuation in
+            let id = UUID()
+            lock.withLock {
+                powerContinuations[id] = continuation
+            }
+            continuation.onTermination = { [weak self] _ in
+                _ = self?.lock.withLock {
+                    self?.powerContinuations.removeValue(forKey: id)
+                }
+            }
+        }
+    }
+
+    internal func focusStateStream() -> AsyncStream<KeyboardFocusState> {
+        AsyncStream { continuation in
+            let id = UUID()
+            lock.withLock {
+                focusContinuations[id] = continuation
+            }
+            continuation.onTermination = { [weak self] _ in
+                _ = self?.lock.withLock {
+                    self?.focusContinuations.removeValue(forKey: id)
+                }
+            }
+        }
+    }
+
+    internal func featureInfo(_ feature: FeatureName) -> FeatureInfo {
+        lock.withLock {
+            guard _isConnected else {
+                if Self.supportedFeatures.contains(feature) || Self.touchFeatures.contains(feature) {
+                    return FeatureInfo(state: .unavailable)
+                }
+                return FeatureInfo(state: .unsupported)
+            }
+
+            if Self.touchFeatures.contains(feature) {
+                return FeatureInfo(state: _touchAvailable ? .available : .unavailable)
+            }
+            if Self.hidFeatures.contains(feature) {
+                return FeatureInfo(state: .available)
+            }
+            if let flag = Self.mediaControlMap[feature] {
+                return FeatureInfo(state: _mediaControlFlags?.contains(flag) == true ? .available : .unavailable)
+            }
+            if Self.volumeFeatures.contains(feature) {
+                return FeatureInfo(
+                    state: _mediaControlFlags?.contains(.volume) == true && _hasVolume ? .available : .unavailable
+                )
+            }
+            if Self.powerFeatures.contains(feature) {
+                return FeatureInfo(state: _hasPowerState ? .available : .unavailable)
+            }
+            if feature == .textFocusState {
+                return FeatureInfo(state: _hasKeyboardFocus ? .available : .unavailable)
+            }
+            if Self.textInputFeatures.contains(feature) {
+                return FeatureInfo(state: _focusState == .focused ? .available : .unavailable)
+            }
+            if Self.appFeatures.contains(feature) {
+                return FeatureInfo(state: _appsAvailable ? .available : .unavailable)
+            }
+            if Self.accountFeatures.contains(feature) {
+                return FeatureInfo(state: _accountsAvailable ? .available : .unavailable)
+            }
+            return FeatureInfo(state: .unsupported)
+        }
+    }
+
+    private static let hidFeatures: Set<FeatureName> = [
+        .up, .down, .left, .right,
+        .playPause, .select, .menu,
+        .volumeUp, .volumeDown, .home, .homeHold,
+        .topMenu, .suspend, .wakeUp,
+        .channelUp, .channelDown,
+        .screensaver, .guide, .controlCenter,
+    ]
+
+    private static let mediaControlMap: [FeatureName: CompanionMediaControlFlags] = [
+        .play: .play,
+        .pause: .pause,
+        .stop: .pause,
+        .next: .nextTrack,
+        .previous: .previousTrack,
+        .skipForward: .skipForward,
+        .skipBackward: .skipBackward,
+    ]
+
+    private static let volumeFeatures: Set<FeatureName> = [
+        .volume, .setVolume,
+    ]
+
+    private static let powerFeatures: Set<FeatureName> = [
+        .turnOn, .turnOff, .powerState,
+    ]
+
+    private static let textInputFeatures: Set<FeatureName> = [
+        .textGet, .textClear, .textAppend, .textSet,
+    ]
+
+    private static let appFeatures: Set<FeatureName> = [
+        .appList, .launchApp,
+    ]
+
+    private static let accountFeatures: Set<FeatureName> = [
+        .accountList, .switchAccount,
+    ]
+
+    private static let touchFeatures: Set<FeatureName> = [
+        .swipe, .action, .click,
+    ]
+
+    private static let supportedFeatures =
+        hidFeatures
+        .union(Set(mediaControlMap.keys))
+        .union(volumeFeatures)
+        .union(powerFeatures)
+        .union(textInputFeatures)
+        .union(appFeatures)
+        .union(accountFeatures)
+        .union([.textFocusState])
+}
+
 /// Companion protocol implementation of RemoteControl.
 /// Stateless wrapper -- all state managed by the actor.
 public struct CompanionRemoteControl: RemoteControl, Sendable {
@@ -133,17 +391,24 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
 // MARK: - Apps
 
 /// Companion protocol implementation of AppsController.
-/// Stateless wrapper -- all state managed by the actor.
+/// Marks app features available after a successful app request.
 public struct CompanionApps: AppsController, Sendable {
     private let handler: CompanionProtocolHandler
+    private let stateStore: CompanionStateStore
 
     public init(protocol handler: CompanionProtocolHandler) {
+        self.init(protocol: handler, stateStore: CompanionStateStore())
+    }
+
+    internal init(protocol handler: CompanionProtocolHandler, stateStore: CompanionStateStore) {
         self.handler = handler
+        self.stateStore = stateStore
     }
 
     public func appList() async throws(ATVError) -> [App] {
         let response = try await handler.sendRequest("FetchLaunchableApplicationsEvent")
         guard case .dict(let pairs) = response["_c"] else { return [] }
+        stateStore.markAppsAvailable()
         return pairs.compactMap { key, value in
             guard let bundleID = key.stringValue, let name = value.stringValue else { return nil }
             return App(name: name, identifier: bundleID)
@@ -153,23 +418,31 @@ public struct CompanionApps: AppsController, Sendable {
     public func launchApp(bundleID: String) async throws(ATVError) {
         let content = OPACK.Value.dictionary([("_bundleID", .string(bundleID))])
         _ = try await handler.sendRequest("_launchApp", content: content)
+        stateStore.markAppsAvailable()
     }
 }
 
 // MARK: - User Accounts
 
 /// Companion protocol implementation of UserAccountsController.
-/// Stateless wrapper -- all state managed by the actor.
+/// Marks account features available after a successful account request.
 public struct CompanionUserAccounts: UserAccountsController, Sendable {
     private let handler: CompanionProtocolHandler
+    private let stateStore: CompanionStateStore
 
     public init(protocol handler: CompanionProtocolHandler) {
+        self.init(protocol: handler, stateStore: CompanionStateStore())
+    }
+
+    internal init(protocol handler: CompanionProtocolHandler, stateStore: CompanionStateStore) {
         self.handler = handler
+        self.stateStore = stateStore
     }
 
     public func accountList() async throws(ATVError) -> [UserAccount] {
         let response = try await handler.sendRequest("FetchUserAccountsEvent")
         guard case .dict(let pairs) = response["_c"] else { return [] }
+        stateStore.markUserAccountsAvailable()
         return pairs.compactMap { key, value in
             guard let id = key.stringValue, let name = value.stringValue else { return nil }
             return UserAccount(name: name, identifier: id)
@@ -179,37 +452,43 @@ public struct CompanionUserAccounts: UserAccountsController, Sendable {
     public func switchAccount(_ accountID: String) async throws(ATVError) {
         let content = OPACK.Value.dictionary([("SwitchAccountID", .string(accountID))])
         _ = try await handler.sendRequest("SwitchUserAccountEvent", content: content)
+        stateStore.markUserAccountsAvailable()
     }
 }
 
 // MARK: - Power
 
-/// Companion protocol implementation of PowerController.
+/// Companion protocol implementation of PowerController backed by observed
+/// Companion system-status state.
 public actor CompanionPower: PowerController {
     private let handler: CompanionProtocolHandler
-    private var _powerState: PowerState = .unknown
+    private let stateStore: CompanionStateStore
     public nonisolated let powerStateStream: AsyncStream<PowerState>
-    private nonisolated let continuation: AsyncStream<PowerState>.Continuation
 
     public init(protocol handler: CompanionProtocolHandler) {
-        self.handler = handler
-        let (stream, cont) = AsyncStream<PowerState>.makeStream()
-        self.powerStateStream = stream
-        self.continuation = cont
+        self.init(protocol: handler, stateStore: CompanionStateStore())
     }
 
-    public var powerState: PowerState { _powerState }
+    internal init(protocol handler: CompanionProtocolHandler, stateStore: CompanionStateStore) {
+        self.handler = handler
+        self.stateStore = stateStore
+        self.powerStateStream = stateStore.powerStateStream()
+    }
+
+    public var powerState: PowerState { stateStore.powerState }
 
     public func turnOn(awaitNewState: Bool) async throws(ATVError) {
         try await sendHIDCommand(.wake)
-        _powerState = .on
-        continuation.yield(.on)
+        if awaitNewState {
+            try await waitForPowerState(.on)
+        }
     }
 
     public func turnOff(awaitNewState: Bool) async throws(ATVError) {
         try await sendHIDCommand(.sleep)
-        _powerState = .off
-        continuation.yield(.off)
+        if awaitNewState {
+            try await waitForPowerState(.off)
+        }
     }
 
     private func sendHIDCommand(_ command: HIDCommand) async throws(ATVError) {
@@ -222,51 +501,63 @@ public actor CompanionPower: PowerController {
                 ]))
         }
     }
+
+    private func waitForPowerState(_ expected: PowerState, timeout: TimeInterval = 5) async throws(ATVError) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while stateStore.powerState != expected {
+            if Date() >= deadline {
+                throw ATVError.operationTimeout("Timeout waiting for Companion power state \(expected)")
+            }
+            try? await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
+        }
+    }
 }
 
 // MARK: - Audio
 
-/// Companion protocol implementation of AudioController.
+/// Companion protocol implementation of AudioController backed by observed
+/// Companion media-control and volume events.
 public actor CompanionAudio: AudioController {
     private let handler: CompanionProtocolHandler
-    private var _volume: Float = 0
-    private var _outputDevices: [OutputDevice] = []
+    private let stateStore: CompanionStateStore
     public nonisolated let volumeStream: AsyncStream<Float>
-    private nonisolated let volumeContinuation: AsyncStream<Float>.Continuation
     public nonisolated let outputDevicesStream: AsyncStream<[OutputDevice]>
-    private nonisolated let devicesContinuation: AsyncStream<[OutputDevice]>.Continuation
 
     public init(protocol handler: CompanionProtocolHandler) {
-        self.handler = handler
-        let (vs, vc) = AsyncStream<Float>.makeStream()
-        self.volumeStream = vs
-        self.volumeContinuation = vc
-        let (ds, dc) = AsyncStream<[OutputDevice]>.makeStream()
-        self.outputDevicesStream = ds
-        self.devicesContinuation = dc
+        self.init(protocol: handler, stateStore: CompanionStateStore())
     }
 
-    public var volume: Float { _volume }
+    internal init(protocol handler: CompanionProtocolHandler, stateStore: CompanionStateStore) {
+        self.handler = handler
+        self.stateStore = stateStore
+        self.volumeStream = stateStore.volumeStream()
+        self.outputDevicesStream = AsyncStream { $0.finish() }
+    }
 
-    public var outputDevices: [OutputDevice] { _outputDevices }
+    public var volume: Float { stateStore.volume }
+
+    public var outputDevices: [OutputDevice] { [] }
 
     public func setVolume(_ level: Float, device: OutputDevice?) async throws(ATVError) {
+        guard stateStore.hasVolumeControl else {
+            throw ATVError.notSupported("Companion volume control is not available")
+        }
         let clamped = max(0, min(level, 100))
+        let revision = stateStore.volumeRevision
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.setVolume.rawValue))),
             ("_vol", .double(Double(clamped / 100))),
         ])
         _ = try await handler.sendRequest("_mcc", content: content)
-        _volume = clamped
-        volumeContinuation.yield(clamped)
+        try await waitForVolumeUpdate(after: revision)
     }
 
     public func volumeUp() async throws(ATVError) {
-        try await setVolume(min(_volume + 5, 100), device: nil)
+        try await sendVolumeButton(.volumeUp)
     }
 
     public func volumeDown() async throws(ATVError) {
-        try await setVolume(max(_volume - 5, 0), device: nil)
+        try await sendVolumeButton(.volumeDown)
     }
 
     public func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
@@ -280,6 +571,32 @@ public actor CompanionAudio: AudioController {
     public func setOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         throw ATVError.notSupported("setOutputDevices not yet implemented for Companion")
     }
+
+    private func sendVolumeButton(_ command: HIDCommand) async throws(ATVError) {
+        guard stateStore.hasVolumeControl else {
+            throw ATVError.notSupported("Companion volume control is not available")
+        }
+        let revision = stateStore.volumeRevision
+        for state in [UInt64(1), UInt64(2)] {
+            _ = try await handler.sendRequest(
+                "_hidC",
+                content: OPACK.Value.dictionary([
+                    ("_hBtS", .uint(state)),
+                    ("_hidC", .uint(UInt64(command.rawValue))),
+                ]))
+        }
+        try await waitForVolumeUpdate(after: revision)
+    }
+
+    private func waitForVolumeUpdate(after revision: Int, timeout: TimeInterval = 5) async throws(ATVError) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while stateStore.volumeRevision <= revision {
+            if Date() >= deadline {
+                throw ATVError.operationTimeout("Timeout waiting for Companion volume update")
+            }
+            try? await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
+        }
+    }
 }
 
 // MARK: - Keyboard
@@ -291,20 +608,22 @@ public actor CompanionAudio: AudioController {
 /// Apple TV.
 public actor CompanionKeyboard: KeyboardController {
     private let handler: CompanionProtocolHandler
-    private var _focusState: KeyboardFocusState = .unknown
+    private let stateStore: CompanionStateStore
     private var sessionUUID: Data?
     private var currentText: String = ""
     public nonisolated let focusStateStream: AsyncStream<KeyboardFocusState>
-    private nonisolated let continuation: AsyncStream<KeyboardFocusState>.Continuation
 
     public init(protocol handler: CompanionProtocolHandler) {
-        self.handler = handler
-        let (stream, cont) = AsyncStream<KeyboardFocusState>.makeStream()
-        self.focusStateStream = stream
-        self.continuation = cont
+        self.init(protocol: handler, stateStore: CompanionStateStore())
     }
 
-    public var textFocusState: KeyboardFocusState { _focusState }
+    internal init(protocol handler: CompanionProtocolHandler, stateStore: CompanionStateStore) {
+        self.handler = handler
+        self.stateStore = stateStore
+        self.focusStateStream = stateStore.focusStateStream()
+    }
+
+    public var textFocusState: KeyboardFocusState { stateStore.textFocusState }
 
     public func textGet() async throws(ATVError) -> String? {
         try await refreshSession()?.currentText
@@ -394,9 +713,7 @@ public actor CompanionKeyboard: KeyboardController {
     }
 
     private func updateFocusState(_ state: KeyboardFocusState) {
-        guard _focusState != state else { return }
-        _focusState = state
-        continuation.yield(state)
+        stateStore.setTextFocusState(state)
     }
 }
 
@@ -485,47 +802,23 @@ public struct CompanionTouch: TouchController, Sendable {
 
 /// Companion protocol implementation of FeatureProvider.
 ///
-/// Touch features are reported unavailable when Companion setup could not
-/// initialize the optional touch interface.
-/// Immutable -- all properties are `let`. Naturally Sendable.
-public struct CompanionFeatures: FeatureProvider, Sendable {
-    private let isConnected: Bool
-    private let touchAvailable: Bool
-
-    /// Features supported by the Companion protocol.
-    private static let supportedFeatures: Set<FeatureName> = [
-        .up, .down, .left, .right,
-        .play, .playPause, .pause, .stop,
-        .next, .previous, .select, .menu,
-        .volumeUp, .volumeDown, .home, .homeHold,
-        .topMenu, .suspend, .wakeUp,
-        .skipForward, .skipBackward,
-        .channelUp, .channelDown,
-        .screensaver, .guide, .controlCenter,
-        .setVolume,
-        .appList, .launchApp,
-        .accountList, .switchAccount,
-        .turnOn, .turnOff, .powerState,
-        .textGet, .textClear, .textAppend, .textSet, .textFocusState,
-    ]
-
-    private static let touchFeatures: Set<FeatureName> = [
-        .swipe, .action, .click,
-    ]
+/// Feature availability is backed by observed Companion state. Navigation HID
+/// commands are available after connect, while media controls, power state,
+/// volume, keyboard focus, apps, accounts, and touch are gated by setup or
+/// events that prove each surface is usable.
+public final class CompanionFeatures: @unchecked Sendable, FeatureProvider {
+    private let stateStore: CompanionStateStore
 
     public init(isConnected: Bool = true, touchAvailable: Bool = true) {
-        self.isConnected = isConnected
-        self.touchAvailable = touchAvailable
+        self.stateStore = CompanionStateStore(isConnected: isConnected, touchAvailable: touchAvailable)
+    }
+
+    internal init(stateStore: CompanionStateStore) {
+        self.stateStore = stateStore
     }
 
     public func featureInfo(_ feature: FeatureName) -> FeatureInfo {
-        if Self.touchFeatures.contains(feature) {
-            return FeatureInfo(state: isConnected && touchAvailable ? .available : .unavailable)
-        }
-        if Self.supportedFeatures.contains(feature) {
-            return FeatureInfo(state: isConnected ? .available : .unavailable)
-        }
-        return FeatureInfo(state: .unsupported)
+        stateStore.featureInfo(feature)
     }
 
     public func allFeatures(includeUnsupported: Bool) -> [FeatureName: FeatureInfo] {

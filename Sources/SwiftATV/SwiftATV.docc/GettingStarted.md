@@ -239,8 +239,11 @@ Task {
 ## Check feature availability
 
 Not every protocol implements every feature. Use ``FeatureProvider`` to check
-what's available on a connected device before calling it. Companion touch
-gestures can be unavailable even when the rest of Companion setup succeeds:
+what's available on a connected device before calling it. Availability can
+change after protocol events or a successful request. Companion media controls,
+volume, power, apps, accounts, and keyboard focus start unavailable until the
+Apple TV reports or proves that state; Companion touch gestures can also be
+unavailable even when the rest of Companion setup succeeds:
 
 ```swift
 if atv.features.inState([.available], features: .play, .pause, .next) {

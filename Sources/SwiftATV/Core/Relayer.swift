@@ -37,6 +37,16 @@ public final class Relayer<Interface>: @unchecked Sendable {
         registrations.append(Registration(protocol: `protocol`, implementation: implementation))
     }
 
+    /// Remove all implementations for a protocol.
+    internal func unregister(for protocol: ATVProtocol) {
+        lock.lock()
+        defer { lock.unlock() }
+        registrations.removeAll { $0.protocol == `protocol` }
+        if takeoverProtocol == `protocol` {
+            takeoverProtocol = nil
+        }
+    }
+
     /// Get the highest-priority registered implementation.
     /// If a takeover protocol is active, that implementation is returned instead.
     public var main: Interface? {

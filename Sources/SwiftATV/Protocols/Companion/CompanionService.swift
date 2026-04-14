@@ -5,7 +5,8 @@ import Foundation
 /// Provides the entry point for creating a Companion connection,
 /// performing pair-verify, and initializing protocol interfaces. Touch setup
 /// is best-effort so devices that do not answer `_touchStart` can still expose
-/// remote, app, power, audio, and keyboard functionality.
+/// remote, app, power, audio, and keyboard functionality. Subscribed Companion
+/// events feed a shared state store used by controllers and feature reporting.
 ///
 /// Thread safety: Mutable interface references protected by `NSLock`.
 public final class CompanionService: @unchecked Sendable, CompanionConnectionDelegate {
@@ -20,7 +21,9 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     private let settings: ATVSettings
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private let touchStartTimeout: TimeInterval
+    private let stateStore = CompanionStateStore()
     private var credentials: HAPCredentials?
+    private var eventTask: Task<Void, Never>?
 
     private var _remoteControl: CompanionRemoteControl?
     private var _apps: CompanionApps?
@@ -133,23 +136,32 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             deviceID: settings.clientIdentity.deviceID
         )
         let touchAvailable = try await startTouchIfAvailable()
+        stateStore.setTouchAvailable(touchAvailable)
         try await protocolHandler.startSession()
+        startEventLoop()
         try await protocolHandler.subscribeEvents(["_iMC"])
+        for optionalEvent in ["SystemStatus", "TVSystemStatus", "_tiStarted", "_tiStopped"] {
+            try? await protocolHandler.subscribeEvents([optionalEvent])
+        }
+        await initializeState()
 
         lock.withLock {
             _remoteControl = CompanionRemoteControl(protocol: protocolHandler)
-            _apps = CompanionApps(protocol: protocolHandler)
-            _userAccounts = CompanionUserAccounts(protocol: protocolHandler)
-            _power = CompanionPower(protocol: protocolHandler)
-            _audio = CompanionAudio(protocol: protocolHandler)
-            _keyboard = CompanionKeyboard(protocol: protocolHandler)
+            _apps = CompanionApps(protocol: protocolHandler, stateStore: stateStore)
+            _userAccounts = CompanionUserAccounts(protocol: protocolHandler, stateStore: stateStore)
+            _power = CompanionPower(protocol: protocolHandler, stateStore: stateStore)
+            _audio = CompanionAudio(protocol: protocolHandler, stateStore: stateStore)
+            _keyboard = CompanionKeyboard(protocol: protocolHandler, stateStore: stateStore)
             _touch = touchAvailable ? CompanionTouch(protocol: protocolHandler) : nil
-            _features = CompanionFeatures(isConnected: true, touchAvailable: touchAvailable)
+            _features = CompanionFeatures(stateStore: stateStore)
         }
     }
 
     /// Close the Companion protocol connection.
     public func close() async {
+        eventTask?.cancel()
+        eventTask = nil
+        stateStore.setConnected(false)
         let keyboard = lock.withLock { _keyboard }
         try? await keyboard?.stopTextInput()
         await protocolHandler.stop()
@@ -179,6 +191,113 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             return message.contains("_touchStart")
         }
         return false
+    }
+
+    private func startEventLoop() {
+        eventTask?.cancel()
+        eventTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = await protocolHandler.eventStream
+            for await (identifier, message) in stream {
+                if Task.isCancelled { break }
+                await handleEvent(identifier: identifier, message: message)
+            }
+        }
+    }
+
+    private func initializeState() async {
+        await refreshPowerState()
+    }
+
+    private func handleEvent(identifier: String, message: OPACK.Value) async {
+        let content = message["_c"] ?? message
+        switch identifier {
+        case "_iMC":
+            await handleMediaControlEvent(content)
+        case "SystemStatus", "TVSystemStatus":
+            handleSystemStatusEvent(content)
+        case "_tiStarted":
+            stateStore.setTextFocusState(.focused)
+        case "_tiStopped":
+            stateStore.setTextFocusState(.unfocused)
+        default:
+            break
+        }
+    }
+
+    private func handleMediaControlEvent(_ content: OPACK.Value) async {
+        guard let rawFlags = content["_mcF"]?.intValue else {
+            return
+        }
+        let flags = CompanionMediaControlFlags(rawValue: rawFlags)
+        stateStore.setMediaControlFlags(flags)
+        if flags.contains(.volume) {
+            await refreshVolume()
+        } else {
+            stateStore.clearVolume()
+        }
+    }
+
+    private func handleSystemStatusEvent(_ content: OPACK.Value) {
+        guard
+            let rawState = content["state"]?.intValue,
+            let status = CompanionSystemStatus(rawValue: Int(rawState))
+        else {
+            return
+        }
+        stateStore.setPowerState(Self.powerState(from: status))
+    }
+
+    private func refreshPowerState() async {
+        do {
+            let response = try await protocolHandler.sendRequest("FetchAttentionState")
+            let content = response["_c"] ?? response
+            handleSystemStatusEvent(content)
+        } catch {
+            // Power remains unavailable until a status event arrives.
+        }
+    }
+
+    private func refreshVolume() async {
+        do {
+            let content = OPACK.Value.dictionary([
+                ("_mcc", .uint(UInt64(MediaControlCommand.getVolume.rawValue)))
+            ])
+            let response = try await protocolHandler.sendRequest("_mcc", content: content)
+            guard let normalized = Self.numericValue(response["_c"]?["_vol"]) else {
+                return
+            }
+            stateStore.setVolume(Float(normalized * 100))
+        } catch {
+            stateStore.clearVolume()
+        }
+    }
+
+    private static func powerState(from status: CompanionSystemStatus) -> PowerState {
+        switch status {
+        case .asleep:
+            return .off
+        case .screensaver, .awake, .idle:
+            return .on
+        }
+    }
+
+    private static func numericValue(_ value: OPACK.Value?) -> Double? {
+        guard let value else {
+            return nil
+        }
+        switch value {
+        case .double(let double):
+            return double
+        case .float(let float):
+            return Double(float)
+        case .int(let int):
+            return Double(int)
+        case .uint(let uint):
+            return Double(uint)
+        default:
+            return nil
+        }
     }
 
     private static func utf8String(from data: Data) -> String? {

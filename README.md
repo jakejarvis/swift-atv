@@ -9,15 +9,16 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Credential Persistence** -- Pairing handlers expose HAP credentials directly, and connection setup can use credentials from settings or enriched services
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
 - **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to direct or tunneled MRP push updates
-- **Connection Events** -- Observe connection-lost and explicit-close events from the unified device facade
+- **Connection Events** -- Observe primary connection loss and explicit-close events from the unified device facade
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
 - **Power Control** -- Turn devices on/off and monitor power state
-- **Audio Control** -- Adjust volume and manage output devices over direct MRP
+- **Audio Control** -- Adjust volume when protocol state confirms volume control, and manage output devices over direct MRP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures when Companion touch setup is available
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
 - **Local Client Identity** -- Configure the controller/app identity sent during pairing and protocol setup with `ATVSettings.clientIdentity`
+- **State-backed Features** -- Feature availability reflects protocol state and diagnostics instead of assuming every connected interface is ready
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
 - **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion
 
@@ -206,9 +207,15 @@ contains `ConnectionAttemptError` entries for every attempted protocol.
 
 ### Check Feature Availability
 
+Not every protocol implements every feature. Availability can change after
+protocol events or a successful request. Companion media controls, volume,
+power, apps, accounts, and keyboard focus start unavailable until the Apple TV
+reports or proves that state; Companion touch can also be unavailable even when
+the rest of Companion setup succeeds.
+
 ```swift
-if atv.features.isAvailable(.appList) {
-    let apps = try await atv.apps.appList()
+if atv.features.isAvailable(.textSet) {
+    try await atv.keyboard.textSet("Movie title")
 }
 
 // Check multiple features at once
@@ -245,7 +252,10 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 
 **Relayer priority order**: MRP > AirPlay > Companion.
 Connection setup returns after the first usable protocol connects: direct MRP
-first, AirPlay-tunneled MRP next, then Companion.
+first, AirPlay-tunneled MRP next, then Companion. If a non-primary protocol
+later closes or fails optional setup, the facade unregisters that protocol
+without emitting a terminal device-close event. A primary or last-active
+protocol close still emits `connectionLost`.
 
 ### Protocols
 
@@ -316,7 +326,7 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 292 XCTest cases covering pyatv ports and SwiftATV-specific
+The test suite runs 297 XCTest cases covering pyatv ports and SwiftATV-specific
 integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
@@ -326,11 +336,12 @@ device model lookups, settings Codable round-trips, relayer priority and
 takeover, Companion feature availability, HAP credential serialization,
 MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
+MRP optional setup diagnostics and feature gating,
 Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
 resolution, scan diagnostics, identity merging, deterministic first-usable
 connect, aggregate connection errors, credential selection including AirPlay
 tunnel ordering, Companion touch-start timeout resilience, facade device
-events, timeout conversion, strict TLV8 auth decoding,
+events including secondary-protocol close isolation, timeout conversion, strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, consumer-style module-qualified
 imports, pairing code direction, and `MessageDispatcher` actor behavior.
 

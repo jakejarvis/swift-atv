@@ -29,6 +29,18 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 - Installation snippets no longer hard-code the current release number, so
   release bumps only update `ATVClient.version` and changelog metadata.
+- `FacadeAppleTV` now tracks protocol lifecycle per protocol. A failed or
+  closed optional secondary protocol no longer tears down an already usable
+  primary connection.
+- Companion feature availability is now backed by observed Companion state.
+  Media controls, volume, power, apps, accounts, keyboard focus, and touch are
+  unavailable until setup, events, or successful requests prove them usable.
+- Companion power and audio no longer mutate local state optimistically.
+  Power waits for real status when requested, and volume up/down use HID volume
+  buttons plus volume events instead of synthetic absolute volume changes.
+- MRP feature availability is now more conservative for metadata, push, audio,
+  output devices, and power state, and optional startup failures are exposed as
+  feature diagnostics instead of being silently swallowed.
 - Documentation now describes AirPlay support as the implemented AirPlay 2 MRP
   tunnel instead of as a broader AirPlay media surface.
 - `ATVSettings.info` was replaced by `ATVSettings.clientIdentity`, which now

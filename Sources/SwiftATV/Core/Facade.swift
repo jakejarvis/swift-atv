@@ -4,14 +4,15 @@ import Foundation
 /// behind the `AppleTVDevice` interface.
 ///
 /// Uses the `Relayer` pattern to route method calls to the highest-priority
-/// protocol that supports each feature.
+/// protocol that supports each feature. Tracks protocol lifecycle separately so
+/// secondary protocol teardown does not close a usable primary connection.
 ///
 /// Thread safety: Mutable service/event state protected by `NSLock`.
 /// Relayers have their own internal locking.
 public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private typealias TerminalEventDrain = (
         CompanionService?,
-        MRPService?,
+        [MRPService],
         AsyncStream<DeviceEvent>.Continuation?
     )
 
@@ -19,7 +20,9 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     private let _settings: ATVSettings
     private let lock = NSLock()
     private var companionService: CompanionService?
-    private var mrpService: MRPService?
+    private var mrpServices: [ATVProtocol: MRPService] = [:]
+    private var activeProtocols: Set<ATVProtocol> = []
+    private var primaryProtocol: ATVProtocol?
 
     // Relayers for each interface (internally thread-safe)
     private let remoteControlRelayer = Relayer<RemoteControl>()
@@ -139,18 +142,20 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
             eventStreamFinished = true
             let companion = companionService
-            let mrp = mrpService
+            let mrps = Array(mrpServices.values)
             companionService = nil
-            mrpService = nil
+            mrpServices.removeAll()
+            activeProtocols.removeAll()
+            primaryProtocol = nil
 
             if eventContinuation == nil {
                 pendingEvents.append(event)
             }
 
-            return (companion, mrp, eventContinuation)
+            return (companion, mrps, eventContinuation)
         }
 
-        guard let (companion, mrp, continuation) = drained else {
+        guard let (companion, mrps, continuation) = drained else {
             return
         }
 
@@ -159,11 +164,26 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             continuation.finish()
         }
 
+        unregisterAllProtocols()
         await companion?.close()
-        await mrp?.close()
+        for mrp in mrps {
+            await mrp.close()
+        }
     }
 
     private func protocolConnectionDidClose(_ error: Error?, protocol: ATVProtocol) {
+        let shouldFinish = lock.withLock {
+            guard activeProtocols.contains(`protocol`), !eventStreamFinished else {
+                return false
+            }
+            return primaryProtocol == `protocol` || activeProtocols.count == 1
+        }
+
+        guard shouldFinish else {
+            unregisterSecondaryProtocol(`protocol`)
+            return
+        }
+
         let event = DeviceEvent.connectionLost(
             ATVError.connectionLost(
                 error.map { "\(`protocol`) connection closed: \(String(describing: $0))" }
@@ -177,6 +197,59 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     internal func _testProtocolConnectionDidClose(error: Error?, protocol: ATVProtocol) {
         protocolConnectionDidClose(error, protocol: `protocol`)
+    }
+
+    internal func _testSetActiveProtocols(_ protocols: Set<ATVProtocol>, primary: ATVProtocol?) {
+        lock.withLock {
+            activeProtocols = protocols
+            primaryProtocol = primary
+        }
+    }
+
+    internal var _testActiveProtocols: Set<ATVProtocol> {
+        lock.withLock { activeProtocols }
+    }
+
+    private func unregisterSecondaryProtocol(_ protocol: ATVProtocol) {
+        let service = lock.withLock {
+            guard activeProtocols.remove(`protocol`) != nil else {
+                return Optional<MRPService>.none
+            }
+            if primaryProtocol == `protocol` {
+                primaryProtocol = activeProtocols.first
+            }
+            switch `protocol` {
+            case .companion:
+                companionService = nil
+                return nil
+            case .mrp, .airPlay:
+                return mrpServices.removeValue(forKey: `protocol`)
+            }
+        }
+
+        unregisterProtocol(`protocol`)
+        Task {
+            await service?.close()
+        }
+    }
+
+    private func unregisterProtocol(_ protocol: ATVProtocol) {
+        remoteControlRelayer.unregister(for: `protocol`)
+        metadataRelayer.unregister(for: `protocol`)
+        pushUpdaterRelayer.unregister(for: `protocol`)
+        appsRelayer.unregister(for: `protocol`)
+        userAccountsRelayer.unregister(for: `protocol`)
+        powerRelayer.unregister(for: `protocol`)
+        audioRelayer.unregister(for: `protocol`)
+        keyboardRelayer.unregister(for: `protocol`)
+        touchRelayer.unregister(for: `protocol`)
+        featureRelayer.unregister(for: `protocol`)
+    }
+
+    private func unregisterAllProtocols() {
+        for `protocol` in ATVProtocol.allCases {
+            unregisterProtocol(`protocol`)
+        }
     }
 
     // MARK: - Setup
@@ -249,6 +322,10 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         }
         lock.withLock {
             self.companionService = companion
+            self.activeProtocols.insert(.companion)
+            if self.primaryProtocol == nil {
+                self.primaryProtocol = .companion
+            }
         }
 
         // Register Companion implementations with relayers
@@ -310,7 +387,7 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             throw error
         }
 
-        registerMRP(mrp, for: .mrp)
+        registerMRP(mrp, for: .airPlay)
     }
 
     private func setupMRP(_ service: ServiceInfo, credentials: HAPCredentials?) async throws(ATVError) {
@@ -334,7 +411,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     private func registerMRP(_ mrp: MRPService, for registrationProtocol: ATVProtocol) {
         lock.withLock {
-            self.mrpService = mrp
+            self.mrpServices[registrationProtocol] = mrp
+            self.activeProtocols.insert(registrationProtocol)
+            if self.primaryProtocol == nil {
+                self.primaryProtocol = registrationProtocol
+            }
         }
 
         if let rc = mrp.remoteControl {

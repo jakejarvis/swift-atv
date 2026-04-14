@@ -363,11 +363,33 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(received.values, [7, 10])
     }
 
-    func testMRPFeaturesAdvertiseAudioControls() {
-        let features = MRPFeatures(stateStore: MRPStateStore())
+    func testMRPFeaturesGateAudioControlsUntilVolumeStateArrives() {
+        let stateStore = MRPStateStore()
+        let features = MRPFeatures(stateStore: stateStore)
+
+        XCTAssertEqual(features.featureInfo(.volume).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.setVolume).state, .unavailable)
+
+        var message = ProtocolMessageMessage()
+        message.type = .volumeDidChangeMessage
+        var volume = VolumeDidChangeMessage()
+        volume.volume = 0.42
+        message.volumeDidChangeMessage = volume
+        stateStore.update(message: message)
 
         XCTAssertEqual(features.featureInfo(.volume).state, .available)
         XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
+    }
+
+    func testMRPFeaturesExposeOptionalSetupDiagnostics() {
+        let stateStore = MRPStateStore()
+        let features = MRPFeatures(stateStore: stateStore)
+
+        stateStore.recordSetupFailure("client updates failed", affectedFeatures: [.pushUpdates])
+
+        let info = features.featureInfo(.pushUpdates)
+        XCTAssertEqual(info.state, .unavailable)
+        XCTAssertEqual(info.options["diagnostic"], "client updates failed")
     }
 
     private static func setStateMessage(

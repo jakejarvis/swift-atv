@@ -7,7 +7,12 @@ final class MRPStateStore: @unchecked Sendable {
     private var _powerState: PowerState = .unknown
     private var _currentApp: App?
     private var _artworkID = ""
+    private var _hasVolumeState = false
+    private var _hasOutputDevicesState = false
+    private var _hasPlayingSnapshot = false
+    private var _clientUpdatesConfigured = false
     private var featureOverrides: [FeatureName: FeatureInfo] = [:]
+    private var setupDiagnostics: [FeatureName: FeatureInfo] = [:]
     private var volumeContinuations: [UUID: AsyncStream<Float>.Continuation] = [:]
     private var outputContinuations: [UUID: AsyncStream<[OutputDevice]>.Continuation] = [:]
     private var powerContinuations: [UUID: AsyncStream<PowerState>.Continuation] = [:]
@@ -17,6 +22,10 @@ final class MRPStateStore: @unchecked Sendable {
     var powerState: PowerState { lock.withLock { _powerState } }
     var currentApp: App? { lock.withLock { _currentApp } }
     var artworkID: String { lock.withLock { _artworkID } }
+    var hasVolumeState: Bool { lock.withLock { _hasVolumeState } }
+    var hasOutputDevicesState: Bool { lock.withLock { _hasOutputDevicesState } }
+    var hasPlayingSnapshot: Bool { lock.withLock { _hasPlayingSnapshot } }
+    var clientUpdatesConfigured: Bool { lock.withLock { _clientUpdatesConfigured } }
 
     func update(message: ProtocolMessageMessage) {
         switch message.type {
@@ -29,22 +38,45 @@ final class MRPStateStore: @unchecked Sendable {
         case .deviceInfoMessage, .deviceInfoUpdateMessage:
             setPower(.on)
         case .setStateMessage:
+            lock.withLock { _hasPlayingSnapshot = true }
             updateCommandFeatures(message.setStateMessage.supportedCommands)
         case .setDefaultSupportedCommandsMessage:
             updateCommandFeatures(message.setDefaultSupportedCommandsMessage.supportedCommands)
+        case .volumeControlAvailabilityMessage:
+            lock.withLock {
+                _hasVolumeState = message.volumeControlAvailabilityMessage.volumeControlAvailable
+            }
+        case .volumeControlCapabilitiesDidChangeMessage:
+            lock.withLock { _hasVolumeState = true }
         default:
             return
         }
     }
 
     func featureInfo(_ feature: FeatureName) -> FeatureInfo? {
-        lock.withLock { featureOverrides[feature] }
+        lock.withLock { setupDiagnostics[feature] ?? featureOverrides[feature] }
     }
 
     func updateMetadata(app: App?, artworkID: String) {
         lock.withLock {
             _currentApp = app
             _artworkID = artworkID
+            if app != nil || !artworkID.isEmpty {
+                _hasPlayingSnapshot = true
+            }
+        }
+    }
+
+    func markClientUpdatesConfigured() {
+        lock.withLock { _clientUpdatesConfigured = true }
+    }
+
+    func recordSetupFailure(_ message: String, affectedFeatures: Set<FeatureName>) {
+        let info = FeatureInfo(state: .unavailable, options: ["diagnostic": message])
+        lock.withLock {
+            for feature in affectedFeatures {
+                setupDiagnostics[feature] = info
+            }
         }
     }
 
@@ -94,6 +126,7 @@ final class MRPStateStore: @unchecked Sendable {
         let percent = volume * 100
         let continuations = lock.withLock {
             _volume = percent
+            _hasVolumeState = true
             return Array(volumeContinuations.values)
         }
         for continuation in continuations {
@@ -114,6 +147,7 @@ final class MRPStateStore: @unchecked Sendable {
         }
         let continuations = lock.withLock {
             _outputDevices = devices
+            _hasOutputDevicesState = true
             return Array(outputContinuations.values)
         }
         for continuation in continuations {
@@ -273,6 +307,12 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var heartbeatTask: Task<Void, Never>?
 
+    private static let clientUpdateDependentFeatures: Set<FeatureName> = [
+        .pushUpdates,
+        .volume, .setVolume, .volumeUp, .volumeDown,
+        .outputDevices, .addOutputDevices, .removeOutputDevices, .setOutputDevices,
+    ]
+
     init(
         connection: any MRPTransport,
         playerState: MRPPlayerState,
@@ -305,14 +345,27 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         }
 
         try await connection.send(MRPMessages.setConnectionState())
-        _ = try? await connection.sendAndReceive(
-            MRPMessages.clientUpdatesConfig(),
-            responseType: .clientUpdatesConfigMessage
-        )
-        _ = try? await connection.sendAndReceive(
-            MRPMessages.getKeyboardSession(),
-            responseType: .getKeyboardSessionMessage
-        )
+        do {
+            _ = try await connection.sendAndReceive(
+                MRPMessages.clientUpdatesConfig(),
+                responseType: .clientUpdatesConfigMessage
+            )
+            stateStore.markClientUpdatesConfigured()
+        } catch {
+            stateStore.recordSetupFailure(
+                "MRP client update subscription failed: \(String(describing: error))",
+                affectedFeatures: Self.clientUpdateDependentFeatures
+            )
+        }
+        do {
+            _ = try await connection.sendAndReceive(
+                MRPMessages.getKeyboardSession(),
+                responseType: .getKeyboardSessionMessage
+            )
+        } catch {
+            // MRP keyboard setup is optional and SwiftATV does not expose an
+            // MRP keyboard interface yet, so no public features are downgraded.
+        }
         if heartbeatMode == .genericMessage {
             startHeartbeat()
         }

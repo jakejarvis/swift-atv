@@ -254,7 +254,8 @@ public final class MRPAudio: @unchecked Sendable, AudioController {
     }
 }
 
-/// Feature provider for direct MRP interfaces and supported-command updates.
+/// Feature provider for direct MRP interfaces, supported-command updates, and
+/// optional setup diagnostics.
 public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
     private let stateStore: MRPStateStore
 
@@ -266,11 +267,23 @@ public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
         if let info = stateStore.featureInfo(feature) {
             return info
         }
-        if Self.alwaysAvailable.contains(feature) {
+        if Self.remoteHIDFeatures.contains(feature) {
             return FeatureInfo(state: .available)
         }
+        if Self.powerFeatures.contains(feature) {
+            return FeatureInfo(state: stateStore.powerState == .unknown ? .unavailable : .available)
+        }
+        if feature == .pushUpdates {
+            return FeatureInfo(state: stateStore.clientUpdatesConfigured ? .available : .unavailable)
+        }
+        if Self.audioFeatures.contains(feature) {
+            return FeatureInfo(state: stateStore.hasVolumeState ? .available : .unavailable)
+        }
+        if Self.outputDeviceFeatures.contains(feature) {
+            return FeatureInfo(state: stateStore.hasOutputDevicesState ? .available : .unavailable)
+        }
         if Self.metadata.contains(feature) {
-            return FeatureInfo(state: .available)
+            return FeatureInfo(state: stateStore.hasPlayingSnapshot ? .available : .unavailable)
         }
         return FeatureInfo(state: .unsupported)
     }
@@ -290,11 +303,21 @@ public final class MRPFeatures: @unchecked Sendable, FeatureProvider {
         features.allSatisfy { states.contains(featureInfo($0).state) }
     }
 
-    private static let alwaysAvailable: Set<FeatureName> = [
+    private static let remoteHIDFeatures: Set<FeatureName> = [
         .up, .down, .left, .right, .select, .menu, .home, .homeHold, .topMenu,
-        .volumeUp, .volumeDown, .suspend, .wakeUp, .powerState, .turnOn, .turnOff,
-        .pushUpdates, .volume, .setVolume, .outputDevices, .addOutputDevices,
-        .removeOutputDevices, .setOutputDevices,
+        .suspend, .wakeUp,
+    ]
+
+    private static let powerFeatures: Set<FeatureName> = [
+        .powerState, .turnOn, .turnOff,
+    ]
+
+    private static let audioFeatures: Set<FeatureName> = [
+        .volume, .setVolume, .volumeUp, .volumeDown,
+    ]
+
+    private static let outputDeviceFeatures: Set<FeatureName> = [
+        .outputDevices, .addOutputDevices, .removeOutputDevices, .setOutputDevices,
     ]
 
     private static let metadata: Set<FeatureName> = [

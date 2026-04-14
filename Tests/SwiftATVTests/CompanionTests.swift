@@ -88,35 +88,35 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.home).state, .available)
 
         // Playback
-        XCTAssertEqual(features.featureInfo(.play).state, .available)
+        XCTAssertEqual(features.featureInfo(.play).state, .unavailable)
         XCTAssertEqual(features.featureInfo(.playPause).state, .available)
-        XCTAssertEqual(features.featureInfo(.pause).state, .available)
-        XCTAssertEqual(features.featureInfo(.stop).state, .available)
-        XCTAssertEqual(features.featureInfo(.next).state, .available)
-        XCTAssertEqual(features.featureInfo(.previous).state, .available)
+        XCTAssertEqual(features.featureInfo(.pause).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.stop).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.next).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.previous).state, .unavailable)
 
         // Power
-        XCTAssertEqual(features.featureInfo(.turnOn).state, .available)
-        XCTAssertEqual(features.featureInfo(.turnOff).state, .available)
-        XCTAssertEqual(features.featureInfo(.powerState).state, .available)
+        XCTAssertEqual(features.featureInfo(.turnOn).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.turnOff).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.powerState).state, .unavailable)
 
         // Audio
-        XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
+        XCTAssertEqual(features.featureInfo(.setVolume).state, .unavailable)
 
         // Apps
-        XCTAssertEqual(features.featureInfo(.appList).state, .available)
-        XCTAssertEqual(features.featureInfo(.launchApp).state, .available)
+        XCTAssertEqual(features.featureInfo(.appList).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.launchApp).state, .unavailable)
 
         // Accounts
-        XCTAssertEqual(features.featureInfo(.accountList).state, .available)
-        XCTAssertEqual(features.featureInfo(.switchAccount).state, .available)
+        XCTAssertEqual(features.featureInfo(.accountList).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.switchAccount).state, .unavailable)
 
         // Keyboard
-        XCTAssertEqual(features.featureInfo(.textGet).state, .available)
-        XCTAssertEqual(features.featureInfo(.textClear).state, .available)
-        XCTAssertEqual(features.featureInfo(.textAppend).state, .available)
-        XCTAssertEqual(features.featureInfo(.textSet).state, .available)
-        XCTAssertEqual(features.featureInfo(.textFocusState).state, .available)
+        XCTAssertEqual(features.featureInfo(.textGet).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.textClear).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.textAppend).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.textSet).state, .unavailable)
+        XCTAssertEqual(features.featureInfo(.textFocusState).state, .unavailable)
 
         // Touch
         XCTAssertEqual(features.featureInfo(.swipe).state, .available)
@@ -142,6 +142,35 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(features.featureInfo(.streamFile).state, .unsupported)
     }
 
+    func testCompanionFeaturesReflectObservedState() {
+        let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
+        let features = CompanionFeatures(stateStore: stateStore)
+
+        stateStore.setMediaControlFlags([
+            .play, .pause, .nextTrack, .previousTrack, .skipForward, .skipBackward, .volume,
+        ])
+        stateStore.setVolume(45)
+        stateStore.setPowerState(.on)
+        stateStore.markAppsAvailable()
+        stateStore.markUserAccountsAvailable()
+        stateStore.setTextFocusState(.focused)
+
+        XCTAssertEqual(features.featureInfo(.play).state, .available)
+        XCTAssertEqual(features.featureInfo(.pause).state, .available)
+        XCTAssertEqual(features.featureInfo(.next).state, .available)
+        XCTAssertEqual(features.featureInfo(.previous).state, .available)
+        XCTAssertEqual(features.featureInfo(.skipForward).state, .available)
+        XCTAssertEqual(features.featureInfo(.skipBackward).state, .available)
+        XCTAssertEqual(features.featureInfo(.setVolume).state, .available)
+        XCTAssertEqual(features.featureInfo(.volume).state, .available)
+        XCTAssertEqual(features.featureInfo(.powerState).state, .available)
+        XCTAssertEqual(features.featureInfo(.turnOn).state, .available)
+        XCTAssertEqual(features.featureInfo(.appList).state, .available)
+        XCTAssertEqual(features.featureInfo(.accountList).state, .available)
+        XCTAssertEqual(features.featureInfo(.textFocusState).state, .available)
+        XCTAssertEqual(features.featureInfo(.textGet).state, .available)
+    }
+
     func testCompanionFeaturesDisconnected() {
         let features = CompanionFeatures(isConnected: false)
 
@@ -155,7 +184,11 @@ final class CompanionTests: XCTestCase {
     }
 
     func testCompanionFeaturesIsAvailable() {
-        let features = CompanionFeatures(isConnected: true)
+        let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
+        let features = CompanionFeatures(stateStore: stateStore)
+
+        XCTAssertFalse(features.isAvailable(.play))
+        stateStore.setMediaControlFlags([.play])
         XCTAssertTrue(features.isAvailable(.play))
         XCTAssertTrue(features.isAvailable(.home))
         XCTAssertFalse(features.isAvailable(.title))

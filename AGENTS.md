@@ -24,8 +24,10 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 ### Key Design Patterns
 
 - **Facade**: `FacadeAppleTV` in `Core/Facade.swift` unifies all protocols behind `AppleTVDevice` and surfaces connection lifecycle events
+- **Per-protocol lifecycle**: The facade tracks active and primary protocols separately. Secondary protocol setup/close failures unregister only that protocol; primary or last-active closes emit terminal device events.
 - **Relayer**: `Core/Relayer.swift` routes method calls to the highest-priority protocol (MRP > AirPlay > Companion)
 - **Connect setup priority**: `ATVClient.connect` attempts implemented control protocols deterministically (direct MRP > AirPlay-tunneled MRP > Companion), returns after the first usable protocol connects, and aggregates per-protocol errors if none connect. Explicit `.mrp` stays strict; explicit `.airPlay` opens the tunnel.
+- **State-backed features**: Companion and MRP feature providers report unavailable until setup, protocol events, or successful requests prove optional/stateful surfaces are usable. Optional setup failures are exposed with feature diagnostics when a public feature is affected.
 - **Diagnostic discovery**: `ATVClient.scanWithDiagnostics` preserves discovered devices while exposing non-fatal Bonjour browser/resolver failures and empty TXT records
 - **Actor-based concurrency**: `MessageDispatcher` uses Swift actors for thread-safe pub-sub messaging
 - **Async/await throughout**: All I/O and protocol communication is async
@@ -48,8 +50,8 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
     - `SRP.swift` -- SRP-6a client matching pyatv's srptools conventions
     - `HAPPairing.swift` -- Stepwise `HAPPairSetupHandler` + `HAPPairVerifyHandler`
   - `Protocols/AirPlay/` -- AirPlay 2 support (HAP pair-setup, pair-verify over `/pair-verify`, encrypted control/event/data channels, RTSP SETUP/RECORD, DataStream MRP tunnel, feedback keepalive)
-  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, best-effort touch, power, audio volume, RTI text entry, connection-lost propagation; output-device mutation is not implemented yet)
-  - `Protocols/MRP/` -- MRP implementation (checked-in SwiftProtobuf-generated pyatv messages in `Generated/`, source `.proto` files in `Protobuf/`, transport abstraction, direct TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, connection-lost propagation)
+  - `Protocols/Companion/` -- Companion protocol (TCP framing, OPACK messages, HID commands, SRP pair-setup, pair-verify, apps, event-driven feature/state store, best-effort touch, power, audio volume, RTI text entry, connection-lost propagation; output-device mutation is not implemented yet)
+  - `Protocols/MRP/` -- MRP implementation (checked-in SwiftProtobuf-generated pyatv messages in `Generated/`, source `.proto` files in `Protobuf/`, transport abstraction, direct TCP framing, pair-setup/pair-verify, interfaces, active playback refresh, player-state actor, optional setup diagnostics, connection-lost propagation)
   - `SwiftATV.docc/` -- DocC catalog (landing page + Getting Started)
 - `Tests/SwiftATVTests/` -- Test suite (XCTest ported from pyatv + Swift Testing for new features)
 
@@ -57,8 +59,8 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
 
 | Protocol | Status | Notes |
 |----------|--------|-------|
-| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, power, audio volume, keyboard focus/text entry, best-effort touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is not implemented yet |
-| MRP | Implemented | Direct TCP/protobuf connection plus AirPlay 2 DataStream tunnel transport, pair-setup, pair-verify for direct MRP, remote, actively refreshed metadata, push, power, audio, connection-lost events |
+| Companion | Implemented | Connection, pair-setup (SRP-6a), pair-verify, remote, apps, users, event-backed power/audio/media-control/keyboard state, best-effort touch, connection-lost events, Bonjour identifiers/metadata. Output-device mutation is not implemented yet |
+| MRP | Implemented | Direct TCP/protobuf connection plus AirPlay 2 DataStream tunnel transport, pair-setup, pair-verify for direct MRP, remote, actively refreshed metadata, push, power, audio, optional setup diagnostics, connection-lost events |
 | AirPlay | Implemented | AirPlay 2 HAP pair-setup, pair-verify, encrypted control/event/data channels, and MRP tunneling |
 
 ## Code Conventions
@@ -136,12 +138,13 @@ Most tests are ported from pyatv's test suite (XCTest):
   malformed-credential, deterministic first-usable priority, service-credential,
   mandatory-credential, Companion credential requirements, aggregate failures,
   and client-identity collision checks.
-- `FacadeEventTests.swift` -- facade connection-closed and connection-lost
-  event propagation.
+- `FacadeEventTests.swift` -- facade connection-closed, connection-lost, and
+  per-protocol primary/secondary close behavior.
 - `TimingTests.swift` -- shared timeout-to-nanoseconds conversion guards.
 - `MRPPlayerStateTests` <- `tests/protocols/mrp/test_player_state.py` plus
   SwiftATV MRP framing/message, volume, command-result, varint overflow,
-  active metadata refresh, and pair-verify-final-response coverage.
+  active metadata refresh, optional setup diagnostics, feature-state gating,
+  and pair-verify-final-response coverage.
 - `ConsumerCompileTests.swift` -- consumer-style imports proving
   module-qualified types such as `SwiftATV.ATVProtocol` and scan diagnostics
   compile alongside `ATVClient` facade calls.

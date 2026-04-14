@@ -16,6 +16,13 @@ support. Connection setup is deterministic for implemented control protocols
 (direct MRP, then AirPlay-tunneled MRP, then Companion) and returns as soon as
 one usable protocol connects.
 
+The facade tracks lifecycle per protocol. Closing or failing a non-primary
+secondary protocol unregisters only that protocol; the device emits
+`connectionLost` when the primary or last active protocol closes. Feature
+availability is state-backed, so optional Companion and MRP surfaces are
+reported unavailable until setup, events, or successful requests prove them
+usable.
+
 ``ATVSettings/clientIdentity`` describes the local controller or app identity
 sent during pairing and protocol setup. It must not be copied from the target
 Apple TV's identifiers.
