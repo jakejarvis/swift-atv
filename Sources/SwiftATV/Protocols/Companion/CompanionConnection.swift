@@ -362,8 +362,14 @@ public final class CompanionConnection: @unchecked Sendable {
                     ) {
                         removed.continuation.resume(
                             throwing: ATVError.operationTimeout(
-                                "Timeout waiting for frame type \(responseType)"
-                            ))
+                                TimeoutContext(
+                                    protocol: .companion,
+                                    operation: "frame",
+                                    requestID: "\(responseType)",
+                                    duration: timeout
+                                )
+                            )
+                        )
                     }
                 }
                 // Publish the task handle under the same lock every other
@@ -440,8 +446,14 @@ public final class CompanionConnection: @unchecked Sendable {
                     if let removed = self.removeFrameWaiterIfOwned(type: type, id: waiterID) {
                         removed.continuation.resume(
                             throwing: ATVError.operationTimeout(
-                                "Timeout waiting for frame type \(type)"
-                            ))
+                                TimeoutContext(
+                                    protocol: .companion,
+                                    operation: "frame",
+                                    requestID: "\(type)",
+                                    duration: timeout
+                                )
+                            )
+                        )
                     }
                 }
                 lock.withLock {

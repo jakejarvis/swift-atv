@@ -364,7 +364,14 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
 
                     if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
                         removed.continuation.resume(
-                            throwing: ATVError.operationTimeout("Timeout waiting for MRP \(waitKey)")
+                            throwing: ATVError.operationTimeout(
+                                TimeoutContext(
+                                    protocol: .mrp,
+                                    operation: "request",
+                                    requestID: waitKey,
+                                    duration: timeout
+                                )
+                            )
                         )
                     }
                 }

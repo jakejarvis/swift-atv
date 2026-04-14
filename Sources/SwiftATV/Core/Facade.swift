@@ -215,6 +215,24 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         lock.withLock { activeProtocols }
     }
 
+    internal var connectedPrimaryProtocol: ATVProtocol? {
+        lock.withLock { primaryProtocol }
+    }
+
+    internal var connectedActiveProtocols: [ATVProtocol] {
+        lock.withLock {
+            Relayer<RemoteControl>.defaultPriorities.filter { activeProtocols.contains($0) }
+        }
+    }
+
+    internal var protocolSetupDiagnostics: [ProtocolSetupDiagnostic] {
+        lock.withLock {
+            mrpServices.flatMap { registrationProtocol, service in
+                service.setupDiagnostics(protocol: registrationProtocol)
+            }
+        }
+    }
+
     private func unregisterSecondaryProtocol(_ protocol: ATVProtocol) {
         let service = lock.withLock {
             guard activeProtocols.remove(`protocol`) != nil else {
@@ -263,7 +281,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     /// Set up a protocol service for this device.
     public func setupProtocol(
         _ service: ServiceInfo,
-        credentials resolvedCredentials: HAPCredentials? = nil
+        credentials resolvedCredentials: HAPCredentials? = nil,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
     ) async throws(ATVError) {
         try ATVClient.validateClientIdentity(settings: _settings, for: configuration)
 
@@ -278,7 +297,11 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
                         settings: _settings
                     )
                 }
-            try await setupAirPlayMRPTunnel(service, credentialCandidates: candidates)
+            try await setupAirPlayMRPTunnel(
+                service,
+                credentialCandidates: candidates,
+                requestTimeout: requestTimeout
+            )
             return
         }
 
@@ -366,7 +389,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
 
     internal func setupAirPlayMRPTunnel(
         _ service: ServiceInfo,
-        credentialCandidates: [HAPCredentials]
+        credentialCandidates: [HAPCredentials],
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
     ) async throws(ATVError) {
         try ATVClient.validateClientIdentity(settings: _settings, for: configuration)
 
@@ -377,7 +401,8 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             host: configuration.address,
             port: service.port,
             credentialCandidates: credentialCandidates,
-            settings: _settings
+            settings: _settings,
+            requestTimeout: requestTimeout
         )
         let mrp = MRPService(
             transport: tunnel,
@@ -527,9 +552,9 @@ struct RelayingMediaCommands: MediaCommandController {
 
     func commandInfo(_ command: MediaRemoteCommand) -> MediaCommandInfo {
         let infos = relayer.all.map { $0.commandInfo(command) }
-        return infos.first { $0.state != .unsupported }
-            ?? infos.first
-            ?? MediaCommandInfo(state: .unsupported, diagnostic: "Media commands not available")
+        return infos.max { lhs, rhs in
+            lhs.state.mergeRank < rhs.state.mergeRank
+        } ?? MediaCommandInfo(state: .unsupported, diagnostic: "Media commands not available")
     }
 
     func allCommands(includeUnsupported: Bool) -> [MediaRemoteCommand: MediaCommandInfo] {
@@ -566,7 +591,9 @@ struct RelayingCapabilities: CapabilityProvider {
 
     func capabilityInfo(_ capability: Capability) -> CapabilityInfo {
         let infos = relayer.all.map { $0.capabilityInfo(capability) }
-        return infos.first { $0.state != .unsupported } ?? infos.first ?? CapabilityInfo(state: .unsupported)
+        return infos.max { lhs, rhs in
+            lhs.state.mergeRank < rhs.state.mergeRank
+        } ?? CapabilityInfo(state: .unsupported)
     }
 
     func allCapabilities(includeUnsupported: Bool) -> [Capability: CapabilityInfo] {
@@ -585,12 +612,27 @@ struct RelayingCapabilities: CapabilityProvider {
     }
 }
 
+extension CapabilityState {
+    fileprivate var mergeRank: Int {
+        switch self {
+        case .available: return 3
+        case .unavailable: return 2
+        case .unknown: return 1
+        case .unsupported: return 0
+        }
+    }
+}
+
 private struct UnsupportedMetadata: ATVMetadata {
     var deviceID: String? { nil }
     var artworkID: String { "" }
     var currentApp: App? { nil }
-    func artwork(width: Int?, height: Int?) async throws(ATVError) -> ArtworkInfo? { nil }
-    func playing() async throws(ATVError) -> Playing { Playing() }
+    func artwork(width: Int?, height: Int?) async throws(ATVError) -> ArtworkInfo? {
+        throw ATVError.notSupported("Metadata not available")
+    }
+    func playing() async throws(ATVError) -> Playing {
+        throw ATVError.notSupported("Metadata not available")
+    }
 }
 
 private struct UnsupportedPushUpdater: PushUpdater {

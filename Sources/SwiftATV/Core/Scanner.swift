@@ -51,6 +51,8 @@
         case resolverFailed
         /// A service resolved successfully but did not include a TXT record.
         case emptyTXTRecord
+        /// A sleep-proxy service resolved without a usable device identifier.
+        case missingIdentifier
     }
 
     /// Non-fatal diagnostic emitted while scanning for Bonjour services.
@@ -158,8 +160,10 @@
                 serviceTypes = Self.protocolServiceTypes
             }
 
-            // Also always scan for device info
-            let allTypes = serviceTypes + [.deviceInfo]
+            // Also always scan for device info. Sleep proxy is useful only
+            // during normal discovery, not when the caller asks for a
+            // protocol-specific service subset.
+            let allTypes = serviceTypes + [.deviceInfo] + (protocols == nil ? [.sleepProxy] : [])
 
             // Browse for each service type concurrently
             let browseOutput: BrowseOutput
@@ -209,6 +213,17 @@
             diagnostics: [ATVScanDiagnostic],
             identifiers: Set<String>? = nil
         ) -> ATVScanResult {
+            var diagnostics = diagnostics
+            for service in services
+            where service.serviceType == .sleepProxy && serviceIdentifiers(from: service).isEmpty {
+                diagnostics.append(
+                    ATVScanDiagnostic(
+                        serviceType: .sleepProxy,
+                        kind: .missingIdentifier,
+                        message: "Resolved sleep proxy \(service.name) without a usable identifier"
+                    )
+                )
+            }
             var results = Self.configurations(from: services)
 
             if let identifiers {
@@ -250,8 +265,8 @@
             _ service: DiscoveredService,
             into configs: inout [AppleTVConfiguration]
         ) {
-            let identifiers = serviceIdentifiers(from: service.txtRecord)
-            let preferredIdentifier = preferredIdentifier(from: service.txtRecord)
+            let identifiers = serviceIdentifiers(from: service)
+            let preferredIdentifier = preferredIdentifier(from: service)
             let matchingIndices = configs.indices.filter { index in
                 let config = configs[index]
                 let hasSharedIdentifier =
@@ -272,7 +287,7 @@
                 configs.append(
                     AppleTVConfiguration(
                         address: service.host,
-                        name: service.name,
+                        name: displayName(from: service),
                         identifier: preferredIdentifier
                     )
                 )
@@ -304,11 +319,16 @@
             identifiers: Set<String>
         ) {
             if config.identifier == nil {
-                config.identifier = preferredIdentifier(from: service.txtRecord)
+                config.identifier = preferredIdentifier(from: service)
             }
 
             if service.serviceType == .deviceInfo {
                 config.deviceInfo = DeviceInfo.fromProperties(service.txtRecord)
+                return
+            }
+
+            if service.serviceType == .sleepProxy {
+                config.deepSleep = true
                 return
             }
 
@@ -317,7 +337,7 @@
             let serviceInfo = ServiceInfo(
                 protocol: proto,
                 port: service.port,
-                identifier: preferredIdentifier(from: service.txtRecord),
+                identifier: preferredIdentifier(from: service),
                 properties: service.txtRecord,
                 pairingRequirement: Self.pairingRequirement(from: service.txtRecord, for: proto)
             )
@@ -332,12 +352,37 @@
             }
         }
 
-        private static func serviceIdentifiers(from properties: [String: String]) -> Set<String> {
-            DiscoveryIdentifiers.all(from: properties)
+        private static func serviceIdentifiers(from service: DiscoveredService) -> Set<String> {
+            var identifiers = DiscoveryIdentifiers.all(from: service.txtRecord)
+            if service.serviceType == .sleepProxy, let identifier = sleepProxyIdentifier(from: service.name) {
+                identifiers.insert(identifier)
+            }
+            return identifiers
         }
 
-        private static func preferredIdentifier(from properties: [String: String]) -> String? {
-            DiscoveryIdentifiers.preferred(from: properties)
+        private static func preferredIdentifier(from service: DiscoveredService) -> String? {
+            DiscoveryIdentifiers.preferred(from: service.txtRecord)
+                ?? (service.serviceType == .sleepProxy ? sleepProxyIdentifier(from: service.name) : nil)
+        }
+
+        private static func displayName(from service: DiscoveredService) -> String {
+            guard service.serviceType == .sleepProxy else {
+                return service.name
+            }
+            let parts = service.name.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard parts.count == 2 else {
+                return service.name
+            }
+            return String(parts[1])
+        }
+
+        private static func sleepProxyIdentifier(from name: String) -> String? {
+            let parts = name.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard parts.count == 2, let raw = parts.first else {
+                return nil
+            }
+            let identifier = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return identifier.isEmpty ? nil : identifier
         }
 
         private static func property(_ properties: [String: String], keys: [String]) -> String? {

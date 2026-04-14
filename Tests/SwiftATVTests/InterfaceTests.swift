@@ -14,7 +14,12 @@ final class InterfaceTests: XCTestCase {
 
         func pin(_ pin: String) async throws(ATVError) {}
         func begin() async throws(ATVError) {}
-        func finish() async throws(ATVError) {}
+        func finish() async throws(ATVError) -> PairingResult {
+            guard let credentials else {
+                throw ATVError.pairingFailed("No credentials")
+            }
+            return PairingResult(service: service, credentials: credentials)
+        }
         func close() async {}
     }
 

@@ -102,6 +102,42 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertFalse(config.matchesIdentifier("missing-id"))
     }
 
+    func testEffectivePairingStatusUsesSavedCredentials() {
+        let service = ServiceInfo(
+            protocol: .mrp,
+            port: port2,
+            pairingRequirement: .mandatory
+        )
+        var settings = ATVSettings()
+
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .credentialsMissing)
+
+        settings.protocols.mrp.credentials = "01:02:03:04"
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .paired)
+    }
+
+    func testConnectabilityAndPreferredPairingHelpers() {
+        var config = makeConfig()
+        config.addService(ServiceInfo(protocol: .mrp, port: port2, pairingRequirement: .optional))
+        config.addService(ServiceInfo(protocol: .companion, port: port3, pairingRequirement: .optional))
+        config.addService(ServiceInfo(protocol: .airPlay, port: port1, enabled: false))
+
+        let preflight = config.connectability()
+        XCTAssertEqual(preflight.map(\.service.protocol), [.mrp, .companion, .airPlay])
+        XCTAssertEqual(preflight.map(\.status), [.connectable, .missingCredentials, .disabled])
+        XCTAssertEqual(config.connectableProtocols(), [.mrp])
+        XCTAssertEqual(
+            config.preferredPairingService(protocols: [.companion, .mrp])?.protocol,
+            .companion
+        )
+        XCTAssertNil(config.preferredPairingService(protocols: [.airPlay]))
+
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "01:02:03:04"
+        XCTAssertEqual(config.connectableProtocols(settings: settings), [.mrp, .companion])
+        XCTAssertEqual(config.preferredPairingService(settings: settings)?.protocol, .mrp)
+    }
+
     // MARK: - test_add_airplay_service
 
     func testAddAirplayService() {

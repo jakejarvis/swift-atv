@@ -26,6 +26,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
     private let port: Int
     private let credentialCandidates: [HAPCredentials]
     private let settings: ATVSettings
+    private let requestTimeout: TimeInterval
     private let group: EventLoopGroup
     private let ownsGroup: Bool
     private let lock = NSLock()
@@ -68,12 +69,14 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         port: Int,
         credentialCandidates: [HAPCredentials],
         settings: ATVSettings,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         group: EventLoopGroup? = nil
     ) {
         self.host = host
         self.port = port
         self.credentialCandidates = credentialCandidates
         self.settings = settings
+        self.requestTimeout = requestTimeout
         if let group {
             self.group = group
             self.ownsGroup = false
@@ -116,6 +119,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                 outputKey: eventKeys.outputKey,
                 inputKey: eventKeys.inputKey,
                 group: group,
+                requestTimeout: requestTimeout,
                 onClose: { [weak self] error in
                     self?.handleConnectionClosed(error: error)
                 }
@@ -137,6 +141,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                 outputKey: dataKeys.outputKey,
                 inputKey: dataKeys.inputKey,
                 group: group,
+                requestTimeout: requestTimeout,
                 onMessage: { [weak self] message in
                     self?.handleReceivedMessage(message)
                 },
@@ -243,7 +248,14 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
 
                     if let removed = self.removeWaiterIfOwned(key: waitKey, id: waiterID) {
                         removed.continuation.resume(
-                            throwing: ATVError.operationTimeout("Timeout waiting for MRP \(waitKey)")
+                            throwing: ATVError.operationTimeout(
+                                TimeoutContext(
+                                    protocol: .airPlay,
+                                    operation: "mrpTunnelRequest",
+                                    requestID: waitKey,
+                                    duration: timeout
+                                )
+                            )
                         )
                     }
                 }
@@ -300,7 +312,12 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         var bestError: ATVError?
 
         for credentials in credentialCandidates {
-            let control = AirPlayControlConnection(host: host, port: port, group: group)
+            let control = AirPlayControlConnection(
+                host: host,
+                port: port,
+                requestTimeout: requestTimeout,
+                group: group
+            )
             do {
                 try await control.connect()
                 let verifier = try await control.pairVerify(credentials: credentials)

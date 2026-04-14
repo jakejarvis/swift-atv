@@ -46,6 +46,66 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
     public var description: String {
         "\(`protocol`):\(port)"
     }
+
+    /// Pairing status after considering saved settings and service credentials.
+    public func effectivePairingStatus(settings: ATVSettings = ATVSettings()) -> EffectivePairingStatus {
+        switch pairingRequirement {
+        case .disabled:
+            return .disabled
+        case .unsupported:
+            return .unsupported
+        case .notNeeded:
+            return .notNeeded
+        case .optional:
+            return hasCredentials(settings: settings) ? .paired : .unpaired
+        case .mandatory:
+            return hasCredentials(settings: settings) ? .paired : .credentialsMissing
+        }
+    }
+
+    private func hasCredentials(settings: ATVSettings) -> Bool {
+        guard let credentials = settings.credentials(for: `protocol`) ?? credentials else {
+            return false
+        }
+        return !credentials.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+/// Effective pairing status for a discovered service.
+public enum EffectivePairingStatus: Sendable, Hashable {
+    case disabled
+    case unsupported
+    case notNeeded
+    case unpaired
+    case credentialsMissing
+    case paired
+}
+
+/// Connectability status for a discovered service.
+public enum ServiceConnectabilityStatus: Sendable, Hashable {
+    case connectable
+    case disabled
+    case unsupported
+    case missingCredentials
+    case invalidCredentials
+    case airPlayTunnelUnavailable
+}
+
+/// Local preflight result for a service before opening a network connection.
+public struct ServiceConnectability: Sendable, Hashable {
+    public let service: ServiceInfo
+    public let status: ServiceConnectabilityStatus
+    public let diagnostic: String?
+
+    public init(
+        service: ServiceInfo,
+        status: ServiceConnectabilityStatus,
+        diagnostic: String? = nil
+    ) {
+        self.service = service
+        self.status = status
+        self.diagnostic = diagnostic
+    }
 }
 
 // MARK: - Default Ports
@@ -156,6 +216,42 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
         allIdentifiers.contains(identifier)
     }
 
+    /// Local service connectability policy after applying saved settings.
+    public func connectability(settings: ATVSettings = ATVSettings()) -> [ServiceConnectability] {
+        services.map { service in
+            connectability(for: service, settings: settings)
+        }
+    }
+
+    /// Protocols that can be attempted with the supplied settings.
+    public func connectableProtocols(settings: ATVSettings = ATVSettings()) -> [ATVProtocol] {
+        connectability(settings: settings).compactMap { item in
+            item.status == .connectable ? item.service.protocol : nil
+        }
+    }
+
+    /// Preferred service to pair, ordered by the supplied protocol preference.
+    public func preferredPairingService(
+        settings: ATVSettings = ATVSettings(),
+        protocols: [ATVProtocol] = ConnectOptions.defaultProtocolOrder
+    ) -> ServiceInfo? {
+        let candidates = services.filter { service in
+            service.enabled && protocols.contains(service.protocol)
+        }
+        for `protocol` in protocols {
+            guard let service = candidates.first(where: { $0.protocol == `protocol` }) else {
+                continue
+            }
+            switch service.effectivePairingStatus(settings: settings) {
+            case .unpaired, .credentialsMissing:
+                return service
+            case .disabled, .unsupported, .notNeeded, .paired:
+                continue
+            }
+        }
+        return nil
+    }
+
     public var description: String {
         let serviceList = services.map(\.description).joined(separator: ", ")
         return "\(name) (\(address)) [\(serviceList)]"
@@ -172,5 +268,143 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
         guard let identifier else { return nil }
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func connectability(
+        for service: ServiceInfo,
+        settings: ATVSettings
+    ) -> ServiceConnectability {
+        guard service.enabled else {
+            return ServiceConnectability(
+                service: service,
+                status: .disabled,
+                diagnostic: "Service is disabled"
+            )
+        }
+
+        switch service.protocol {
+        case .companion:
+            return credentialRequiredConnectability(
+                service: service,
+                settings: settings,
+                missingDiagnostic: "Companion requires pairing credentials"
+            )
+
+        case .mrp:
+            if service.pairingRequirement == .mandatory {
+                return credentialRequiredConnectability(
+                    service: service,
+                    settings: settings,
+                    missingDiagnostic: "MRP service requires pairing credentials"
+                )
+            }
+            return optionalCredentialConnectability(service: service, settings: settings)
+
+        case .airPlay:
+            return airPlayConnectability(service: service, settings: settings)
+        }
+    }
+
+    private func credentialRequiredConnectability(
+        service: ServiceInfo,
+        settings: ATVSettings,
+        missingDiagnostic: String
+    ) -> ServiceConnectability {
+        guard let serialized = settings.credentials(for: service.protocol) ?? service.credentials,
+            !serialized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return ServiceConnectability(
+                service: service,
+                status: .missingCredentials,
+                diagnostic: missingDiagnostic
+            )
+        }
+        do {
+            _ = try HAPCredentials.parse(serialized)
+            return ServiceConnectability(service: service, status: .connectable)
+        } catch {
+            return ServiceConnectability(
+                service: service,
+                status: .invalidCredentials,
+                diagnostic: String(describing: error)
+            )
+        }
+    }
+
+    private func optionalCredentialConnectability(
+        service: ServiceInfo,
+        settings: ATVSettings
+    ) -> ServiceConnectability {
+        guard let serialized = settings.credentials(for: service.protocol) ?? service.credentials,
+            !serialized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return ServiceConnectability(service: service, status: .connectable)
+        }
+        do {
+            _ = try HAPCredentials.parse(serialized)
+            return ServiceConnectability(service: service, status: .connectable)
+        } catch {
+            return ServiceConnectability(
+                service: service,
+                status: .invalidCredentials,
+                diagnostic: String(describing: error)
+            )
+        }
+    }
+
+    private func airPlayConnectability(
+        service: ServiceInfo,
+        settings: ATVSettings
+    ) -> ServiceConnectability {
+        guard settings.protocols.airplay.mrpTunnelMode != .disable else {
+            return ServiceConnectability(
+                service: service,
+                status: .airPlayTunnelUnavailable,
+                diagnostic: "AirPlay MRP tunnel is disabled by settings"
+            )
+        }
+
+        do {
+            let candidates = try ATVClient.resolvedAirPlayTunnelCredentialCandidates(
+                for: service,
+                configuration: self,
+                settings: settings
+            )
+            guard
+                AirPlaySupport.supportsRemoteControlTunnel(
+                    service: service,
+                    credentials: candidates.first,
+                    settings: settings
+                )
+            else {
+                return ServiceConnectability(
+                    service: service,
+                    status: .airPlayTunnelUnavailable,
+                    diagnostic: "AirPlay MRP tunnel is not supported by this service"
+                )
+            }
+            return ServiceConnectability(service: service, status: .connectable)
+        } catch let error {
+            switch error {
+            case .noCredentials:
+                return ServiceConnectability(
+                    service: service,
+                    status: .missingCredentials,
+                    diagnostic: error.errorDescription
+                )
+            case .invalidCredentials:
+                return ServiceConnectability(
+                    service: service,
+                    status: .invalidCredentials,
+                    diagnostic: error.errorDescription
+                )
+            default:
+                return ServiceConnectability(
+                    service: service,
+                    status: .unsupported,
+                    diagnostic: error.errorDescription
+                )
+            }
+        }
     }
 }

@@ -15,7 +15,9 @@ Companion provides modern app, keyboard text input/focus, best-effort touch,
 power, audio-volume, and remote-control support. Connection setup is
 deterministic for implemented control protocols (direct MRP, then
 AirPlay-tunneled MRP, then Companion) and returns as soon as one usable protocol
-connects.
+connects unless ``ConnectStrategy/allAllowed`` is requested. The result
+describes the primary protocol, active protocols, setup attempts, and optional
+setup diagnostics.
 
 The facade tracks lifecycle per protocol. Closing or failing a non-primary
 secondary protocol unregisters only that protocol; the device emits
@@ -32,7 +34,9 @@ Apple TV's identifiers.
 Discovery resolves Bonjour TXT records with each live service, merges services
 by stable device identifiers, including Companion-only TXT identifiers, and can
 optionally return scan diagnostics for non-fatal browser, resolver, or empty-TXT
-failures.
+failures. Unfiltered scans also include sleep-proxy discovery so sleeping
+devices can be marked with ``AppleTVConfiguration/deepSleep`` when Bonjour
+provides a usable device identifier.
 
 SwiftATV requires Swift 6.3 or newer.
 
@@ -46,7 +50,8 @@ import SwiftATV
 let devices = try await ATVClient.scan(timeout: 5)
 guard let device = devices.first else { return }
 
-let atv = try await ATVClient.connect(device)
+let connection = try await ATVClient.connect(device)
+let atv = connection.device
 try await atv.remoteControl.home()
 try await atv.remoteControl.play()
 await atv.close()
@@ -62,16 +67,26 @@ await atv.close()
 ### Getting started
 
 - ``ATVClient``
+- ``ConnectOptions``
+- ``ConnectStrategy``
+- ``ConnectResult``
+- ``ConnectAttempt``
+- ``ProtocolSetupDiagnostic``
+- ``defaultProtocolRequestTimeout``
 - <doc:GettingStarted>
 
 ### Discovery
 
 - ``ATVScanner``
+- ``BonjourServiceType``
 - ``ATVScanResult``
 - ``ATVScanDiagnostic``
 - ``ATVScanDiagnosticKind``
 - ``AppleTVConfiguration``
 - ``ServiceInfo``
+- ``EffectivePairingStatus``
+- ``ServiceConnectability``
+- ``ServiceConnectabilityStatus``
 - ``DeviceInfo``
 
 ### Device control
@@ -109,6 +124,7 @@ await atv.close()
 ### Pairing and authentication
 
 - ``PairingHandler``
+- ``PairingResult``
 - ``PairingCodeDirection``
 - ``CompanionPairingHandler``
 - ``CompanionPairVerifyHandler``
@@ -165,4 +181,5 @@ await atv.close()
 ### Errors
 
 - ``ATVError``
+- ``TimeoutContext``
 - ``ConnectionAttemptError``

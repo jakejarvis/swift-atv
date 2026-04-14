@@ -1,5 +1,89 @@
 import Foundation
 
+/// Default timeout for protocol request/response exchanges during setup.
+public let defaultProtocolRequestTimeout: TimeInterval = 5.0
+
+/// Connection setup strategy.
+public enum ConnectStrategy: Sendable, Hashable {
+    /// Return after the first usable protocol connects.
+    case firstUsable
+    /// Attempt every allowed protocol and return when at least one connects.
+    case allAllowed
+}
+
+/// Options controlling protocol selection during connection.
+public struct ConnectOptions: Sendable, Hashable {
+    public static let defaultProtocolOrder: [ATVProtocol] = [.mrp, .airPlay, .companion]
+
+    /// Protocols to attempt, in preference order.
+    public var protocols: [ATVProtocol]
+    /// Whether to return after one connection or attach every usable protocol.
+    public var strategy: ConnectStrategy
+    /// Timeout used by AirPlay HTTP/RTSP setup requests.
+    public var requestTimeout: TimeInterval
+
+    public init(
+        protocols: [ATVProtocol] = ConnectOptions.defaultProtocolOrder,
+        strategy: ConnectStrategy = .firstUsable,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout
+    ) {
+        self.protocols = protocols
+        self.strategy = strategy
+        self.requestTimeout = requestTimeout
+    }
+}
+
+/// One protocol setup attempt made during connection.
+public struct ConnectAttempt: Sendable {
+    public let `protocol`: ATVProtocol
+    public let port: Int
+    public let error: ATVError?
+
+    public init(protocol: ATVProtocol, port: Int, error: ATVError? = nil) {
+        self.protocol = `protocol`
+        self.port = port
+        self.error = error
+    }
+
+    public var succeeded: Bool { error == nil }
+}
+
+/// Optional setup diagnostic associated with a connected protocol.
+public struct ProtocolSetupDiagnostic: Sendable, Hashable {
+    public let `protocol`: ATVProtocol
+    public let capability: Capability
+    public let info: CapabilityInfo
+
+    public init(protocol: ATVProtocol, capability: Capability, info: CapabilityInfo) {
+        self.protocol = `protocol`
+        self.capability = capability
+        self.info = info
+    }
+}
+
+/// Result metadata returned by ``ATVClient/connect(_:options:settings:)``.
+public struct ConnectResult: Sendable {
+    public let device: any AppleTVDevice
+    public let primaryProtocol: ATVProtocol
+    public let activeProtocols: [ATVProtocol]
+    public let attempts: [ConnectAttempt]
+    public let setupDiagnostics: [ProtocolSetupDiagnostic]
+
+    public init(
+        device: any AppleTVDevice,
+        primaryProtocol: ATVProtocol,
+        activeProtocols: [ATVProtocol],
+        attempts: [ConnectAttempt],
+        setupDiagnostics: [ProtocolSetupDiagnostic] = []
+    ) {
+        self.device = device
+        self.primaryProtocol = primaryProtocol
+        self.activeProtocols = activeProtocols
+        self.attempts = attempts
+        self.setupDiagnostics = setupDiagnostics
+    }
+}
+
 /// High-level client entry points for discovering, pairing, and connecting to Apple TV devices.
 ///
 /// Port of the Python pyatv library to idiomatic Swift.
@@ -10,9 +94,7 @@ public enum ATVClient {
     /// Library version.
     public static let version = "0.3.0"
 
-    fileprivate static let connectProtocolPriority: [ATVProtocol] = [
-        .mrp, .airPlay, .companion,
-    ]
+    fileprivate static let connectProtocolPriority = ConnectOptions.defaultProtocolOrder
 
     internal typealias ProtocolSetupOverride =
         @Sendable (
@@ -102,32 +184,33 @@ public enum ATVClient {
         }
     #endif
 
-    /// Connect to an Apple TV device.
+    /// Connect to an Apple TV device and return protocol setup metadata.
     ///
-    /// Establishes a connection using the available protocol services
-    /// in the configuration.
-    ///
-    /// Without an explicit protocol, implemented control protocols are tried
-    /// in deterministic order: direct MRP, then AirPlay-tunneled MRP when
-    /// direct MRP is unavailable or fails, then Companion. The method returns
-    /// as soon as the first usable protocol connects. If all automatic
-    /// attempts fail, the thrown `.connectionFailed` contains the attempted
-    /// protocols and their underlying errors. If `settings` does not contain
-    /// credentials for a protocol, `ServiceInfo.credentials` is used as a
-    /// fallback. The AirPlay tunnel tries AirPlay credentials first and
-    /// Companion credentials second. Companion requires credentials.
+    /// Services are attempted in ``ConnectOptions/protocols`` order. With
+    /// ``ConnectStrategy/firstUsable`` the method returns after the first
+    /// successful protocol. With ``ConnectStrategy/allAllowed`` it continues
+    /// attaching lower-priority protocols and returns if at least one protocol
+    /// connects. If all attempts fail, the thrown `.connectionFailed` contains
+    /// the failed protocols and their underlying errors. A strict
+    /// single-protocol request throws that protocol's underlying setup error
+    /// directly.
     ///
     /// - Parameters:
     ///   - config: Device configuration obtained from scanning or manually created.
-    ///   - protocol: Optional protocol to use. If nil, the best available is chosen.
+    ///   - options: Protocol order, setup strategy, and request timeout.
     ///   - settings: Optional settings containing saved protocol credentials.
-    /// - Returns: A connected device instance.
+    /// - Returns: Connected device plus protocol setup metadata.
     public static func connect(
         _ config: AppleTVConfiguration,
-        protocol: ATVProtocol? = nil,
+        options: ConnectOptions = ConnectOptions(),
         settings: ATVSettings? = nil
-    ) async throws(ATVError) -> any AppleTVDevice {
+    ) async throws(ATVError) -> ConnectResult {
         let deviceSettings = settings ?? ATVSettings()
+        _ = try timeoutNanoseconds(from: options.requestTimeout, parameterName: "options.requestTimeout")
+        let requestedProtocols = deduplicated(options.protocols)
+        guard !requestedProtocols.isEmpty else {
+            throw ATVError.invalidConfig("options.protocols must contain at least one protocol")
+        }
 
         let availableServices = config.services.filter(\.enabled)
 
@@ -135,28 +218,26 @@ public enum ATVClient {
             throw ATVError.noService("No enabled services in configuration")
         }
 
-        let selectedServices = availableServices.filter { service in
-            guard let requestedProtocol = `protocol` else { return true }
-            return service.protocol == requestedProtocol
+        let selectedServices = requestedProtocols.flatMap { requestedProtocol in
+            availableServices.filter { service in service.protocol == requestedProtocol }
         }
 
         guard !selectedServices.isEmpty else {
-            if let requestedProtocol = `protocol` {
-                throw ATVError.noService("No enabled \(requestedProtocol) service in configuration")
-            }
-            throw ATVError.noService("No enabled services in configuration")
+            let requested = requestedProtocols.map(\.description).joined(separator: ", ")
+            throw ATVError.noService("No enabled requested services in configuration: \(requested)")
         }
 
         try validateClientIdentity(settings: deviceSettings, for: config)
 
-        let prioritizedServices = selectedServices.prioritizedForConnect()
+        let prioritizedServices = selectedServices.prioritizedForConnect(order: requestedProtocols)
         let facade = FacadeAppleTV(
             configuration: config,
             settings: deviceSettings
         )
 
-        var attempts: [ConnectionAttemptError] = []
-        let requestedSpecificProtocol = `protocol` != nil
+        var failedAttempts: [ConnectionAttemptError] = []
+        var attempts: [ConnectAttempt] = []
+        var connectedAnyProtocol = false
 
         for service in prioritizedServices {
             do {
@@ -193,30 +274,45 @@ public enum ATVClient {
                     try await setupAirPlayProtocol(
                         facade,
                         service: service,
-                        credentialCandidates: airPlayCredentialCandidates
+                        credentialCandidates: airPlayCredentialCandidates,
+                        requestTimeout: options.requestTimeout
                     )
                 } else {
-                    try await setupProtocol(facade, service: service, credentials: credentials)
+                    try await setupProtocol(
+                        facade,
+                        service: service,
+                        credentials: credentials,
+                        requestTimeout: options.requestTimeout
+                    )
                 }
-                return facade
+                attempts.append(ConnectAttempt(protocol: service.protocol, port: service.port))
+                connectedAnyProtocol = true
+                if options.strategy == .firstUsable {
+                    return try connectResult(facade: facade, attempts: attempts)
+                }
             } catch let error as ATVError {
-                if requestedSpecificProtocol {
-                    await facade.close()
-                    throw error
-                }
-                attempts.append(ConnectionAttemptError(protocol: service.protocol, port: service.port, error: error))
+                failedAttempts.append(
+                    ConnectionAttemptError(protocol: service.protocol, port: service.port, error: error)
+                )
+                attempts.append(ConnectAttempt(protocol: service.protocol, port: service.port, error: error))
             } catch {
                 let wrapped = ATVError.wrap(error)
-                if requestedSpecificProtocol {
-                    await facade.close()
-                    throw wrapped
-                }
-                attempts.append(ConnectionAttemptError(protocol: service.protocol, port: service.port, error: wrapped))
+                failedAttempts.append(
+                    ConnectionAttemptError(protocol: service.protocol, port: service.port, error: wrapped)
+                )
+                attempts.append(ConnectAttempt(protocol: service.protocol, port: service.port, error: wrapped))
             }
         }
 
+        if connectedAnyProtocol {
+            return try connectResult(facade: facade, attempts: attempts)
+        }
+
         await facade.close()
-        throw ATVError.connectionFailed(message: "No usable protocol connected", attempts: attempts)
+        if requestedProtocols.count == 1, failedAttempts.count == 1 {
+            throw failedAttempts[0].error
+        }
+        throw ATVError.connectionFailed(message: "No usable protocol connected", attempts: failedAttempts)
     }
 
     /// Pair with an Apple TV device.
@@ -289,7 +385,8 @@ public enum ATVClient {
     private static func setupProtocol(
         _ facade: FacadeAppleTV,
         service: ServiceInfo,
-        credentials: HAPCredentials?
+        credentials: HAPCredentials?,
+        requestTimeout: TimeInterval
     ) async throws(ATVError) {
         if let override = protocolSetupOverrideStore.get() {
             do {
@@ -301,13 +398,18 @@ public enum ATVClient {
             }
             return
         }
-        try await facade.setupProtocol(service, credentials: credentials)
+        try await facade.setupProtocol(
+            service,
+            credentials: credentials,
+            requestTimeout: requestTimeout
+        )
     }
 
     private static func setupAirPlayProtocol(
         _ facade: FacadeAppleTV,
         service: ServiceInfo,
-        credentialCandidates: [HAPCredentials]
+        credentialCandidates: [HAPCredentials],
+        requestTimeout: TimeInterval
     ) async throws(ATVError) {
         if let override = protocolSetupOverrideStore.get() {
             do {
@@ -319,7 +421,27 @@ public enum ATVClient {
             }
             return
         }
-        try await facade.setupAirPlayMRPTunnel(service, credentialCandidates: credentialCandidates)
+        try await facade.setupAirPlayMRPTunnel(
+            service,
+            credentialCandidates: credentialCandidates,
+            requestTimeout: requestTimeout
+        )
+    }
+
+    private static func connectResult(
+        facade: FacadeAppleTV,
+        attempts: [ConnectAttempt]
+    ) throws(ATVError) -> ConnectResult {
+        guard let primaryProtocol = facade.connectedPrimaryProtocol else {
+            throw ATVError.connectionFailed(message: "Protocol setup completed without active protocols")
+        }
+        return ConnectResult(
+            device: facade,
+            primaryProtocol: primaryProtocol,
+            activeProtocols: facade.connectedActiveProtocols,
+            attempts: attempts,
+            setupDiagnostics: facade.protocolSetupDiagnostics
+        )
     }
 
     internal static func resolvedCredentials(
@@ -448,6 +570,15 @@ public enum ATVClient {
         }
         return hex.count == 12 ? hex.lowercased() : nil
     }
+
+    private static func deduplicated(_ protocols: [ATVProtocol]) -> [ATVProtocol] {
+        var seen = Set<ATVProtocol>()
+        var result: [ATVProtocol] = []
+        for `protocol` in protocols where seen.insert(`protocol`).inserted {
+            result.append(`protocol`)
+        }
+        return result
+    }
 }
 
 extension ATVProtocol {
@@ -457,11 +588,15 @@ extension ATVProtocol {
 }
 
 extension Array where Element == ServiceInfo {
-    fileprivate func prioritizedForConnect() -> [ServiceInfo] {
+    fileprivate func prioritizedForConnect(order: [ATVProtocol]) -> [ServiceInfo] {
         enumerated()
             .sorted { lhs, rhs in
-                let lhsPriority = lhs.element.protocol.connectPriority
-                let rhsPriority = rhs.element.protocol.connectPriority
+                let lhsPriority =
+                    order.firstIndex(of: lhs.element.protocol)
+                    ?? lhs.element.protocol.connectPriority
+                let rhsPriority =
+                    order.firstIndex(of: rhs.element.protocol)
+                    ?? rhs.element.protocol.connectPriority
                 if lhsPriority != rhsPriority {
                     return lhsPriority < rhsPriority
                 }

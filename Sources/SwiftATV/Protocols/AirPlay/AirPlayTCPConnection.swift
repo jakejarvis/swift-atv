@@ -3,7 +3,9 @@ import NIOCore
 import NIOPosix
 
 private final class PendingAirPlayDataWaiter: @unchecked Sendable {
+    let id = UUID()
     let continuation: CheckedContinuation<Data, Error>
+    var timeoutTask: Task<Void, Never>?
 
     init(_ continuation: CheckedContinuation<Data, Error>) {
         self.continuation = continuation
@@ -40,14 +42,20 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         }
     }
 
-    func connect() async throws(ATVError) {
+    func connect(
+        timeout: TimeInterval = defaultProtocolRequestTimeout,
+        timeoutContext: TimeoutContext? = nil
+    ) async throws(ATVError) {
         let alreadyClosed = lock.withLock { isClosed }
         guard !alreadyClosed else {
             throw ATVError.connectionLost("Connection has been closed")
         }
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let timeoutMs = Int64(timeoutNs / 1_000_000)
 
         let bootstrap = ClientBootstrap(group: group)
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
+            .channelOption(ChannelOptions.connectTimeout, value: .milliseconds(timeoutMs))
             .channelInitializer { [self] channel in
                 channel.pipeline.addHandler(AirPlayTCPHandler(connection: self))
             }
@@ -56,6 +64,17 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         do {
             connected = try await bootstrap.connect(host: host, port: port).get()
         } catch {
+            let description = String(describing: error).lowercased()
+            if description.contains("timeout") || description.contains("timed out") {
+                throw ATVError.operationTimeout(
+                    timeoutContext
+                        ?? TimeoutContext(
+                            protocol: .airPlay,
+                            operation: "connect",
+                            duration: timeout
+                        )
+                )
+            }
             throw ATVError.wrap(error)
         }
 
@@ -113,13 +132,24 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         }
     }
 
-    func receive() async throws(ATVError) -> Data {
+    func receive(
+        timeout: TimeInterval? = nil,
+        timeoutContext: TimeoutContext? = nil
+    ) async throws(ATVError) -> Data {
         if let data = lock.withLock({ pendingData.isEmpty ? nil : pendingData.removeFirst() }) {
             return data
         }
+        let timeoutNs =
+            if let timeout {
+                try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+            } else {
+                Optional<UInt64>.none
+            }
 
         do {
             return try await withCheckedThrowingContinuation { continuation in
+                let waiter = PendingAirPlayDataWaiter(continuation)
+                let waiterID = waiter.id
                 lock.lock()
                 if isClosed {
                     lock.unlock()
@@ -138,8 +168,38 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
                     )
                     return
                 }
-                dataWaiter = PendingAirPlayDataWaiter(continuation)
+                dataWaiter = waiter
                 lock.unlock()
+
+                if let timeoutNs {
+                    let task = Task { [weak self] in
+                        do {
+                            try await Task.sleep(nanoseconds: timeoutNs)
+                        } catch {
+                            return
+                        }
+                        guard let self else { return }
+                        if let removed = self.removeDataWaiterIfOwned(id: waiterID) {
+                            removed.continuation.resume(
+                                throwing: ATVError.operationTimeout(
+                                    timeoutContext
+                                        ?? TimeoutContext(
+                                            protocol: .airPlay,
+                                            operation: "receive",
+                                            duration: timeout ?? 0
+                                        )
+                                )
+                            )
+                        }
+                    }
+                    lock.withLock {
+                        if dataWaiter?.id == waiterID {
+                            waiter.timeoutTask = task
+                        } else {
+                            task.cancel()
+                        }
+                    }
+                }
             }
         } catch let err as ATVError {
             throw err
@@ -159,6 +219,7 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
             hapSession = nil
             return (ch, waiter)
         }
+        drained.1?.timeoutTask?.cancel()
         drained.1?.continuation.resume(throwing: ATVError.connectionLost("Connection closed"))
         try? await drained.0?.close()
         await shutdownOwnedGroupIfNeeded()
@@ -199,6 +260,7 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         }
         lock.unlock()
 
+        delivery?.0.timeoutTask?.cancel()
         delivery?.0.continuation.resume(returning: delivery?.1 ?? Data())
     }
 
@@ -218,6 +280,7 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         let closeError =
             error.map { ATVError.connectionLost("Connection closed: \(String(describing: $0))") }
             ?? ATVError.connectionLost("Connection closed")
+        drained.0?.timeoutTask?.cancel()
         drained.0?.continuation.resume(throwing: closeError)
         Task { [weak self] in
             try? await drained.1?.close()
@@ -233,6 +296,16 @@ internal final class AirPlayTCPConnection: @unchecked Sendable {
         }
         if shouldShutdown {
             try? await group.shutdownGracefully()
+        }
+    }
+
+    private func removeDataWaiterIfOwned(id: UUID) -> PendingAirPlayDataWaiter? {
+        lock.withLock {
+            guard let waiter = dataWaiter, waiter.id == id else {
+                return nil
+            }
+            dataWaiter = nil
+            return waiter
         }
     }
 }

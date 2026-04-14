@@ -208,4 +208,24 @@ public struct ATVSettings: Codable, Sendable {
         case .mrp: protocols.mrp.credentials = credentials
         }
     }
+
+    /// Return a copy of these settings with a pairing result applied.
+    public func applying(_ pairing: PairingResult) -> ATVSettings {
+        var copy = self
+        copy.apply(pairing)
+        return copy
+    }
+
+    /// Persist credentials and service identifier from a pairing result.
+    public mutating func apply(_ pairing: PairingResult) {
+        setCredentials(pairing.serializedCredentials, for: pairing.service.protocol)
+        switch pairing.service.protocol {
+        case .airPlay:
+            protocols.airplay.identifier = pairing.service.identifier
+        case .companion:
+            protocols.companion.identifier = pairing.service.identifier
+        case .mrp:
+            protocols.mrp.identifier = pairing.service.identifier
+        }
+    }
 }

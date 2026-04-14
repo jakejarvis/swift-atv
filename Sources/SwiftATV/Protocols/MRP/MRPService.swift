@@ -100,6 +100,12 @@ final class MRPStateStore: @unchecked Sendable {
         }
     }
 
+    func setupDiagnosticEntries() -> [(Capability, CapabilityInfo)] {
+        lock.withLock {
+            setupDiagnostics.map { ($0.key, $0.value) }
+        }
+    }
+
     func volumeStream() -> AsyncStream<Float> {
         AsyncStream { continuation in
             let id = UUID()
@@ -283,6 +289,16 @@ public final class MRPService: @unchecked Sendable {
     public var capabilities: MRPCapabilities? { lock.withLock { _capabilities } }
     /// Media command controller registered after setup.
     public var mediaCommands: MRPMediaCommands? { lock.withLock { _mediaCommands } }
+
+    func setupDiagnostics(protocol registrationProtocol: ATVProtocol) -> [ProtocolSetupDiagnostic] {
+        stateStore.setupDiagnosticEntries().map { capability, info in
+            ProtocolSetupDiagnostic(
+                protocol: registrationProtocol,
+                capability: capability,
+                info: info
+            )
+        }
+    }
 
     /// Create an MRP service for a host and port.
     public init(

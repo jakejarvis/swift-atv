@@ -194,8 +194,10 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
     }
 
     private static func isRecoverableTouchStartFailure(_ error: ATVError) -> Bool {
-        if case .operationTimeout(let message) = error {
-            return message.contains("_touchStart")
+        if case .operationTimeout(let context) = error {
+            return context.protocol == .companion
+                && context.operation == "request"
+                && context.requestID == "_touchStart"
         }
         return false
     }

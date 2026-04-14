@@ -9,8 +9,29 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- `ATVClient.connect` now takes `ConnectOptions` and returns `ConnectResult`
+  with the connected device, primary protocol, active protocols, protocol
+  setup attempts, and optional setup diagnostics. `ConnectStrategy.allAllowed`
+  can attach every usable allowed protocol instead of returning after the
+  first success.
+- `PairingHandler.finish()` now returns `PairingResult`, and
+  `ATVSettings.apply(_:)` / `applying(_:)` persist the paired service
+  identifier and credentials into the correct protocol settings bucket.
+- `AppleTVConfiguration.connectability(settings:)`,
+  `connectableProtocols(settings:)`, `preferredPairingService(...)`, and
+  `ServiceInfo.effectivePairingStatus(settings:)` expose SwiftATV's local
+  pairing/connectability policy to consumers.
+- Discovery now scans `_sleep-proxy._udp` during unfiltered scans and marks
+  matching configurations as `deepSleep` when a sleep-proxy record can be
+  associated with a device identifier.
+
 ### Changed
 
+- `ATVError.operationTimeout` now carries a structured `TimeoutContext`
+  containing protocol, operation, request identifier, and duration instead of
+  forcing callers to parse operation names from strings.
 - MRP output-device mutation now mirrors pyatv by sending both legacy and
   cluster-aware output-context fields, uses AirPlay-tunneled MRP the same as
   direct MRP, and derives output-device capability state from both
@@ -21,6 +42,21 @@ Pre-1.0: minor version bumps may contain breaking changes.
   `MediaCommandInfo`, and `MediaCommandOptions`; MRP maps `SupportedCommands`
   into command availability, while commands needing unmodeled queue, session,
   or language payloads remain explicitly unsupported.
+- Relayed capability and media-command state now prefers `.available` over
+  higher-priority `.unavailable`, so a lower-priority protocol can expose a
+  usable feature that a higher-priority protocol reports as temporarily
+  unavailable.
+
+### Fixed
+
+- AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
+  preventing AirPlay services that accept TCP but never send a full response
+  from hanging connection fallback.
+- Companion request timeout tasks are cancelled when their request succeeds,
+  matching the lower-level Companion and MRP waiter lifecycle and avoiding
+  stale sleeper tasks.
+- Companion-only metadata now throws `.notSupported("Metadata not available")`
+  instead of returning an empty idle `Playing()` value.
 
 ## [0.3.0] - 2026-04-14
 

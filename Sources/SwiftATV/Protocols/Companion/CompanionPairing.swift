@@ -198,9 +198,10 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
     }
 
     /// Complete the pairing process using the entered PIN.
-    /// After success, read `credentials` for the long-term HAP keys and
-    /// persist them (e.g. into `ATVSettings.protocols.companion.credentials`).
-    public func finish() async throws(ATVError) {
+    ///
+    /// The returned ``PairingResult`` can be applied to ``ATVSettings`` for
+    /// protocol-aware credential persistence.
+    public func finish() async throws(ATVError) -> PairingResult {
         let (pin, m2Data) = lock.withLock { (_pin, m2ResponseData) }
         guard let pin else {
             throw ATVError.pairingFailed("PIN not set. Call pin() before finish().")
@@ -219,15 +220,14 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
 
         // M6: decrypt accessory identity, verify signature, store credentials.
         try setup.finish(fromResponse: m6Response)
-
-        // The caller is responsible for persisting `self.credentials` into
-        // `ATVSettings.protocols.companion.credentials` (matches pyatv's
-        // contract where the handler produces credentials and the caller
-        // stores them).
+        guard let credentials = setup.credentials else {
+            throw ATVError.pairingFailed("Pairing completed without credentials")
+        }
 
         lock.withLock {
             _hasPaired = true
         }
+        return PairingResult(service: _service, credentials: credentials)
     }
 
     /// Close the pairing handler.

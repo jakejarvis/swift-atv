@@ -61,6 +61,24 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.credentials(for: .companion), "comp-cred")
     }
 
+    func testApplyPairingResultStoresProtocolCredentialsAndIdentifier() {
+        let credentials = HAPCredentials(
+            ltpk: Data([0x01]),
+            ltsk: Data([0x02]),
+            atvIdentifier: Data([0x03]),
+            clientIdentifier: Data([0x04])
+        )
+        let service = ServiceInfo(protocol: .companion, port: 49153, identifier: "companion-id")
+        let result = PairingResult(service: service, credentials: credentials)
+
+        var settings = ATVSettings()
+        settings.apply(result)
+
+        XCTAssertEqual(settings.protocols.companion.credentials, "01:02:03:04")
+        XCTAssertEqual(settings.protocols.companion.identifier, "companion-id")
+        XCTAssertEqual(settings.applying(result).protocols.companion.credentials, "01:02:03:04")
+    }
+
     // MARK: - Protocol-specific settings
 
     func testAirPlaySettingsDefaults() {

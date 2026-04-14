@@ -65,7 +65,7 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
         lock.withLock { m2ResponseData = response }
     }
 
-    public func finish() async throws(ATVError) {
+    public func finish() async throws(ATVError) -> PairingResult {
         let (pin, m2Data) = lock.withLock { (_pin, m2ResponseData) }
         guard let pin else {
             throw ATVError.pairingFailed("PIN not set. Call pin() before finish().")
@@ -79,8 +79,12 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
         let m5 = try setup.m5(fromResponse: m4, displayName: settings.clientIdentity.name)
         let m6 = try await exchange(m5)
         try setup.finish(fromResponse: m6)
+        guard let credentials = setup.credentials else {
+            throw ATVError.pairingFailed("Pairing completed without credentials")
+        }
 
         lock.withLock { _hasPaired = true }
+        return PairingResult(service: _service, credentials: credentials)
     }
 
     public func close() async {

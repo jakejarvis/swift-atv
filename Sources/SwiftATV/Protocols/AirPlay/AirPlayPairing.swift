@@ -65,7 +65,7 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
         }
     }
 
-    public func finish() async throws(ATVError) {
+    public func finish() async throws(ATVError) -> PairingResult {
         let (control, pin, m2Data) = lock.withLock { (connection, _pin, m2ResponseData) }
         guard let control else {
             throw ATVError.invalidState("finish() called before begin()")
@@ -82,10 +82,14 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
         let m5 = try setup.m5(fromResponse: m4, displayName: settings.clientIdentity.name)
         let m6 = try await control.pairSetupExchange(m5)
         try setup.finish(fromResponse: m6)
+        guard let credentials = setup.credentials else {
+            throw ATVError.pairingFailed("Pairing completed without credentials")
+        }
 
         lock.withLock {
             _hasPaired = true
         }
+        return PairingResult(service: _service, credentials: credentials)
     }
 
     public func close() async {

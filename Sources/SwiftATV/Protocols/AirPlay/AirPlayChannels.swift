@@ -4,6 +4,7 @@ import SwiftProtobuf
 
 internal final class AirPlayEventChannel: @unchecked Sendable {
     private let socket: AirPlayTCPConnection
+    private let requestTimeout: TimeInterval
     private let onClose: (@Sendable (Error?) -> Void)?
     private var receiveTask: Task<Void, Never>?
     private var buffer = Data()
@@ -14,15 +15,25 @@ internal final class AirPlayEventChannel: @unchecked Sendable {
         outputKey: Data,
         inputKey: Data,
         group: EventLoopGroup,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onClose: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.socket = AirPlayTCPConnection(host: host, port: port, group: group)
         self.socket.enableEncryption(outputKey: outputKey, inputKey: inputKey)
+        self.requestTimeout = requestTimeout
         self.onClose = onClose
     }
 
     func connect() async throws(ATVError) {
-        try await socket.connect()
+        try await socket.connect(
+            timeout: requestTimeout,
+            timeoutContext: TimeoutContext(
+                protocol: .airPlay,
+                operation: "connect",
+                requestID: "event-channel",
+                duration: requestTimeout
+            )
+        )
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
         }
@@ -74,6 +85,7 @@ internal final class AirPlayDataStreamChannel: @unchecked Sendable {
     private static let zeroCommand = Data(count: 4)
 
     private let socket: AirPlayTCPConnection
+    private let requestTimeout: TimeInterval
     private let onMessage: @Sendable (ProtocolMessageMessage) -> Void
     private let onClose: (@Sendable (Error?) -> Void)?
     private let lock = NSLock()
@@ -87,17 +99,27 @@ internal final class AirPlayDataStreamChannel: @unchecked Sendable {
         outputKey: Data,
         inputKey: Data,
         group: EventLoopGroup,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
         onMessage: @escaping @Sendable (ProtocolMessageMessage) -> Void,
         onClose: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.socket = AirPlayTCPConnection(host: host, port: port, group: group)
         self.socket.enableEncryption(outputKey: outputKey, inputKey: inputKey)
+        self.requestTimeout = requestTimeout
         self.onMessage = onMessage
         self.onClose = onClose
     }
 
     func connect() async throws(ATVError) {
-        try await socket.connect()
+        try await socket.connect(
+            timeout: requestTimeout,
+            timeoutContext: TimeoutContext(
+                protocol: .airPlay,
+                operation: "connect",
+                requestID: "data-stream",
+                duration: requestTimeout
+            )
+        )
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
         }

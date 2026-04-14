@@ -26,12 +26,22 @@ final class SwiftATVConnectTests: XCTestCase {
         }
     }
 
+    private static func recordSuccessfulSetup(
+        on facade: FacadeAppleTV,
+        service: ServiceInfo,
+        credentials: HAPCredentials?,
+        recorder: AttemptRecorder
+    ) {
+        recorder.append(service, credentials: credentials)
+        facade._testSetActiveProtocols(Set(recorder.protocols), primary: recorder.protocols.first)
+    }
+
     func testConnectRequestedMissingProtocolThrowsNoService() async {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
         config.addService(ServiceInfo(protocol: .airPlay, port: 7000))
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .mrp)
+            _ = try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]))
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.noService = error else {
@@ -48,7 +58,11 @@ final class SwiftATVConnectTests: XCTestCase {
         settings.protocols.companion.credentials = "not-valid-hap-credentials"
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .companion, settings: settings)
+            _ = try await ATVClient.connect(
+                config,
+                options: ConnectOptions(protocols: [.companion]),
+                settings: settings
+            )
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.invalidCredentials = error else {
@@ -65,7 +79,7 @@ final class SwiftATVConnectTests: XCTestCase {
         settings.protocols.mrp.credentials = "not-valid-hap-credentials"
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .mrp, settings: settings)
+            _ = try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]), settings: settings)
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.invalidCredentials = error else {
@@ -81,9 +95,14 @@ final class SwiftATVConnectTests: XCTestCase {
         config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
         let recorder = AttemptRecorder()
 
-        _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
-                recorder.append(service, credentials: credentials)
+        let result = try await ATVClient.withProtocolSetupOverride(
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
             },
             operation: {
                 try await ATVClient.connect(config)
@@ -91,6 +110,10 @@ final class SwiftATVConnectTests: XCTestCase {
         )
 
         XCTAssertEqual(recorder.protocols, [.mrp])
+        XCTAssertEqual(result.primaryProtocol, .mrp)
+        XCTAssertEqual(result.activeProtocols, [.mrp])
+        XCTAssertEqual(result.attempts.map(\.protocol), [.mrp])
+        XCTAssertTrue(result.attempts.allSatisfy(\.succeeded))
     }
 
     func testConnectFallsBackAfterSupportedProtocolFailure() async throws {
@@ -102,11 +125,12 @@ final class SwiftATVConnectTests: XCTestCase {
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
+            { facade, service, credentials in
                 recorder.append(service, credentials: credentials)
                 if service.protocol == .mrp {
                     throw ATVError.connectionFailed(message: "MRP failed")
                 }
+                facade._testSetActiveProtocols(Set(recorder.protocols), primary: recorder.protocols.first)
             },
             operation: {
                 try await ATVClient.connect(config, settings: settings)
@@ -114,6 +138,39 @@ final class SwiftATVConnectTests: XCTestCase {
         )
 
         XCTAssertEqual(recorder.protocols, [.mrp, .companion])
+    }
+
+    func testConnectAllAllowedAttachesEveryUsableProtocol() async throws {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.protocols.companion.credentials = "01:02:03:04"
+        let recorder = AttemptRecorder()
+
+        let result = try await ATVClient.withProtocolSetupOverride(
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
+            },
+            operation: {
+                try await ATVClient.connect(
+                    config,
+                    options: ConnectOptions(strategy: .allAllowed),
+                    settings: settings
+                )
+            }
+        )
+
+        XCTAssertEqual(recorder.protocols, [.mrp, .companion])
+        XCTAssertEqual(result.primaryProtocol, .mrp)
+        XCTAssertEqual(result.activeProtocols, [.mrp, .companion])
+        XCTAssertEqual(result.attempts.map(\.protocol), [.mrp, .companion])
+        XCTAssertTrue(result.attempts.allSatisfy(\.succeeded))
     }
 
     func testConnectAttemptsAirPlayTunnelBeforeCompanionAfterMRPFailure() async throws {
@@ -132,11 +189,12 @@ final class SwiftATVConnectTests: XCTestCase {
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
+            { facade, service, credentials in
                 recorder.append(service, credentials: credentials)
                 if service.protocol == .mrp {
                     throw ATVError.connectionFailed(message: "MRP failed")
                 }
+                facade._testSetActiveProtocols(Set(recorder.protocols), primary: recorder.protocols.first)
             },
             operation: {
                 try await ATVClient.connect(config, settings: settings)
@@ -162,8 +220,13 @@ final class SwiftATVConnectTests: XCTestCase {
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
-                recorder.append(service, credentials: credentials)
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
             },
             operation: {
                 try await ATVClient.connect(config, settings: settings)
@@ -192,11 +255,16 @@ final class SwiftATVConnectTests: XCTestCase {
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
-                recorder.append(service, credentials: credentials)
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
             },
             operation: {
-                try await ATVClient.connect(config, protocol: .airPlay)
+                try await ATVClient.connect(config, options: ConnectOptions(protocols: [.airPlay]))
             }
         )
 
@@ -217,7 +285,7 @@ final class SwiftATVConnectTests: XCTestCase {
                     throw ATVError.connectionFailed(message: "requested protocol failed")
                 },
                 operation: {
-                    try await ATVClient.connect(config, protocol: .mrp)
+                    try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]))
                 }
             )
             XCTFail("Expected connect to throw")
@@ -283,7 +351,7 @@ final class SwiftATVConnectTests: XCTestCase {
                     recorder.append(service, credentials: credentials)
                 },
                 operation: {
-                    try await ATVClient.connect(config, protocol: .companion)
+                    try await ATVClient.connect(config, options: ConnectOptions(protocols: [.companion]))
                 }
             )
             XCTFail("Expected connect to throw")
@@ -310,11 +378,16 @@ final class SwiftATVConnectTests: XCTestCase {
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
-                recorder.append(service, credentials: credentials)
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
             },
             operation: {
-                try await ATVClient.connect(config, protocol: .mrp)
+                try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]))
             }
         )
 
@@ -337,11 +410,16 @@ final class SwiftATVConnectTests: XCTestCase {
         let recorder = AttemptRecorder()
 
         _ = try await ATVClient.withProtocolSetupOverride(
-            { _, service, credentials in
-                recorder.append(service, credentials: credentials)
+            { facade, service, credentials in
+                Self.recordSuccessfulSetup(
+                    on: facade,
+                    service: service,
+                    credentials: credentials,
+                    recorder: recorder
+                )
             },
             operation: {
-                try await ATVClient.connect(config, protocol: .mrp, settings: settings)
+                try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]), settings: settings)
             }
         )
 
@@ -359,7 +437,7 @@ final class SwiftATVConnectTests: XCTestCase {
                     recorder.append(service, credentials: credentials)
                 },
                 operation: {
-                    try await ATVClient.connect(config, protocol: .mrp)
+                    try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]))
                 }
             )
             XCTFail("Expected connect to throw")
@@ -384,7 +462,7 @@ final class SwiftATVConnectTests: XCTestCase {
             ))
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .mrp)
+            _ = try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]))
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.invalidCredentials = error else {
@@ -405,7 +483,7 @@ final class SwiftATVConnectTests: XCTestCase {
         settings.clientIdentity.deviceID = "target-device"
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .mrp, settings: settings)
+            _ = try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]), settings: settings)
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.settingsError = error else {
@@ -428,7 +506,7 @@ final class SwiftATVConnectTests: XCTestCase {
         settings.clientIdentity.macAddress = "aa-bb-cc-dd-ee-ff"
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .mrp, settings: settings)
+            _ = try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]), settings: settings)
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.settingsError = error else {

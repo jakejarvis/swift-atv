@@ -500,7 +500,14 @@ public actor CompanionPower: PowerController {
         let deadline = Date().addingTimeInterval(timeout)
         while stateStore.powerState != expected {
             if Date() >= deadline {
-                throw ATVError.operationTimeout("Timeout waiting for Companion power state \(expected)")
+                throw ATVError.operationTimeout(
+                    TimeoutContext(
+                        protocol: .companion,
+                        operation: "waitForState",
+                        requestID: "power:\(expected)",
+                        duration: timeout
+                    )
+                )
             }
             try? await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
         }
@@ -587,7 +594,14 @@ public actor CompanionAudio: AudioController {
         let deadline = Date().addingTimeInterval(timeout)
         while stateStore.volumeRevision <= revision {
             if Date() >= deadline {
-                throw ATVError.operationTimeout("Timeout waiting for Companion volume update")
+                throw ATVError.operationTimeout(
+                    TimeoutContext(
+                        protocol: .companion,
+                        operation: "waitForState",
+                        requestID: "volume",
+                        duration: timeout
+                    )
+                )
             }
             try? await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
         }

@@ -507,6 +507,24 @@ public enum PairingCodeDirection: Sendable, Hashable, CustomStringConvertible {
     }
 }
 
+/// Result returned from a completed device pairing flow.
+public struct PairingResult: Sendable {
+    /// Service that was paired.
+    public let service: ServiceInfo
+    /// HAP long-term credentials produced by pairing.
+    public let credentials: HAPCredentials
+
+    public init(service: ServiceInfo, credentials: HAPCredentials) {
+        self.service = service
+        self.credentials = credentials
+    }
+
+    /// Serialized HAP credentials suitable for persistent storage.
+    public var serializedCredentials: String {
+        credentials.serialize()
+    }
+}
+
 /// Interface for device pairing procedures.
 public protocol PairingHandler: Sendable {
     /// Describes where the pairing PIN is shown and whether the client should display one.
@@ -517,7 +535,7 @@ public protocol PairingHandler: Sendable {
     var credentials: HAPCredentials? { get }
     func pin(_ pin: String) async throws(ATVError)
     func begin() async throws(ATVError)
-    func finish() async throws(ATVError)
+    func finish() async throws(ATVError) -> PairingResult
     func close() async
 }
 

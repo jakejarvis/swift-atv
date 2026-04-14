@@ -209,6 +209,68 @@
             )
         }
 
+        func testSleepProxyMarksDeepSleepAndUsesServiceNameIdentifier() throws {
+            let services = [
+                DiscoveredService(
+                    serviceType: .sleepProxy,
+                    name: "sleep-id Living Room",
+                    host: "192.168.1.10",
+                    port: 0,
+                    txtRecord: [:]
+                )
+            ]
+
+            let config = try XCTUnwrap(ATVScanner.configurations(from: services).first)
+
+            XCTAssertTrue(config.deepSleep)
+            XCTAssertEqual(config.name, "Living Room")
+            XCTAssertEqual(config.identifier, "sleep-id")
+            XCTAssertEqual(config.mainIdentifier, "sleep-id")
+            XCTAssertTrue(config.services.isEmpty)
+        }
+
+        func testSleepProxyMergesWithProtocolServiceByIdentifier() throws {
+            let services = [
+                DiscoveredService(
+                    serviceType: .mrp,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49152,
+                    txtRecord: ["UniqueIdentifier": "sleep-id"]
+                ),
+                DiscoveredService(
+                    serviceType: .sleepProxy,
+                    name: "sleep-id Living Room",
+                    host: "fe80::1",
+                    port: 0,
+                    txtRecord: [:]
+                ),
+            ]
+
+            let config = try XCTUnwrap(ATVScanner.configurations(from: services).first)
+
+            XCTAssertEqual(ATVScanner.configurations(from: services).count, 1)
+            XCTAssertTrue(config.deepSleep)
+            XCTAssertEqual(config.service(for: .mrp)?.identifier, "sleep-id")
+        }
+
+        func testSleepProxyWithoutIdentifierProducesDiagnostic() throws {
+            let service = DiscoveredService(
+                serviceType: .sleepProxy,
+                name: "LivingRoom",
+                host: "192.168.1.10",
+                port: 0,
+                txtRecord: [:]
+            )
+
+            let result = ATVScanner.scanResult(from: [service], diagnostics: [])
+            let diagnostic = try XCTUnwrap(result.diagnostics.first)
+
+            XCTAssertEqual(result.diagnostics.count, 1)
+            XCTAssertEqual(diagnostic.serviceType, .sleepProxy)
+            XCTAssertEqual(diagnostic.kind, .missingIdentifier)
+        }
+
         func testExistingMRPAndAirPlayIdentifierBehaviorDoesNotRegress() throws {
             let services = [
                 DiscoveredService(

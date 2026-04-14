@@ -204,14 +204,14 @@ final class RelayerTests: XCTestCase {
         XCTAssertTrue(capabilities.isAvailable(.remote(.channelUp)))
     }
 
-    func testRelayingCapabilitiesKeepHigherPriorityUnavailableState() {
+    func testRelayingCapabilitiesPreferAvailableLowerPriorityState() {
         let relayer = Relayer<CapabilityProvider>()
         relayer.register(StubCapabilities([.mediaCommand(.play): .unavailable]), for: .mrp)
         relayer.register(StubCapabilities([.mediaCommand(.play): .available]), for: .companion)
 
         let capabilities = RelayingCapabilities(relayer: relayer)
 
-        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.play)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.play)).state, .available)
     }
 }
 

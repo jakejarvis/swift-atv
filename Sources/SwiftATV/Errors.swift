@@ -1,5 +1,29 @@
 import Foundation
 
+/// Structured context for an operation that exceeded its timeout.
+public struct TimeoutContext: Sendable, Hashable {
+    /// Protocol involved in the operation, when known.
+    public let `protocol`: ATVProtocol?
+    /// Stable operation category, such as `connect`, `request`, or `waitForState`.
+    public let operation: String
+    /// Request, frame, message, or state identifier involved in the timeout.
+    public let requestID: String?
+    /// Timeout duration in seconds.
+    public let duration: TimeInterval
+
+    public init(
+        protocol: ATVProtocol? = nil,
+        operation: String,
+        requestID: String? = nil,
+        duration: TimeInterval
+    ) {
+        self.protocol = `protocol`
+        self.operation = operation
+        self.requestID = requestID
+        self.duration = duration
+    }
+}
+
 /// A protocol setup failure recorded during automatic connection fallback.
 public struct ConnectionAttemptError: Sendable {
     public let `protocol`: ATVProtocol
@@ -43,7 +67,7 @@ public indirect enum ATVError: Error, LocalizedError, Sendable {
     case noCredentials(String)
 
     /// Operation timed out.
-    case operationTimeout(String)
+    case operationTimeout(TimeoutContext)
 
     /// Device is in an invalid state for this operation.
     case invalidState(String)
@@ -92,7 +116,7 @@ public indirect enum ATVError: Error, LocalizedError, Sendable {
         case .notSupported(let msg): return "Not supported: \(msg)"
         case .invalidCredentials(let msg): return "Invalid credentials: \(msg)"
         case .noCredentials(let msg): return "No credentials: \(msg)"
-        case .operationTimeout(let msg): return "Operation timeout: \(msg)"
+        case .operationTimeout(let context): return "Operation timeout: \(Self.describeTimeout(context))"
         case .invalidState(let msg): return "Invalid state: \(msg)"
         case .blocked(let msg): return "Blocked: \(msg)"
         case .invalidResponse(let msg): return "Invalid response: \(msg)"
@@ -117,5 +141,18 @@ public indirect enum ATVError: Error, LocalizedError, Sendable {
     private static func describeAttempt(_ attempt: ConnectionAttemptError) -> String {
         let message = attempt.error.errorDescription ?? String(describing: attempt.error)
         return "\(attempt.protocol): \(message)"
+    }
+
+    private static func describeTimeout(_ context: TimeoutContext) -> String {
+        var parts: [String] = []
+        if let `protocol` = context.protocol {
+            parts.append("\(`protocol`)")
+        }
+        parts.append(context.operation)
+        if let requestID = context.requestID, !requestID.isEmpty {
+            parts.append(requestID)
+        }
+        parts.append("\(context.duration)s")
+        return parts.joined(separator: " ")
     }
 }

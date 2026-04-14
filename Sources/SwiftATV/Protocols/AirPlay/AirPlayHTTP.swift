@@ -132,18 +132,33 @@ internal struct AirPlayHTTPRequest: Sendable {
 
 internal final class AirPlayControlConnection: @unchecked Sendable {
     private let socket: AirPlayTCPConnection
+    private let requestTimeout: TimeInterval
     private let lock = NSLock()
     private var responseBuffer = Data()
     private var cSeq = 0
 
     let sessionID = UUID().uuidString.uppercased()
 
-    init(host: String, port: Int, group: EventLoopGroup? = nil) {
+    init(
+        host: String,
+        port: Int,
+        requestTimeout: TimeInterval = defaultProtocolRequestTimeout,
+        group: EventLoopGroup? = nil
+    ) {
         self.socket = AirPlayTCPConnection(host: host, port: port, group: group)
+        self.requestTimeout = requestTimeout
     }
 
     func connect() async throws(ATVError) {
-        try await socket.connect()
+        try await socket.connect(
+            timeout: requestTimeout,
+            timeoutContext: TimeoutContext(
+                protocol: .airPlay,
+                operation: "connect",
+                requestID: "control",
+                duration: requestTimeout
+            )
+        )
     }
 
     func close() async {
@@ -286,7 +301,7 @@ internal final class AirPlayControlConnection: @unchecked Sendable {
         var request = "\(method) \(path) HTTP/1.1\r\n"
         request += requestHeaders(headers, body: body)
         try await socket.send(Data(request.utf8) + (body ?? Data()))
-        return try await receiveResponse()
+        return try await receiveResponse(requestID: "\(method) \(path)")
     }
 
     private func sendRTSPRequest(
@@ -311,10 +326,10 @@ internal final class AirPlayControlConnection: @unchecked Sendable {
             body: body
         )
         try await socket.send(Data(request.utf8) + (body ?? Data()))
-        return try await receiveResponse()
+        return try await receiveResponse(requestID: "\(method) \(path)")
     }
 
-    private func receiveResponse() async throws(ATVError) -> AirPlayHTTPResponse {
+    private func receiveResponse(requestID: String) async throws(ATVError) -> AirPlayHTTPResponse {
         while true {
             let parsedResult: Result<AirPlayHTTPResponse?, ATVError> = lock.withLock {
                 do {
@@ -330,7 +345,15 @@ internal final class AirPlayControlConnection: @unchecked Sendable {
                 return parsed
             }
 
-            let data = try await socket.receive()
+            let data = try await socket.receive(
+                timeout: requestTimeout,
+                timeoutContext: TimeoutContext(
+                    protocol: .airPlay,
+                    operation: "request",
+                    requestID: requestID,
+                    duration: requestTimeout
+                )
+            )
             lock.withLock {
                 responseBuffer.append(data)
             }

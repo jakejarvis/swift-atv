@@ -3,6 +3,35 @@ import XCTest
 @testable import SwiftATV
 
 final class FacadeEventTests: XCTestCase {
+    func testUnsupportedMetadataThrowsNotSupported() async {
+        let facade = FacadeAppleTV(
+            configuration: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),
+            settings: ATVSettings()
+        )
+
+        do {
+            _ = try await facade.metadata.playing()
+            XCTFail("Expected playing() to throw")
+        } catch let error {
+            guard case ATVError.notSupported(let message) = error else {
+                XCTFail("Expected notSupported, got \(error)")
+                return
+            }
+            XCTAssertEqual(message, "Metadata not available")
+        }
+
+        do {
+            _ = try await facade.metadata.artwork()
+            XCTFail("Expected artwork() to throw")
+        } catch let error {
+            guard case ATVError.notSupported(let message) = error else {
+                XCTFail("Expected notSupported, got \(error)")
+                return
+            }
+            XCTAssertEqual(message, "Metadata not available")
+        }
+    }
+
     func testExplicitCloseEmitsConnectionClosed() async {
         let facade = FacadeAppleTV(
             configuration: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),

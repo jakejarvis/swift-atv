@@ -62,7 +62,9 @@ You can narrow the scan to specific protocols or device identifiers to avoid
 paying for protocol probes you don't need. Identifier filtering matches any
 identifier reported by the device's services, not just the preferred display
 identifier. Companion-only discoveries use the stable Companion TXT identifiers
-reported by `_companion-link._tcp`:
+reported by `_companion-link._tcp`. Unfiltered scans also include
+`_sleep-proxy._udp`, which can mark configurations as ``AppleTVConfiguration/deepSleep``
+when the sleep-proxy service name carries a matching device identifier:
 
 ```swift
 let companionOnly = try await ATVClient.scan(
@@ -112,37 +114,34 @@ case .clientProvided(let pin):
     print("Enter this PIN on \(device.name): \(pin)")
 }
 
-try await handler.finish()
+let pairing = try await handler.finish()
+settings.apply(pairing)
 
-// Pull out the resulting HAP long-term credentials from the protocol-agnostic
-// PairingHandler.
-if let identifier = device.mainIdentifier,
-   let credentials = handler.serializedCredentials
-{
-    try keychain.store(credentials, for: identifier)
+if let identifier = device.mainIdentifier {
+    try keychain.store(settings, for: identifier)
 }
 
 await handler.close()
 ```
 
-Store the serialized credentials under one of the device's identifiers
+Store the updated settings under one of the device's identifiers
 (``AppleTVConfiguration/mainIdentifier`` or ``AppleTVConfiguration/allIdentifiers``)
-so you can restore them on the next connection.
+so you can restore the protocol credentials on the next connection.
 
 To pair through direct MRP, request `.mrp` and store the credentials for
 `.mrp`:
 
 ```swift
-let handler = try await ATVClient.pair(device, protocol: .mrp)
+var settings = ATVSettings()
+let handler = try await ATVClient.pair(device, protocol: .mrp, settings: settings)
 
 try await handler.begin()
 try await handler.pin(userEnteredPIN)
-try await handler.finish()
+let pairing = try await handler.finish()
+settings.apply(pairing)
 
-if let identifier = device.mainIdentifier,
-   let credentials = handler.serializedCredentials
-{
-    try keychain.store(credentials, for: identifier)
+if let identifier = device.mainIdentifier {
+    try keychain.store(settings, for: identifier)
 }
 
 await handler.close()
@@ -164,16 +163,20 @@ let handler = try await ATVClient.pair(
 
 try await handler.begin()
 try await handler.pin(userEnteredPIN)
-try await handler.finish()
+let pairing = try await handler.finish()
+settings.apply(pairing)
 
-settings.setCredentials(handler.serializedCredentials, for: .airPlay)
+if let identifier = device.mainIdentifier {
+    try keychain.store(settings, for: identifier)
+}
+
 await handler.close()
 ```
 
 ## Connect and issue commands
 
 Once paired, connect by loading the stored credentials into
-``ATVSettings`` and calling ``ATVClient/connect(_:protocol:settings:)``:
+``ATVSettings`` and calling ``ATVClient/connect(_:options:settings:)``:
 
 ```swift
 var settings = ATVSettings()
@@ -181,7 +184,10 @@ settings.clientIdentity.name = "Clicker"
 settings.setCredentials(storedCredentialsString, for: .companion)
 // Use `.mrp` here when you stored credentials from MRPPairingHandler.
 
-let atv = try await ATVClient.connect(device, settings: settings)
+let connection = try await ATVClient.connect(device, settings: settings)
+let atv = connection.device
+
+print("Connected with \(connection.primaryProtocol)")
 
 // Remote control
 try await atv.remoteControl.home()
@@ -204,17 +210,23 @@ if atv.capabilities.isAvailable(.keyboard(.textSet)) {
 await atv.close()
 ```
 
-``ATVClient/connect(_:protocol:settings:)`` tries enabled services in a
-deterministic order for implemented control protocols and returns when the
-first usable protocol connects: direct MRP first, then the AirPlay 2 MRP
-tunnel, then Companion. If you request `.mrp`, SwiftATV only uses direct MRP.
-If you request `.airPlay`, SwiftATV opens the AirPlay MRP tunnel.
+``ATVClient/connect(_:options:settings:)`` tries enabled services in
+``ConnectOptions/protocols`` order and returns ``ConnectResult`` when a usable
+protocol connects. The default order is direct MRP first, then the AirPlay 2
+MRP tunnel, then Companion. Use `ConnectOptions(protocols: [.mrp])` for strict
+direct MRP, or `ConnectOptions(strategy: .allAllowed)` to attach every usable
+allowed protocol before returning.
 
 Credentials in ``ATVSettings`` take precedence. If settings do not contain
 credentials for a protocol, SwiftATV falls back to the matching
 ``ServiceInfo/credentials`` value from an enriched scan result. The AirPlay MRP
 tunnel tries AirPlay credentials first, then Companion credentials when AirPlay
 credentials are absent. Companion connections always require credentials.
+
+Use ``AppleTVConfiguration/connectableProtocols(settings:)``,
+``AppleTVConfiguration/preferredPairingService(settings:protocols:)``, and
+``ServiceInfo/effectivePairingStatus(settings:)`` to apply SwiftATV's protocol
+policy before opening connect or pairing UI.
 
 ``ATVSettings/clientIdentity`` describes your local app or controller. Do not
 copy identifiers from the scanned Apple TV into this field; SwiftATV validates

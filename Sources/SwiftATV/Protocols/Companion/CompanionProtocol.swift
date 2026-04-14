@@ -56,6 +56,24 @@ public enum CompanionSystemStatus: Int, Sendable {
 /// Default timeout for Companion protocol requests.
 public let defaultCompanionTimeout: TimeInterval = 5.0
 
+private final class PendingCompanionRequest: @unchecked Sendable {
+    let id = UUID()
+    let identifier: String
+    let timeout: TimeInterval
+    let continuation: CheckedContinuation<OPACK.Value, Error>
+    var timeoutTask: Task<Void, Never>?
+
+    init(
+        identifier: String,
+        timeout: TimeInterval,
+        continuation: CheckedContinuation<OPACK.Value, Error>
+    ) {
+        self.identifier = identifier
+        self.timeout = timeout
+        self.continuation = continuation
+    }
+}
+
 /// High-level Companion protocol handler.
 ///
 /// Manages OPACK message exchange over the CompanionConnection,
@@ -64,7 +82,7 @@ public let defaultCompanionTimeout: TimeInterval = 5.0
 public actor CompanionProtocolHandler {
     private let connection: CompanionConnection
     private var xid: Int
-    private var pendingRequests: [Int: CheckedContinuation<OPACK.Value, Error>] = [:]
+    private var pendingRequests: [Int: PendingCompanionRequest] = [:]
     private var eventContinuation: AsyncStream<(String, OPACK.Value)>.Continuation?
     private var _eventStream: AsyncStream<(String, OPACK.Value)>?
     private var sessionID: UInt64 = 0
@@ -129,8 +147,9 @@ public actor CompanionProtocolHandler {
     internal func failPendingRequests(reason: ATVError) {
         let snapshot = pendingRequests
         pendingRequests.removeAll()
-        for (_, continuation) in snapshot {
-            continuation.resume(throwing: reason)
+        for (_, request) in snapshot {
+            request.timeoutTask?.cancel()
+            request.continuation.resume(throwing: reason)
         }
     }
 
@@ -144,7 +163,11 @@ public actor CompanionProtocolHandler {
         do {
             return try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<OPACK.Value, Error>) in
-                pendingRequests[xid] = continuation
+                pendingRequests[xid] = PendingCompanionRequest(
+                    identifier: "test",
+                    timeout: defaultCompanionTimeout,
+                    continuation: continuation
+                )
             }
         } catch let err as ATVError {
             throw err
@@ -186,30 +209,48 @@ public actor CompanionProtocolHandler {
         do {
             return try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<OPACK.Value, Error>) in
+                let request = PendingCompanionRequest(
+                    identifier: identifier,
+                    timeout: timeout,
+                    continuation: continuation
+                )
+                let requestID = request.id
                 // 1. Synchronously install the waiter in the actor's state.
                 //    (Fine to touch actor-isolated state here: this closure
                 //    runs synchronously on the actor before any suspension.)
-                self.pendingRequests[currentXID] = continuation
+                self.pendingRequests[currentXID] = request
                 // 2. Kick off the send + timeout on a detached Task that
                 //    hops back onto the actor when it needs to touch state.
-                Task { [weak self] in
+                let task = Task { [weak self] in
                     guard let self else { return }
                     do {
                         try await self.connection.send(type: .eOPACK, payload: data)
                     } catch {
-                        if let waiter = await self.takePendingRequest(xid: currentXID) {
-                            waiter.resume(throwing: error)
+                        if let waiter = await self.takePendingRequest(xid: currentXID, id: requestID) {
+                            waiter.timeoutTask?.cancel()
+                            waiter.continuation.resume(throwing: error)
                         }
                         return
                     }
-                    try? await Task.sleep(nanoseconds: timeoutNs)
-                    if let waiter = await self.takePendingRequest(xid: currentXID) {
-                        waiter.resume(
+                    do {
+                        try await Task.sleep(nanoseconds: timeoutNs)
+                    } catch {
+                        return
+                    }
+                    if let waiter = await self.takePendingRequest(xid: currentXID, id: requestID) {
+                        waiter.continuation.resume(
                             throwing: ATVError.operationTimeout(
-                                "Timeout waiting for response to \(identifier)"
-                            ))
+                                TimeoutContext(
+                                    protocol: .companion,
+                                    operation: "request",
+                                    requestID: identifier,
+                                    duration: timeout
+                                )
+                            )
+                        )
                     }
                 }
+                request.timeoutTask = task
             }
         } catch let err as ATVError {
             throw err
@@ -220,8 +261,11 @@ public actor CompanionProtocolHandler {
 
     /// Actor-isolated helper so the send + timeout Task can remove a
     /// pending request atomically before resuming its continuation.
-    private func takePendingRequest(xid: Int) -> CheckedContinuation<OPACK.Value, Error>? {
-        pendingRequests.removeValue(forKey: xid)
+    private func takePendingRequest(xid: Int, id: UUID) -> PendingCompanionRequest? {
+        guard let request = pendingRequests[xid], request.id == id else {
+            return nil
+        }
+        return pendingRequests.removeValue(forKey: xid)
     }
 
     /// Send an OPACK request without registering a response waiter.
@@ -357,12 +401,13 @@ public actor CompanionProtocolHandler {
             // Response to a request
             if let xidVal = message["_x"]?.intValue {
                 let xid = Int(xidVal)
-                if let continuation = pendingRequests.removeValue(forKey: xid) {
+                if let request = pendingRequests.removeValue(forKey: xid) {
+                    request.timeoutTask?.cancel()
                     // Check for error
                     if let errorMsg = message["_em"]?.stringValue {
-                        continuation.resume(throwing: ATVError.protocolError(errorMsg))
+                        request.continuation.resume(throwing: ATVError.protocolError(errorMsg))
                     } else {
-                        continuation.resume(returning: message)
+                        request.continuation.resume(returning: message)
                     }
                 }
             }

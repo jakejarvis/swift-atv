@@ -49,9 +49,9 @@ final class ConsumerCompileTests: XCTestCase {
         let connect:
             (
                 SwiftATV.AppleTVConfiguration,
-                SwiftATV.ATVProtocol?,
+                SwiftATV.ConnectOptions,
                 SwiftATV.ATVSettings?
-            ) async throws(SwiftATV.ATVError) -> any SwiftATV.AppleTVDevice = ATVClient.connect
+            ) async throws(SwiftATV.ATVError) -> SwiftATV.ConnectResult = ATVClient.connect
         let pair:
             (
                 SwiftATV.AppleTVConfiguration,
