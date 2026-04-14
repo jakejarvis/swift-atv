@@ -16,7 +16,13 @@ final class ConsumerCompileTests: XCTestCase {
         )
         let settings = SwiftATV.ATVSettings()
 
-        XCTAssertEqual(ATVClient.version, "0.2.2")
+        XCTAssertFalse(ATVClient.version.isEmpty)
+        XCTAssertNotNil(
+            ATVClient.version.range(
+                of: #"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$"#,
+                options: .regularExpression
+            )
+        )
         XCTAssertEqual(config.service(for: protocolName)?.port, SwiftATV.ServiceInfo.defaultMRPPort)
         XCTAssertNil(settings.credentials(for: protocolName))
     }

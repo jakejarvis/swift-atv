@@ -33,12 +33,13 @@ Add SwiftATV to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jakejarvis/swift-atv.git", from: "0.2.2"),
+    .package(url: "https://github.com/jakejarvis/swift-atv.git", branch: "main"),
 ]
 ```
 
-> SwiftATV is pre-1.0; API may change in minor releases. Pin a release version
-> or exact revision and review the [CHANGELOG](CHANGELOG.md) before upgrading.
+> SwiftATV is pre-1.0; API may change in minor releases. For production apps,
+> replace `branch: "main"` with a tagged release version or exact revision and
+> review the [CHANGELOG](CHANGELOG.md) before upgrading.
 
 Then add it as a dependency to your target:
 

@@ -23,6 +23,11 @@ Pre-1.0: minor version bumps may contain breaking changes.
   set using the `_tiStart` / `_tiC` RTI text-input flow, including native UID
   binary-plist payloads for insert and atomic replace operations.
 
+### Changed
+
+- Installation snippets no longer hard-code the current release number, so
+  release bumps only update `ATVClient.version` and changelog metadata.
+
 ## [0.2.2] - 2026-04-13
 
 ### Added

@@ -15,7 +15,7 @@ Using SwiftATV is a three-step flow:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/jakejarvis/swift-atv.git", from: "0.2.2")
+    .package(url: "https://github.com/jakejarvis/swift-atv.git", branch: "main")
 ],
 targets: [
     .target(
@@ -26,6 +26,9 @@ targets: [
     )
 ]
 ```
+
+For production apps, replace `branch: "main"` with a tagged release version or
+exact revision and review the changelog before upgrading.
 
 For Xcode app targets, add `https://github.com/jakejarvis/swift-atv.git` in
 **Package Dependencies** and link the `SwiftATV` product to the app target and

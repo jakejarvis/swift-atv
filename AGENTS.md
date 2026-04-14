@@ -102,6 +102,11 @@ following in the same change:
   Implementation Status, Dependencies, and any architecture notes.
 - The source-level DocC `///` comments on any type you changed.
 
+Release version bumps should update `ATVClient.version` in
+`Sources/SwiftATV/ATVClient.swift` and the changelog release heading/compare
+links. README and DocC installation snippets intentionally avoid hard-coded
+release numbers.
+
 Treat this as a pre-commit checklist, not a polish pass. Docs that drift
 from the code are worse than no docs — they silently mislead.
 
