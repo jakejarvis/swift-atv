@@ -43,10 +43,10 @@ final class SwiftATVConnectTests: XCTestCase {
 
     func testConnectRequestedUnsupportedProtocolThrowsNotSupported() async {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
-        config.addService(ServiceInfo(protocol: .airPlay, port: 7000))
+        config.addService(ServiceInfo(protocol: .raop, port: 7000))
 
         do {
-            _ = try await ATVClient.connect(config, protocol: .airPlay)
+            _ = try await ATVClient.connect(config, protocol: .raop)
             XCTFail("Expected connect to throw")
         } catch let error {
             guard case ATVError.notSupported = error else {
@@ -58,7 +58,7 @@ final class SwiftATVConnectTests: XCTestCase {
 
     func testConnectOnlyUnsupportedServicesThrowsNoService() async {
         var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
-        config.addService(ServiceInfo(protocol: .airPlay, port: 7000))
+        config.addService(ServiceInfo(protocol: .raop, port: 7000))
 
         do {
             _ = try await ATVClient.connect(config)
@@ -76,7 +76,7 @@ final class SwiftATVConnectTests: XCTestCase {
         let facade = FacadeAppleTV(configuration: config, settings: ATVSettings())
 
         do {
-            try await facade.setupProtocol(ServiceInfo(protocol: .airPlay, port: 7000))
+            try await facade.setupProtocol(ServiceInfo(protocol: .raop, port: 7000))
             XCTFail("Expected setupProtocol to throw")
         } catch let error {
             guard case ATVError.notSupported = error else {
@@ -157,6 +157,94 @@ final class SwiftATVConnectTests: XCTestCase {
         )
 
         XCTAssertEqual(recorder.protocols, [.mrp, .companion])
+    }
+
+    func testConnectAttemptsAirPlayTunnelBeforeCompanionAfterMRPFailure() async throws {
+        let credentials = "01:02:03:04"
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        config.addService(
+            ServiceInfo(
+                protocol: .airPlay,
+                port: 7000,
+                properties: ["features": "0x4000000000", "model": "AppleTV11,1", "osvers": "16.0"]
+            ))
+        config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.protocols.airplay.credentials = credentials
+        let recorder = AttemptRecorder()
+
+        _ = try await ATVClient.withProtocolSetupOverride(
+            { _, service, credentials in
+                recorder.append(service, credentials: credentials)
+                if service.protocol == .mrp {
+                    throw ATVError.connectionFailed("MRP failed")
+                }
+            },
+            operation: {
+                try await ATVClient.connect(config, settings: settings)
+            }
+        )
+
+        XCTAssertEqual(recorder.protocols, [.mrp, .airPlay, .companion])
+        XCTAssertEqual(recorder.credentials(for: .airPlay), credentials)
+    }
+
+    func testConnectSkipsAirPlayTunnelAfterDirectMRPSucceeds() async throws {
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        config.addService(
+            ServiceInfo(
+                protocol: .airPlay,
+                port: 7000,
+                properties: ["features": "0x4000000000", "model": "AppleTV11,1", "osvers": "16.0"]
+            ))
+        config.addService(ServiceInfo(protocol: .companion, port: 49153, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.protocols.airplay.credentials = "01:02:03:04"
+        let recorder = AttemptRecorder()
+
+        _ = try await ATVClient.withProtocolSetupOverride(
+            { _, service, credentials in
+                recorder.append(service, credentials: credentials)
+            },
+            operation: {
+                try await ATVClient.connect(config, settings: settings)
+            }
+        )
+
+        XCTAssertEqual(recorder.protocols, [.mrp, .companion])
+    }
+
+    func testExplicitAirPlayUsesCompanionCredentialFallback() async throws {
+        let companionCredentials = "01:02:03:04"
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "Test")
+        config.addService(
+            ServiceInfo(
+                protocol: .airPlay,
+                port: 7000,
+                properties: ["features": "0x4000000000", "model": "AppleTV11,1", "osvers": "16.0"]
+            ))
+        config.addService(
+            ServiceInfo(
+                protocol: .companion,
+                port: 49153,
+                credentials: companionCredentials,
+                pairingRequirement: .mandatory
+            ))
+        let recorder = AttemptRecorder()
+
+        _ = try await ATVClient.withProtocolSetupOverride(
+            { _, service, credentials in
+                recorder.append(service, credentials: credentials)
+            },
+            operation: {
+                try await ATVClient.connect(config, protocol: .airPlay)
+            }
+        )
+
+        XCTAssertEqual(recorder.protocols, [.airPlay])
+        XCTAssertEqual(recorder.credentials(for: .airPlay), companionCredentials)
     }
 
     func testConnectRequestedProtocolDoesNotFallBack() async {
@@ -317,7 +405,7 @@ final class SwiftATVConnectTests: XCTestCase {
         }
         XCTAssertThrowsError(
             try ATVClient.validatePairingService(
-                ServiceInfo(protocol: .airPlay, port: 7000, pairingRequirement: .notNeeded)
+                ServiceInfo(protocol: .raop, port: 7000, pairingRequirement: .notNeeded)
             )
         ) { error in
             guard case ATVError.notSupported = error else {
@@ -325,5 +413,10 @@ final class SwiftATVConnectTests: XCTestCase {
                 return
             }
         }
+        XCTAssertNoThrow(
+            try ATVClient.validatePairingService(
+                ServiceInfo(protocol: .airPlay, port: 7000, pairingRequirement: .notNeeded)
+            )
+        )
     }
 }

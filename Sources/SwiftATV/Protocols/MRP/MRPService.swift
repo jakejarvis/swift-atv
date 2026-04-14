@@ -146,14 +146,24 @@ final class MRPStateStore: @unchecked Sendable {
     }
 }
 
-/// Setup and lifecycle management for direct MRP.
+internal enum MRPAuthenticationMode: Sendable, Equatable {
+    case directPairVerify
+    case alreadySecure
+}
+
+internal enum MRPHeartbeatMode: Sendable, Equatable {
+    case genericMessage
+    case disabled
+}
+
+/// Setup and lifecycle management for MRP.
 public final class MRPService: @unchecked Sendable {
     /// Bonjour service type for direct Media Remote Protocol.
     public static let serviceType = "_mediaremotetv._tcp"
     /// Default port for direct MRP.
     public static let defaultPort = 49152
 
-    private let connection: MRPConnection
+    private let connection: any MRPTransport
     private let protocolHandler: MRPProtocolHandler
     private let playerState = MRPPlayerState()
     private let stateStore = MRPStateStore()
@@ -191,13 +201,38 @@ public final class MRPService: @unchecked Sendable {
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         let connection = MRPConnection(host: host, port: port)
-        let handler = MRPProtocolHandler(
+        self.connection = connection
+        self.protocolHandler = MRPProtocolHandler(
             connection: connection,
             playerState: playerState,
             stateStore: stateStore,
+            authenticationMode: .directPairVerify,
+            heartbeatMode: .genericMessage,
             onConnectionClosed: onConnectionClosed
         )
-        self.connection = connection
+        self.credentials = credentials
+        self.settings = settings
+        self.onConnectionClosed = onConnectionClosed
+        self.connection.delegate = protocolHandler
+    }
+
+    internal init(
+        transport: any MRPTransport,
+        credentials: HAPCredentials? = nil,
+        settings: ATVSettings,
+        authenticationMode: MRPAuthenticationMode,
+        heartbeatMode: MRPHeartbeatMode,
+        onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
+    ) {
+        self.connection = transport
+        let handler = MRPProtocolHandler(
+            connection: transport,
+            playerState: playerState,
+            stateStore: stateStore,
+            authenticationMode: authenticationMode,
+            heartbeatMode: heartbeatMode,
+            onConnectionClosed: onConnectionClosed
+        )
         self.protocolHandler = handler
         self.credentials = credentials
         self.settings = settings
@@ -230,21 +265,27 @@ public final class MRPService: @unchecked Sendable {
 }
 
 actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
-    private let connection: MRPConnection
+    private let connection: any MRPTransport
     private let playerState: MRPPlayerState
     private let stateStore: MRPStateStore
+    private let authenticationMode: MRPAuthenticationMode
+    private let heartbeatMode: MRPHeartbeatMode
     private let onConnectionClosed: (@Sendable (Error?) -> Void)?
     private var heartbeatTask: Task<Void, Never>?
 
     init(
-        connection: MRPConnection,
+        connection: any MRPTransport,
         playerState: MRPPlayerState,
         stateStore: MRPStateStore,
+        authenticationMode: MRPAuthenticationMode,
+        heartbeatMode: MRPHeartbeatMode,
         onConnectionClosed: (@Sendable (Error?) -> Void)? = nil
     ) {
         self.connection = connection
         self.playerState = playerState
         self.stateStore = stateStore
+        self.authenticationMode = authenticationMode
+        self.heartbeatMode = heartbeatMode
         self.onConnectionClosed = onConnectionClosed
     }
 
@@ -259,7 +300,7 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         stateStore.update(message: deviceInfo)
         await syncMetadataSnapshot()
 
-        if let credentials {
+        if let credentials, authenticationMode == .directPairVerify {
             try await verify(credentials: credentials)
         }
 
@@ -272,7 +313,9 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
             MRPMessages.getKeyboardSession(),
             responseType: .getKeyboardSessionMessage
         )
-        startHeartbeat()
+        if heartbeatMode == .genericMessage {
+            startHeartbeat()
+        }
     }
 
     func stop() async {

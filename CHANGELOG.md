@@ -11,6 +11,11 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Added
 
+- AirPlay 2 HAP pair-setup is now available via `ATVClient.pair(...,
+  protocol: .airPlay, settings:)`, and AirPlay 2 MRP tunneling can carry MRP
+  remote control, metadata, push, power, and audio over the AirPlay data
+  stream. Default connection setup tries direct MRP first, then the AirPlay MRP
+  tunnel when available, then Companion.
 - Companion `KeyboardController` now implements text get, clear, append, and
   set using the `_tiStart` / `_tiC` RTI text-input flow, including native UID
   binary-plist payloads for insert and atomic replace operations.

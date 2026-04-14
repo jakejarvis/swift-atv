@@ -247,7 +247,10 @@
                 let allowPairing = property(properties, keys: ["allowpairing", "AllowPairing"])
                 return allowPairing?.lowercased() == "yes" ? .optional : .disabled
 
-            case .airPlay, .raop:
+            case .airPlay:
+                return AirPlaySupport.pairingRequirement(from: properties)
+
+            case .raop:
                 let passwordRequired = property(properties, keys: ["pw"])?.lowercased() == "true"
                 return passwordRequired ? .mandatory : .notNeeded
 

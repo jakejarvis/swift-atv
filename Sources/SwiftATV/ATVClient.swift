@@ -11,7 +11,7 @@ public enum ATVClient {
     public static let version = "0.2.2"
 
     fileprivate static let connectProtocolPriority: [ATVProtocol] = [
-        .mrp, .companion, .airPlay, .raop, .dmap,
+        .mrp, .airPlay, .companion, .raop, .dmap,
     ]
 
     internal typealias ProtocolSetupOverride =
@@ -108,10 +108,12 @@ public enum ATVClient {
     /// in the configuration.
     ///
     /// Without an explicit protocol, implemented control protocols are tried
-    /// in deterministic order (MRP, then Companion) and setup falls back past
-    /// failed services until at least one protocol connects. If `settings`
-    /// does not contain credentials for a protocol, `ServiceInfo.credentials`
-    /// is used as a fallback.
+    /// in deterministic order: direct MRP, then AirPlay-tunneled MRP when
+    /// direct MRP is unavailable or fails, then Companion. Setup falls back
+    /// past failed services until at least one protocol connects. If
+    /// `settings` does not contain credentials for a protocol,
+    /// `ServiceInfo.credentials` is used as a fallback. The AirPlay tunnel
+    /// tries AirPlay credentials first and Companion credentials second.
     ///
     /// - Parameters:
     ///   - config: Device configuration obtained from scanning or manually created.
@@ -153,6 +155,7 @@ public enum ATVClient {
         var bestError: ATVError?
         var sawUnsupportedService = false
         let requestedSpecificProtocol = `protocol` != nil
+        var directMRPConnected = false
 
         for service in prioritizedServices {
             guard service.protocol.isConnectSupported else {
@@ -166,14 +169,48 @@ public enum ATVClient {
             }
 
             do {
-                let credentials = try resolvedCredentials(for: service, settings: deviceSettings)
-                if service.pairingRequirement == .mandatory, credentials == nil {
-                    throw ATVError.noCredentials(
-                        "\(service.protocol) service requires pairing credentials"
+                let credentials: HAPCredentials?
+                var airPlayCredentialCandidates: [HAPCredentials]?
+                if service.protocol == .airPlay {
+                    if !requestedSpecificProtocol, directMRPConnected {
+                        continue
+                    }
+                    let candidates = try resolvedAirPlayTunnelCredentialCandidates(
+                        for: service,
+                        configuration: config,
+                        settings: deviceSettings
                     )
+                    let isSupported = AirPlaySupport.supportsRemoteControlTunnel(
+                        service: service,
+                        credentials: candidates.first,
+                        settings: deviceSettings
+                    )
+                    guard isSupported else {
+                        throw ATVError.notSupported("AirPlay MRP tunnel is not supported by this service")
+                    }
+                    credentials = candidates.first
+                    airPlayCredentialCandidates = candidates
+                } else {
+                    credentials = try resolvedCredentials(for: service, settings: deviceSettings)
+                    if service.pairingRequirement == .mandatory, credentials == nil {
+                        throw ATVError.noCredentials(
+                            "\(service.protocol) service requires pairing credentials"
+                        )
+                    }
                 }
-                try await setupProtocol(facade, service: service, credentials: credentials)
+                if let airPlayCredentialCandidates {
+                    try await setupAirPlayProtocol(
+                        facade,
+                        service: service,
+                        credentialCandidates: airPlayCredentialCandidates
+                    )
+                } else {
+                    try await setupProtocol(facade, service: service, credentials: credentials)
+                }
                 setupCount += 1
+                if service.protocol == .mrp {
+                    directMRPConnected = true
+                }
             } catch let error as ATVError {
                 if requestedSpecificProtocol {
                     await facade.close()
@@ -224,6 +261,25 @@ public enum ATVClient {
         _ config: AppleTVConfiguration,
         protocol: ATVProtocol
     ) async throws(ATVError) -> any PairingHandler {
+        try await pair(config, protocol: `protocol`, settings: nil)
+    }
+
+    /// Pair with an Apple TV device using explicit settings.
+    ///
+    /// This overload is useful for protocol-specific pairing options, such as
+    /// forcing AirPlay 2 pairing for manually constructed configurations.
+    ///
+    /// - Parameters:
+    ///   - config: Device configuration.
+    ///   - protocol: Protocol to pair with.
+    ///   - settings: Optional settings used for protocol-specific pairing options.
+    /// - Returns: A pairing handler to complete the pairing process.
+    public static func pair(
+        _ config: AppleTVConfiguration,
+        protocol: ATVProtocol,
+        settings: ATVSettings? = nil
+    ) async throws(ATVError) -> any PairingHandler {
+        let deviceSettings = settings ?? ATVSettings()
         guard let service = config.service(for: `protocol`) else {
             throw ATVError.noService("No \(`protocol`) service found")
         }
@@ -241,7 +297,14 @@ public enum ATVClient {
         case .mrp:
             return try await MRPPairingHandler.create(
                 config: config,
-                service: service
+                service: service,
+                settings: deviceSettings
+            )
+        case .airPlay:
+            return try await AirPlayPairingHandler.create(
+                config: config,
+                service: service,
+                settings: deviceSettings
             )
         default:
             throw ATVError.notSupported("Pairing not yet implemented for \(`protocol`)")
@@ -266,6 +329,24 @@ public enum ATVClient {
         try await facade.setupProtocol(service, credentials: credentials)
     }
 
+    private static func setupAirPlayProtocol(
+        _ facade: FacadeAppleTV,
+        service: ServiceInfo,
+        credentialCandidates: [HAPCredentials]
+    ) async throws(ATVError) {
+        if let override = protocolSetupOverrideStore.get() {
+            do {
+                try await override(facade, service, credentialCandidates.first)
+            } catch let error as ATVError {
+                throw error
+            } catch {
+                throw ATVError.wrap(error)
+            }
+            return
+        }
+        try await facade.setupAirPlayMRPTunnel(service, credentialCandidates: credentialCandidates)
+    }
+
     internal static func resolvedCredentials(
         for service: ServiceInfo,
         settings: ATVSettings
@@ -285,9 +366,52 @@ public enum ATVClient {
         }
     }
 
+    internal static func resolvedAirPlayTunnelCredentialCandidates(
+        for service: ServiceInfo,
+        configuration: AppleTVConfiguration,
+        settings: ATVSettings
+    ) throws(ATVError) -> [HAPCredentials] {
+        var serializedValues: [String] = []
+        func append(_ value: String?) {
+            guard let value, !serializedValues.contains(value) else { return }
+            serializedValues.append(value)
+        }
+
+        append(settings.protocols.airplay.credentials)
+        append(service.credentials)
+        append(settings.protocols.companion.credentials)
+        append(configuration.service(for: .companion)?.credentials)
+
+        var candidates: [HAPCredentials] = []
+        var firstParseError: ATVError?
+        for serialized in serializedValues {
+            guard !serialized.isEmpty else {
+                firstParseError = firstParseError ?? .invalidCredentials("Empty AirPlay tunnel credentials")
+                continue
+            }
+            do {
+                candidates.append(try HAPCredentials.parse(serialized))
+            } catch let err as ATVError {
+                firstParseError = firstParseError ?? err
+            } catch {
+                firstParseError = firstParseError ?? ATVError.wrap(error)
+            }
+        }
+
+        if !candidates.isEmpty {
+            return candidates
+        }
+        if let firstParseError {
+            throw firstParseError
+        }
+        throw ATVError.noCredentials("AirPlay MRP tunnel requires AirPlay or Companion HAP credentials")
+    }
+
     internal static func validatePairingService(_ service: ServiceInfo) throws(ATVError) {
         switch service.pairingRequirement {
         case .mandatory, .optional:
+            return
+        case .notNeeded where service.protocol == .airPlay:
             return
         case .disabled:
             throw ATVError.pairingFailed("Pairing is disabled for \(service.protocol)")
@@ -306,9 +430,9 @@ extension ATVProtocol {
 
     fileprivate var isConnectSupported: Bool {
         switch self {
-        case .mrp, .companion:
+        case .mrp, .airPlay, .companion:
             return true
-        case .airPlay, .raop, .dmap:
+        case .raop, .dmap:
             return false
         }
     }

@@ -5,10 +5,10 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 ## Features
 
 - **Device Discovery** -- Scan the local network for Apple TV, HomePod, and AirPlay devices using Bonjour/mDNS, including live TXT resolution, Companion-only identifiers, and optional scan diagnostics
-- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion and direct MRP links, with protocol-agnostic pairing code direction metadata
+- **Pairing** -- Full HAP SRP-6a pair-setup (PIN entry) and pair-verify over Companion, direct MRP, and AirPlay 2 links, with protocol-agnostic pairing code direction metadata
 - **Credential Persistence** -- Pairing handlers expose HAP credentials directly, and connection setup can use credentials from settings or enriched services
 - **Remote Control** -- Send navigation, playback, and media commands (play, pause, menu, home, volume, etc.)
-- **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to MRP push updates
+- **Metadata and Push Updates** -- Refresh now-playing metadata on demand, read artwork/current app, and subscribe to direct or tunneled MRP push updates
 - **Connection Events** -- Observe connection-lost and explicit-close events from the unified device facade
 - **App Management** -- List installed apps and launch them by bundle ID
 - **User Accounts** -- List and switch between user profiles
@@ -16,9 +16,9 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Audio Control** -- Adjust volume and manage output devices over direct MRP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
-- **Encrypted Communication** -- ChaCha20-Poly1305 over Companion and MRP pair-verified links
+- **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching
-- **Multi-Protocol** -- Unified facade across MRP and Companion, with DMAP, AirPlay, and RAOP planned
+- **Multi-Protocol** -- Unified facade across direct MRP, AirPlay-tunneled MRP, and Companion, with DMAP, AirPlay streaming, and RAOP planned
 
 ## Requirements
 
@@ -177,15 +177,18 @@ await handler.close()
 ```
 
 Use `.mrp` instead of `.companion` to pair against the direct Media Remote
-Protocol service. Persist the returned credentials under
-`ATVSettings.protocols.mrp.credentials` by calling
-`settings.setCredentials(handler.serializedCredentials, for: .mrp)`.
+Protocol service. Use `.airPlay` to pair for AirPlay 2 HAP credentials used by
+the MRP tunnel. Persist the returned credentials under the matching protocol by
+calling `settings.setCredentials(handler.serializedCredentials, for: .mrp)` or
+`settings.setCredentials(handler.serializedCredentials, for: .airPlay)`.
 
-`ATVClient.connect` tries enabled services in deterministic setup order
-(MRP, then Companion, then currently unsupported protocols) and falls back past
-failed or uncredentialed unfiltered services until one usable protocol connects.
-When both settings and a service contain credentials for the same protocol,
-`ATVSettings` wins.
+`ATVClient.connect` tries enabled services in deterministic setup order:
+direct MRP, then AirPlay 2 MRP tunnel when direct MRP is unavailable or fails,
+then Companion. Explicit `protocol: .mrp` stays strict and does not fall back to
+the tunnel; explicit `protocol: .airPlay` opens the tunnel. The tunnel uses
+AirPlay credentials first, then Companion credentials when AirPlay credentials
+are absent. When both settings and a service contain credentials for the same
+protocol, `ATVSettings` wins.
 
 ### Check Feature Availability
 
@@ -227,17 +230,18 @@ SwiftATV uses a **multi-protocol facade** architecture, routing each command to 
 ```
 
 **Relayer priority order**: MRP > DMAP > Companion > AirPlay > RAOP.
-Connection setup uses MRP before Companion for currently implemented protocols;
-AirPlay, RAOP, and DMAP remain discoverable but are not control backends yet.
+Connection setup uses direct MRP first, AirPlay-tunneled MRP as the MRP fallback,
+then Companion. RAOP and DMAP remain discoverable but are not control backends
+yet, and AirPlay media streaming is still planned.
 
 ### Protocols
 
 | Protocol | Purpose | Status |
 |----------|---------|--------|
-| **MRP** | Media Remote Protocol: protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
+| **MRP** | Media Remote Protocol: direct protobuf TCP connection, pair-setup/pair-verify, remote control, metadata, push updates, power, audio | Implemented |
 | **Companion** | Modern control, apps, keyboard text input/focus, touch. Full pair-setup (SRP-6a) and pair-verify | Implemented, except output-device mutation |
+| **AirPlay** | AirPlay 2 HAP pairing and MRP remote-control tunnel; media streaming remains separate | Tunnel implemented, streaming planned |
 | **DMAP** | Legacy Digital Media Access Protocol | Planned |
-| **AirPlay** | Audio/video streaming | Planned |
 | **RAOP** | Remote Audio Output Protocol | Planned |
 
 ## Project Structure
@@ -257,7 +261,8 @@ Sources/SwiftATV/
 │   ├── BinaryPlistArchive.swift # Binary plist writer with native UID support
 │   ├── OPACK.swift             # OPACK binary serialization codec
 │   ├── TLV8.swift              # TLV8 encoding for HAP auth
-│   └── ChaCha20Cipher.swift    # ChaCha20-Poly1305 encryption
+│   ├── ChaCha20Cipher.swift    # ChaCha20-Poly1305 encryption
+│   └── HAPSession.swift        # AirPlay 2 HAP transport encryption
 ├── Core/
 │   ├── Relayer.swift           # Priority-based protocol routing
 │   ├── Facade.swift            # FacadeAppleTV unified implementation
@@ -269,6 +274,13 @@ Sources/SwiftATV/
 │   ├── SRP.swift               # SRP-6a client (pyatv/srptools compatible)
 │   └── HAPPairing.swift        # HAPPairSetupHandler + HAPPairVerifyHandler
 └── Protocols/
+    ├── AirPlay/                # AirPlay 2 HAP pairing + MRP tunnel transport
+    │   ├── AirPlayHTTP.swift
+    │   ├── AirPlayTCPConnection.swift
+    │   ├── AirPlayChannels.swift
+    │   ├── AirPlayMRPTunnelTransport.swift
+    │   ├── AirPlayPairing.swift
+    │   └── AirPlaySupport.swift
     ├── Companion/              # Full Companion protocol implementation
     │   ├── CompanionConnection.swift
     │   ├── CompanionProtocol.swift
@@ -279,12 +291,12 @@ Sources/SwiftATV/
     └── MRP/
         ├── Protobuf/           # pyatv MRP .proto definitions, excluded from compilation
         ├── Generated/          # checked-in SwiftProtobuf output
-        ├── MRPProtocol.swift    # TCP framing, protobuf dispatch, encryption
+        ├── MRPProtocol.swift    # Transport abstraction, TCP framing, protobuf dispatch
         ├── MRPMessages.swift    # Outbound MRP message builders
         ├── MRPPlayerState.swift # Now-playing state actor
         ├── MRPInterfaces.swift  # Remote, metadata, push, power, audio, features
         ├── MRPPairing.swift     # MRP HAP pair-setup flow
-        └── MRPService.swift     # Direct-MRP lifecycle and facade registration
+        └── MRPService.swift     # MRP lifecycle and facade registration
 ```
 
 ## Testing
@@ -293,8 +305,8 @@ Sources/SwiftATV/
 swift test
 ```
 
-The test suite runs 288 XCTest cases covering pyatv ports and SwiftATV-specific
-integration logic, plus 48 Swift Testing cases:
+The test suite runs 291 XCTest cases covering pyatv ports and SwiftATV-specific
+integration logic, plus 57 Swift Testing cases:
 
 **Ported from pyatv** (XCTest) — all enum raw values, OPACK encode/decode for
 every type, TLV8 chunk splitting/reassembly, ChaCha20-Poly1305 (12-byte and
@@ -305,7 +317,7 @@ MRP varint framing, MRP protobuf message construction, MRP player-state
 metadata and active metadata refresh, MRP volume/command-result handling,
 Bonjour pairing flag parsing, Companion Bonjour identifiers, live TXT
 resolution, scan diagnostics, identity merging, deterministic connect
-fallback/credential selection, facade device events, timeout conversion,
+fallback/credential selection including AirPlay tunnel ordering, facade device events, timeout conversion,
 strict TLV8 auth decoding,
 OPACK object-reference/malformed-data handling, consumer-style module-qualified
 imports, pairing code direction, and `MessageDispatcher` actor behavior.
@@ -315,8 +327,9 @@ canned pyatv vector (rejects `B == 0`, rejects `u == 0`, verifies server M2,
 and matches A/M1/K byte-for-byte), HAP pair-setup state machine (M1 encoding,
 M3 output against canned M2, error-TLV surfacing, state ordering),
 `Playing.description` edge cases, Companion auth envelopes, Companion encrypted
-frame AAD, Companion connection race handling, and Companion RTI text-input
-binary-plist encoding/decoding.
+frame AAD, Companion connection race handling, Companion RTI text-input
+binary-plist encoding/decoding, AirPlay feature/pairing parsing, HAP transport
+encryption, and AirPlay DataStream MRP frame extraction.
 
 CI runs the full suite on `macos-26` (Swift 6.3) and `swift:6.3-jammy`
 on `ubuntu-24.04`, plus a Swift 6.3 `swift format lint --strict` job on

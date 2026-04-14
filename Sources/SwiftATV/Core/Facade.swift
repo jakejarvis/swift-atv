@@ -186,6 +186,21 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         _ service: ServiceInfo,
         credentials resolvedCredentials: HAPCredentials? = nil
     ) async throws(ATVError) {
+        if service.protocol == .airPlay {
+            let candidates =
+                if let resolvedCredentials {
+                    [resolvedCredentials]
+                } else {
+                    try ATVClient.resolvedAirPlayTunnelCredentialCandidates(
+                        for: service,
+                        configuration: configuration,
+                        settings: _settings
+                    )
+                }
+            try await setupAirPlayMRPTunnel(service, credentialCandidates: candidates)
+            return
+        }
+
         let credentials: HAPCredentials?
         if let resolvedCredentials {
             credentials = resolvedCredentials
@@ -206,8 +221,10 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             try await setupCompanion(service, credentials: credentials)
         case .mrp:
             try await setupMRP(service, credentials: credentials)
-        case .dmap, .airPlay, .raop:
+        case .dmap, .raop:
             throw ATVError.notSupported("Connection not yet implemented for \(service.protocol)")
+        case .airPlay:
+            preconditionFailure("AirPlay setup is handled before credential resolution")
         }
     }
 
@@ -258,6 +275,39 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         }
     }
 
+    internal func setupAirPlayMRPTunnel(
+        _ service: ServiceInfo,
+        credentialCandidates: [HAPCredentials]
+    ) async throws(ATVError) {
+        guard _settings.protocols.airplay.mrpTunnelMode != .disable else {
+            throw ATVError.notSupported("AirPlay MRP tunnel is disabled by settings")
+        }
+        let tunnel = AirPlayMRPTunnelTransport(
+            host: configuration.address,
+            port: service.port,
+            credentialCandidates: credentialCandidates,
+            settings: _settings
+        )
+        let mrp = MRPService(
+            transport: tunnel,
+            credentials: nil,
+            settings: _settings,
+            authenticationMode: .alreadySecure,
+            heartbeatMode: .disabled,
+            onConnectionClosed: { [weak self] error in
+                self?.protocolConnectionDidClose(error, protocol: .airPlay)
+            }
+        )
+        do {
+            try await mrp.setup()
+        } catch {
+            await mrp.close()
+            throw error
+        }
+
+        registerMRP(mrp, for: .mrp)
+    }
+
     private func setupMRP(_ service: ServiceInfo, credentials: HAPCredentials?) async throws(ATVError) {
         let mrp = MRPService(
             host: configuration.address,
@@ -274,27 +324,31 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
             await mrp.close()
             throw error
         }
+        registerMRP(mrp, for: .mrp)
+    }
+
+    private func registerMRP(_ mrp: MRPService, for registrationProtocol: ATVProtocol) {
         lock.withLock {
             self.mrpService = mrp
         }
 
         if let rc = mrp.remoteControl {
-            remoteControlRelayer.register(rc, for: .mrp)
+            remoteControlRelayer.register(rc, for: registrationProtocol)
         }
         if let metadata = mrp.metadata {
-            metadataRelayer.register(metadata, for: .mrp)
+            metadataRelayer.register(metadata, for: registrationProtocol)
         }
         if let push = mrp.pushUpdater {
-            pushUpdaterRelayer.register(push, for: .mrp)
+            pushUpdaterRelayer.register(push, for: registrationProtocol)
         }
         if let pwr = mrp.power {
-            powerRelayer.register(pwr, for: .mrp)
+            powerRelayer.register(pwr, for: registrationProtocol)
         }
         if let aud = mrp.audio {
-            audioRelayer.register(aud, for: .mrp)
+            audioRelayer.register(aud, for: registrationProtocol)
         }
         if let feat = mrp.features {
-            featureRelayer.register(feat, for: .mrp)
+            featureRelayer.register(feat, for: registrationProtocol)
         }
     }
 

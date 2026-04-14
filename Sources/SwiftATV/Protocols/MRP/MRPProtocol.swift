@@ -135,6 +135,30 @@ internal protocol MRPConnectionDelegate: AnyObject, Sendable {
     func connectionDidClose(error: Error?) async
 }
 
+internal protocol MRPTransport: AnyObject, Sendable {
+    var delegate: MRPConnectionDelegate? { get set }
+    var messageStream: AsyncStream<ProtocolMessageMessage> { get }
+
+    func connect() async throws(ATVError)
+    func enableEncryption(outputKey: Data, inputKey: Data)
+    func send(_ message: ProtocolMessageMessage) async throws(ATVError)
+    func sendAndReceive(
+        _ message: ProtocolMessageMessage,
+        responseType: ProtocolMessageMessage.TypeEnum?,
+        timeout: TimeInterval
+    ) async throws(ATVError) -> ProtocolMessageMessage
+    func close() async
+}
+
+extension MRPTransport {
+    func sendAndReceive(
+        _ message: ProtocolMessageMessage,
+        responseType: ProtocolMessageMessage.TypeEnum? = nil
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        try await sendAndReceive(message, responseType: responseType, timeout: 5.0)
+    }
+}
+
 private final class PendingMRPWaiter: @unchecked Sendable {
     let id = UUID()
     let continuation: CheckedContinuation<ProtocolMessageMessage, Error>
@@ -150,7 +174,7 @@ private final class PendingMRPWaiter: @unchecked Sendable {
 /// The wire format is `[varint payload length][protobuf payload]`. Once
 /// pair-verify succeeds, only the protobuf payload is encrypted, matching
 /// pyatv's `protocols/mrp/connection.py`.
-public final class MRPConnection: @unchecked Sendable {
+public final class MRPConnection: @unchecked Sendable, MRPTransport {
     private let host: String
     private let port: Int
     private let group: EventLoopGroup
@@ -544,7 +568,7 @@ private final class MRPFrameHandler: ChannelInboundHandler, @unchecked Sendable 
     }
 }
 
-private let mrpProtocolExtensionMap: SwiftProtobuf.SimpleExtensionMap = [
+internal let mrpProtocolExtensionMap: SwiftProtobuf.SimpleExtensionMap = [
     Extensions_audioFadeMessage,
     Extensions_audioFadeResponseMessage,
     Extensions_clientUpdatesConfigMessage,
