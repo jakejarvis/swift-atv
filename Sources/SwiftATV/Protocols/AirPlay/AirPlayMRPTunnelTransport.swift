@@ -95,10 +95,14 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
             throw ATVError.noCredentials("AirPlay MRP tunnel requires HAP credentials")
         }
 
+        var pendingControl: AirPlayControlConnection?
+        var pendingEvent: AirPlayEventChannel?
+        var pendingData: AirPlayDataStreamChannel?
         do {
             let verified = try await connectAndVerifyControlChannel()
             let control = verified.control
             let verifier = verified.verifier
+            pendingControl = control
 
             let controlKeys = try verifier.deriveKeys(
                 salt: "Control-Salt",
@@ -124,6 +128,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                     self?.handleConnectionClosed(error: error)
                 }
             )
+            pendingEvent = event
             try await event.connect()
 
             try await control.sendRecord()
@@ -149,6 +154,7 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                     self?.handleConnectionClosed(error: error)
                 }
             )
+            pendingData = data
             try await data.connect()
 
             let shouldClose = lock.withLock {
@@ -161,17 +167,23 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                 return false
             }
             if shouldClose {
-                await data.close()
-                await event.close()
-                await control.close()
                 throw ATVError.connectionLost("Connection has been closed")
             }
+            pendingControl = nil
+            pendingEvent = nil
+            pendingData = nil
 
             startFeedback()
         } catch let err as ATVError {
+            await pendingData?.close()
+            await pendingEvent?.close()
+            await pendingControl?.close()
             await close()
             throw err
         } catch {
+            await pendingData?.close()
+            await pendingEvent?.close()
+            await pendingControl?.close()
             await close()
             throw ATVError.wrap(error)
         }

@@ -54,6 +54,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.
+- AirPlay HTTP/RTSP response timeouts now cover the full response deadline
+  instead of resetting after every partial socket read.
 - Companion request timeout tasks are cancelled when their request succeeds,
   matching the lower-level Companion and MRP waiter lifecycle and avoiding
   stale sleeper tasks.
@@ -70,6 +72,10 @@ Pre-1.0: minor version bumps may contain breaking changes.
   service instead of only unregistering it from facade relayers.
 - MRP, AirPlay, and Companion pairing setup now close partially opened
   connections when handler creation or repeated AirPlay `begin()` calls fail.
+- AirPlay MRP tunnel setup now closes partially opened control/event/data
+  channels when setup fails before the tunnel is fully registered.
+- MRP push streams now cancel their player-state bridge task when the consumer
+  terminates the stream.
 
 ## [0.3.0] - 2026-04-14
 

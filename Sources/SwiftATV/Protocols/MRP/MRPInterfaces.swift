@@ -167,11 +167,17 @@ public final class MRPPushUpdater: @unchecked Sendable, PushUpdater {
         }
         lock.unlock()
         let stream = AsyncStream<Playing> { continuation in
-            Task {
+            let task = Task {
                 for await state in await self.playerState.pushStream() {
                     continuation.yield(state)
                 }
                 continuation.finish()
+            }
+            continuation.onTermination = { [weak self] _ in
+                task.cancel()
+                self?.lock.withLock {
+                    self?._stream = nil
+                }
             }
         }
         lock.withLock {

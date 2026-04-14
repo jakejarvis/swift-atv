@@ -330,6 +330,18 @@ internal final class AirPlayControlConnection: @unchecked Sendable {
     }
 
     private func receiveResponse(requestID: String) async throws(ATVError) -> AirPlayHTTPResponse {
+        let timeoutNs = try timeoutNanoseconds(
+            from: requestTimeout,
+            parameterName: "requestTimeout"
+        )
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let timeoutContext = TimeoutContext(
+            protocol: .airPlay,
+            operation: "request",
+            requestID: requestID,
+            duration: requestTimeout
+        )
+
         while true {
             let parsedResult: Result<AirPlayHTTPResponse?, ATVError> = lock.withLock {
                 do {
@@ -345,14 +357,14 @@ internal final class AirPlayControlConnection: @unchecked Sendable {
                 return parsed
             }
 
+            let elapsedNs = DispatchTime.now().uptimeNanoseconds - startedAt
+            guard elapsedNs < timeoutNs else {
+                throw ATVError.operationTimeout(timeoutContext)
+            }
+            let remainingTimeout = TimeInterval(timeoutNs - elapsedNs) / 1_000_000_000
             let data = try await socket.receive(
-                timeout: requestTimeout,
-                timeoutContext: TimeoutContext(
-                    protocol: .airPlay,
-                    operation: "request",
-                    requestID: requestID,
-                    duration: requestTimeout
-                )
+                timeout: remainingTimeout,
+                timeoutContext: timeoutContext
             )
             lock.withLock {
                 responseBuffer.append(data)
