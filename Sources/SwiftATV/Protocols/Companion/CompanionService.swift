@@ -3,10 +3,11 @@ import Foundation
 /// Setup and lifecycle management for the Companion protocol.
 ///
 /// Provides the entry point for creating a Companion connection,
-/// performing pair-verify, and initializing protocol interfaces. Touch setup
-/// is best-effort so devices that do not answer `_touchStart` can still expose
-/// remote, app, power, audio, and keyboard functionality. Subscribed Companion
-/// events feed a shared state store used by controllers and capability reporting.
+/// performing pair-verify, and initializing protocol interfaces. Session and
+/// touch setup are best-effort so devices that do not answer `_sessionStart` or
+/// `_touchStart` can still expose basic Companion functionality. Subscribed
+/// Companion events feed a shared state store used by controllers and capability
+/// reporting.
 ///
 /// Thread safety: Mutable interface references protected by `NSLock`.
 public final class CompanionService: @unchecked Sendable, CompanionConnectionDelegate {
@@ -117,9 +118,10 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
 
     /// Connect and set up the Companion protocol.
     ///
-    /// TCP connection, pair-verify, system info, session start, and event
-    /// subscription are required. Touch setup is optional: a `_touchStart`
-    /// timeout leaves touch unavailable but does not fail the connection.
+    /// TCP connection, pair-verify, system info, and event subscription are
+    /// required. Session and touch setup are optional: a `_sessionStart` or
+    /// `_touchStart` timeout leaves dependent surfaces unavailable but does not
+    /// fail the connection.
     public func setup() async throws(ATVError) {
         guard let credentials else {
             throw ATVError.noCredentials("Companion requires pairing credentials")
@@ -137,13 +139,13 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         try await protocolHandler.sendSystemInfo(
             name: settings.clientIdentity.name,
             model: settings.clientIdentity.model,
-            pairingIdentifier: settings.clientIdentity.pairingIdentifier,
+            rapportIdentifier: settings.clientIdentity.rapportIdentifier,
             clientID: Self.utf8String(from: credentials.clientIdentifier),
             deviceID: settings.clientIdentity.deviceID
         )
-        let touchAvailable = try await startTouchIfAvailable()
+        let sessionStarted = try await startSessionIfAvailable()
+        let touchAvailable = sessionStarted ? try await startTouchIfAvailable() : false
         stateStore.setTouchAvailable(touchAvailable)
-        try await protocolHandler.startSession()
         startEventLoop()
         try await protocolHandler.subscribeEvents(["_iMC"])
         for optionalEvent in ["SystemStatus", "TVSystemStatus", "_tiStarted", "_tiStopped"] {
@@ -191,6 +193,27 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
             }
             return false
         }
+    }
+
+    private func startSessionIfAvailable() async throws(ATVError) -> Bool {
+        do {
+            try await protocolHandler.startSession()
+            return true
+        } catch let error {
+            guard Self.isRecoverableSessionStartFailure(error) else {
+                throw error
+            }
+            return false
+        }
+    }
+
+    private static func isRecoverableSessionStartFailure(_ error: ATVError) -> Bool {
+        if case .operationTimeout(let context) = error {
+            return context.protocol == .companion
+                && context.operation == "request"
+                && context.requestID == "_sessionStart"
+        }
+        return false
     }
 
     private static func isRecoverableTouchStartFailure(_ error: ATVError) -> Bool {

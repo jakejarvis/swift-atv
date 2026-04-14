@@ -19,7 +19,7 @@ A Swift library for discovering, pairing with, and controlling Apple TV and AirP
 - **Touch/Gesture Input** -- Send swipe, tap, and click gestures when Companion touch setup is available
 - **Virtual Keyboard Input** -- Read, clear, append, and replace text in focused Apple TV text fields over Companion
 - **Encrypted Communication** -- ChaCha20-Poly1305 over Companion, MRP, and AirPlay 2 HAP-encrypted links
-- **Local Client Identity** -- Configure the controller/app identity sent during pairing and protocol setup with `ATVSettings.clientIdentity`
+- **Local Client Identity** -- Configure the controller/app identity sent during pairing and protocol setup with `ATVSettings.clientIdentity`, including the stable Companion Rapport identifier
 - **State-backed Capabilities** -- Typed capability availability reflects protocol state and diagnostics instead of assuming every connected interface is ready
 - **Broad Media Commands** -- Query and send supported MediaRemote commands through `mediaCommands`
 - **Typed throws** -- Every public method is `async throws(ATVError)` so you get exhaustive error matching, including structured timeout context

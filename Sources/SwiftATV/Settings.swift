@@ -86,6 +86,8 @@ public struct ClientIdentitySettings: Codable, Sendable {
     public var model: String
     public var deviceID: String
     public var pairingIdentifier: String
+    /// Stable Rapport-style identifier used as Companion `_systemInfo._i`.
+    public var rapportIdentifier: String
     public var operatingSystemName: String
     public var operatingSystemBuild: String
     public var operatingSystemVersion: String
@@ -96,6 +98,7 @@ public struct ClientIdentitySettings: Codable, Sendable {
         model: String = ClientIdentitySettings.defaultModel,
         deviceID: String = ClientIdentitySettings.defaultDeviceID,
         pairingIdentifier: String? = nil,
+        rapportIdentifier: String? = nil,
         operatingSystemName: String = ClientIdentitySettings.defaultOperatingSystemName,
         operatingSystemBuild: String = ClientIdentitySettings.defaultOperatingSystemBuild,
         operatingSystemVersion: String = ClientIdentitySettings.defaultOperatingSystemVersion
@@ -105,6 +108,7 @@ public struct ClientIdentitySettings: Codable, Sendable {
         self.model = model
         self.deviceID = deviceID
         self.pairingIdentifier = pairingIdentifier ?? UUID().uuidString
+        self.rapportIdentifier = rapportIdentifier ?? Self.makeRapportIdentifier()
         self.operatingSystemName = operatingSystemName
         self.operatingSystemBuild = operatingSystemBuild
         self.operatingSystemVersion = operatingSystemVersion
@@ -116,6 +120,7 @@ public struct ClientIdentitySettings: Codable, Sendable {
         case model
         case deviceID
         case pairingIdentifier
+        case rapportIdentifier
         case operatingSystemName
         case operatingSystemBuild
         case operatingSystemVersion
@@ -130,6 +135,9 @@ public struct ClientIdentitySettings: Codable, Sendable {
         self.pairingIdentifier =
             try container.decodeIfPresent(String.self, forKey: .pairingIdentifier)
             ?? UUID().uuidString
+        self.rapportIdentifier =
+            try container.decodeIfPresent(String.self, forKey: .rapportIdentifier)
+            ?? Self.makeRapportIdentifier()
         self.operatingSystemName =
             try container.decodeIfPresent(String.self, forKey: .operatingSystemName)
             ?? Self.defaultOperatingSystemName
@@ -139,6 +147,12 @@ public struct ClientIdentitySettings: Codable, Sendable {
         self.operatingSystemVersion =
             try container.decodeIfPresent(String.self, forKey: .operatingSystemVersion)
             ?? Self.defaultOperatingSystemVersion
+    }
+
+    static func makeRapportIdentifier() -> String {
+        (0..<6)
+            .map { _ in String(format: "%02x", Int.random(in: 0...255)) }
+            .joined()
     }
 }
 

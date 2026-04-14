@@ -28,8 +28,9 @@ usable. Output-device list and mutation capabilities become available when direc
 MRP or AirPlay-tunneled MRP reports route state.
 
 ``ATVSettings/clientIdentity`` describes the local controller or app identity
-sent during pairing and protocol setup. It must not be copied from the target
-Apple TV's identifiers.
+sent during pairing and protocol setup, including the stable Companion Rapport
+identifier sent in `_systemInfo`. It must not be copied from the target Apple
+TV's identifiers.
 
 Discovery resolves Bonjour TXT records with each live service, merges services
 by stable device identifiers, including Companion-only TXT identifiers, and can

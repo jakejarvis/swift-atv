@@ -519,6 +519,7 @@ public enum ATVClient {
             ("clientIdentity.deviceID", identity.deviceID),
             ("clientIdentity.macAddress", identity.macAddress),
             ("clientIdentity.pairingIdentifier", identity.pairingIdentifier),
+            ("clientIdentity.rapportIdentifier", identity.rapportIdentifier),
         ]
 
         for clientValue in clientValues {

@@ -75,7 +75,7 @@ The package uses `swift-tools-version: 6.3` with Swift 6 language mode (`swiftLa
   because consumers use `SwiftATV` as the module qualifier.
 - All public types conform to `Sendable`
 - `ATVProtocol` only contains supported connection/pairing surfaces; do not add compatibility-only protocol cases without implementation
-- `ATVSettings.clientIdentity` is the local controller/app identity sent to Apple TV protocols. Do not copy the target Apple TV's identifiers into it; connect and pair validate against that mistake.
+- `ATVSettings.clientIdentity` is the local controller/app identity sent to Apple TV protocols, including the stable Companion Rapport identifier used in `_systemInfo`. Do not copy the target Apple TV's identifiers into it; connect and pair validate against that mistake.
 - `Codable` on all settings/config types for JSON persistence
 - `AsyncStream` replaces Python callback-based listeners
 

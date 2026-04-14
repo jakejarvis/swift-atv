@@ -231,7 +231,8 @@ policy before opening connect or pairing UI.
 ``ATVSettings/clientIdentity`` describes your local app or controller. Do not
 copy identifiers from the scanned Apple TV into this field; SwiftATV validates
 that the local client identity does not match the target device before pairing
-or connecting.
+or connecting. Persist the full settings value so the generated Companion
+Rapport identifier stays stable across launches.
 
 You can observe connection lifecycle events from the connected facade:
 

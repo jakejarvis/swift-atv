@@ -537,6 +537,27 @@ final class SwiftATVConnectTests: XCTestCase {
         }
     }
 
+    func testConnectRejectsTargetIdentityAsRapportIdentifier() async {
+        var config = AppleTVConfiguration(
+            address: "127.0.0.1",
+            name: "Test",
+            identifier: "target-device"
+        )
+        config.addService(ServiceInfo(protocol: .mrp, port: 49152, pairingRequirement: .optional))
+        var settings = ATVSettings()
+        settings.clientIdentity.rapportIdentifier = "target-device"
+
+        do {
+            _ = try await ATVClient.connect(config, options: ConnectOptions(protocols: [.mrp]), settings: settings)
+            XCTFail("Expected connect to throw")
+        } catch let error {
+            guard case ATVError.settingsError = error else {
+                XCTFail("Expected settingsError, got \(error)")
+                return
+            }
+        }
+    }
+
     func testPairingServiceValidationRejectsUnavailableStates() {
         XCTAssertNoThrow(
             try ATVClient.validatePairingService(

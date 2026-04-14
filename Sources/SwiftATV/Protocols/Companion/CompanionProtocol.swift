@@ -316,11 +316,11 @@ public actor CompanionProtocolHandler {
     public func sendSystemInfo(
         name: String = "SwiftATV",
         model: String = "iPhone14,2",
-        pairingIdentifier: String? = nil,
+        rapportIdentifier: String? = nil,
         clientID: String? = nil,
         deviceID: String? = nil
     ) async throws(ATVError) {
-        let rpID = pairingIdentifier ?? UUID().uuidString
+        let rpID = rapportIdentifier ?? ClientIdentitySettings.makeRapportIdentifier()
         let idsID = clientID ?? UUID().uuidString
         let pubID = deviceID ?? UUID().uuidString
 

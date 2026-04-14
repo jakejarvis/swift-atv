@@ -26,6 +26,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - Discovery now scans `_sleep-proxy._udp` during unfiltered scans and marks
   matching configurations as `deepSleep` when a sleep-proxy record can be
   associated with a device identifier.
+- `ClientIdentitySettings.rapportIdentifier` stores the stable local
+  Rapport-style identifier sent as Companion `_systemInfo._i`.
 
 ### Changed
 
@@ -57,6 +59,11 @@ Pre-1.0: minor version bumps may contain breaking changes.
   stale sleeper tasks.
 - Companion-only metadata now throws `.notSupported("Metadata not available")`
   instead of returning an empty idle `Playing()` value.
+- Companion setup now starts `_sessionStart` before best-effort `_touchStart`
+  and treats a `_sessionStart` timeout as non-terminal, so basic Companion
+  remote control can still connect when optional session setup stalls.
+- Companion `_systemInfo` now sends a stable per-client Rapport identifier for
+  `_i`, matching pyatv's tvOS 18.4+ connection fix.
 
 ## [0.3.0] - 2026-04-14
 

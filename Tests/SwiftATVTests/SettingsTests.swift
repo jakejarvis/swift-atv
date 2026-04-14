@@ -14,6 +14,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.clientIdentity.model, "iPhone10,6")
         XCTAssertEqual(settings.clientIdentity.deviceID, "FF:70:79:61:74:76")
         XCTAssertFalse(settings.clientIdentity.pairingIdentifier.isEmpty)
+        XCTAssertTrue(settings.clientIdentity.rapportIdentifier.isLowercaseHexIdentifier)
         XCTAssertNil(settings.protocols.companion.credentials)
         XCTAssertNil(settings.protocols.mrp.credentials)
         XCTAssertNil(settings.protocols.airplay.credentials)
@@ -27,6 +28,7 @@ final class SettingsTests: XCTestCase {
         settings.clientIdentity.name = "My Device"
         settings.clientIdentity.model = "iPhone15,2"
         settings.clientIdentity.pairingIdentifier = "remote-id"
+        settings.clientIdentity.rapportIdentifier = "abcdef123456"
 
         let data = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(ATVSettings.self, from: data)
@@ -37,6 +39,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(decoded.clientIdentity.name, "My Device")
         XCTAssertEqual(decoded.clientIdentity.model, "iPhone15,2")
         XCTAssertEqual(decoded.clientIdentity.pairingIdentifier, "remote-id")
+        XCTAssertEqual(decoded.clientIdentity.rapportIdentifier, "abcdef123456")
     }
 
     // MARK: - Credentials accessor
@@ -93,6 +96,7 @@ final class SettingsTests: XCTestCase {
     func testClientIdentitySettingsPairingIdentifier() {
         let settings = ClientIdentitySettings()
         XCTAssertFalse(settings.pairingIdentifier.isEmpty)
+        XCTAssertTrue(settings.rapportIdentifier.isLowercaseHexIdentifier)
     }
 
     func testClientIdentityDefaultsWhenDecodingMissingFields() throws {
@@ -103,6 +107,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.macAddress, "02:73:77:69:66:74")
         XCTAssertEqual(settings.deviceID, "FF:70:79:61:74:76")
         XCTAssertFalse(settings.pairingIdentifier.isEmpty)
+        XCTAssertTrue(settings.rapportIdentifier.isLowercaseHexIdentifier)
     }
 
     // MARK: - AirPlayVersion and MrpTunnelMode codable
@@ -121,5 +126,11 @@ final class SettingsTests: XCTestCase {
             let decoded = try JSONDecoder().decode(MrpTunnelMode.self, from: data)
             XCTAssertEqual(decoded, mode)
         }
+    }
+}
+
+extension String {
+    fileprivate var isLowercaseHexIdentifier: Bool {
+        range(of: #"^[0-9a-f]{12}$"#, options: .regularExpression) != nil
     }
 }

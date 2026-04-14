@@ -43,6 +43,75 @@
             XCTAssertTrue(requests.contains("_sessionStart"))
             XCTAssertTrue(requests.contains("_interest"))
             XCTAssertEqual(requests.filter { $0 == "_hidC" }.count, 2)
+            XCTAssertLessThan(
+                try XCTUnwrap(requests.firstIndex(of: "_sessionStart")),
+                try XCTUnwrap(requests.firstIndex(of: "_touchStart"))
+            )
+        }
+
+        func testSessionStartTimeoutDoesNotFailBasicSetup() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(
+                ignoredRequests: ["_sessionStart"],
+                pairVerify: pairVerify.responder
+            )
+            defer { server.stop() }
+
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                touchStartTimeout: 0.05
+            )
+
+            try await service.setup()
+
+            XCTAssertEqual(service.capabilities?.capabilityInfo(.remote(.up)).state, .available)
+            XCTAssertEqual(service.capabilities?.capabilityInfo(.touch(.swipe)).state, .unavailable)
+            XCTAssertNil(service.touch)
+
+            let remote = try XCTUnwrap(service.remoteControl)
+            try await remote.up()
+
+            await service.close()
+
+            let requests = server.requests
+            XCTAssertTrue(requests.contains("_systemInfo"))
+            XCTAssertTrue(requests.contains("_sessionStart"))
+            XCTAssertFalse(requests.contains("_touchStart"))
+            XCTAssertTrue(requests.contains("_interest"))
+            XCTAssertEqual(requests.filter { $0 == "_hidC" }.count, 2)
+        }
+
+        func testSystemInfoUsesRapportIdentifier() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(pairVerify: pairVerify.responder)
+            defer { server.stop() }
+
+            let settings = ATVSettings(
+                clientIdentity: ClientIdentitySettings(
+                    name: "Clicker",
+                    deviceID: "client-device-id",
+                    pairingIdentifier: "pairing-id",
+                    rapportIdentifier: "rapport-id"
+                )
+            )
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                settings: settings,
+                touchStartTimeout: 0.05
+            )
+
+            try await service.setup()
+            await service.close()
+
+            let content = try XCTUnwrap(server.requestContent(for: "_systemInfo"))
+            XCTAssertEqual(content["_i"]?.stringValue, "rapport-id")
+            XCTAssertNotEqual(content["_i"]?.stringValue, "pairing-id")
+            XCTAssertEqual(content["_idsID"]?.stringValue, "fake-client")
+            XCTAssertEqual(content["_pubID"]?.stringValue, "client-device-id")
         }
     }
 
@@ -56,6 +125,7 @@
         private var pendingCipher: ChaCha20Cipher?
         private var cipher: ChaCha20Cipher?
         private var _requests: [String] = []
+        private var _requestContents: [String: OPACK.Value] = [:]
 
         var port: Int {
             Int(listener.port!.rawValue)
@@ -63,6 +133,10 @@
 
         var requests: [String] {
             lock.withLock { _requests }
+        }
+
+        func requestContent(for identifier: String) -> OPACK.Value? {
+            lock.withLock { _requestContents[identifier] }
         }
 
         static func start(
@@ -215,6 +289,9 @@
 
             lock.withLock {
                 _requests.append(identifier)
+                if let content = message["_c"] {
+                    _requestContents[identifier] = content
+                }
             }
 
             guard
