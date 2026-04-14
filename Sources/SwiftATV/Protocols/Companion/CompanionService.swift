@@ -82,6 +82,10 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         return _mediaCommands
     }
 
+    internal var _testIsConnected: Bool {
+        stateStore.isConnected
+    }
+
     public convenience init(
         host: String,
         port: Int,

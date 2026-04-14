@@ -108,6 +108,29 @@ final class FacadeEventTests: XCTestCase {
         XCTAssertEqual(facade._testActiveProtocols, [.mrp])
     }
 
+    func testSecondaryCompanionCloseClosesRemovedService() async {
+        let facade = FacadeAppleTV(
+            configuration: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),
+            settings: ATVSettings()
+        )
+        let companion = CompanionService(
+            host: "127.0.0.1",
+            port: 0,
+            settings: ATVSettings(),
+            touchStartTimeout: 0.05
+        )
+        facade._testSetActiveProtocols([.mrp, .companion], primary: .mrp)
+        facade._testSetCompanionService(companion)
+
+        facade._testProtocolConnectionDidClose(error: nil, protocol: .companion)
+
+        let didClose = await eventually(timeoutNanoseconds: 500_000_000) {
+            !companion._testIsConnected
+        }
+        XCTAssertTrue(didClose)
+        XCTAssertEqual(facade._testActiveProtocols, [.mrp])
+    }
+
     func testPrimaryProtocolCloseEmitsConnectionLost() async {
         let facade = FacadeAppleTV(
             configuration: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),
@@ -146,5 +169,19 @@ final class FacadeEventTests: XCTestCase {
             group.cancelAll()
             return event
         }
+    }
+
+    private func eventually(
+        timeoutNanoseconds: UInt64,
+        condition: @escaping @Sendable () -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+        while ContinuousClock.now < deadline {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return condition()
     }
 }

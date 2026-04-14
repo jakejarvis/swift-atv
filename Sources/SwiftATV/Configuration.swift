@@ -160,13 +160,27 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
     /// Add or merge a service for this device.
     public mutating func addService(_ service: ServiceInfo) {
         if let index = services.firstIndex(where: { $0.protocol == service.protocol }) {
-            // Merge: keep existing credentials if new service doesn't have them
+            // Merge: newer Bonjour data wins when it is populated, but a
+            // sparse duplicate must not erase identifiers, TXT metadata, or
+            // pairing state learned from an earlier result.
             var merged = service
+            let existing = services[index]
+            if merged.identifier == nil {
+                merged.identifier = existing.identifier
+            }
             if merged.credentials == nil {
-                merged.credentials = services[index].credentials
+                merged.credentials = existing.credentials
             }
             if merged.password == nil {
-                merged.password = services[index].password
+                merged.password = existing.password
+            }
+            if merged.properties.isEmpty {
+                merged.properties = existing.properties
+            } else {
+                merged.properties = existing.properties.merging(merged.properties) { _, new in new }
+            }
+            if merged.pairingRequirement == .unsupported, existing.pairingRequirement != .unsupported {
+                merged.pairingRequirement = existing.pairingRequirement
             }
             services[index] = merged
         } else {

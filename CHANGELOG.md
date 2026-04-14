@@ -64,6 +64,12 @@ Pre-1.0: minor version bumps may contain breaking changes.
   remote control can still connect when optional session setup stalls.
 - Companion `_systemInfo` now sends a stable per-client Rapport identifier for
   `_i`, matching pyatv's tvOS 18.4+ connection fix.
+- Duplicate sparse service records no longer erase discovered identifiers,
+  TXT properties, credentials, or pairing requirements from existing services.
+- Removing Companion as a secondary protocol now closes the removed Companion
+  service instead of only unregistering it from facade relayers.
+- MRP, AirPlay, and Companion pairing setup now close partially opened
+  connections when handler creation or repeated AirPlay `begin()` calls fail.
 
 ## [0.3.0] - 2026-04-14
 

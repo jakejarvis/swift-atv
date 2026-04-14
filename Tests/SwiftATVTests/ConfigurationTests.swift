@@ -251,6 +251,27 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(config.service(for: .companion)?.credentials, "creds2")
     }
 
+    func testServiceMergePreservesDiscoveryMetadataWhenDuplicateIsSparse() {
+        let richService = ServiceInfo(
+            protocol: .companion,
+            port: port3,
+            identifier: "companion-id",
+            properties: ["rpFl": "0x4000", "rpMac": "AA:BB:CC:DD:EE:FF"],
+            pairingRequirement: .mandatory
+        )
+        let sparseService = ServiceInfo(protocol: .companion, port: port3)
+
+        var config = AppleTVConfiguration(address: "127.0.0.1", name: "test")
+        config.addService(richService)
+        config.addService(sparseService)
+
+        let merged = config.service(for: .companion)
+        XCTAssertEqual(merged?.identifier, "companion-id")
+        XCTAssertEqual(merged?.properties["rpFl"], "0x4000")
+        XCTAssertEqual(merged?.properties["rpMac"], "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(merged?.pairingRequirement, .mandatory)
+    }
+
     // MARK: - Deep sleep
 
     func testDeepSleep() {

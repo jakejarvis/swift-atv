@@ -42,11 +42,16 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
         settings: ATVSettings = ATVSettings()
     ) async throws(ATVError) -> MRPPairingHandler {
         let connection = MRPConnection(host: config.address, port: service.port)
-        try await connection.connect()
-        _ = try await connection.sendAndReceive(
-            MRPMessages.deviceInformation(settings: settings),
-            responseType: .deviceInfoMessage
-        )
+        do {
+            try await connection.connect()
+            _ = try await connection.sendAndReceive(
+                MRPMessages.deviceInformation(settings: settings),
+                responseType: .deviceInfoMessage
+            )
+        } catch {
+            await connection.close()
+            throw error
+        }
         return MRPPairingHandler(
             config: config,
             service: service,

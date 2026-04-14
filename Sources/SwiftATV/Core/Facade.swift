@@ -15,6 +15,10 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         [MRPService],
         AsyncStream<DeviceEvent>.Continuation?
     )
+    private typealias SecondaryProtocolDrain = (
+        companion: CompanionService?,
+        mrp: MRPService?
+    )
 
     private let configuration: AppleTVConfiguration
     private let _settings: ATVSettings
@@ -211,6 +215,12 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
         }
     }
 
+    internal func _testSetCompanionService(_ service: CompanionService?) {
+        lock.withLock {
+            companionService = service
+        }
+    }
+
     internal var _testActiveProtocols: Set<ATVProtocol> {
         lock.withLock { activeProtocols }
     }
@@ -234,25 +244,27 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     private func unregisterSecondaryProtocol(_ protocol: ATVProtocol) {
-        let service = lock.withLock {
+        let services = lock.withLock {
             guard activeProtocols.remove(`protocol`) != nil else {
-                return Optional<MRPService>.none
+                return SecondaryProtocolDrain(nil, nil)
             }
             if primaryProtocol == `protocol` {
                 primaryProtocol = activeProtocols.first
             }
             switch `protocol` {
             case .companion:
+                let companion = companionService
                 companionService = nil
-                return nil
+                return SecondaryProtocolDrain(companion, nil)
             case .mrp, .airPlay:
-                return mrpServices.removeValue(forKey: `protocol`)
+                return SecondaryProtocolDrain(nil, mrpServices.removeValue(forKey: `protocol`))
             }
         }
 
         unregisterProtocol(`protocol`)
         Task {
-            await service?.close()
+            await services.companion?.close()
+            await services.mrp?.close()
         }
     }
 

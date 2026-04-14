@@ -172,7 +172,12 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
         settings: ATVSettings = ATVSettings()
     ) async throws(ATVError) -> CompanionPairingHandler {
         let connection = CompanionConnection(host: config.address, port: service.port)
-        try await connection.connect()
+        do {
+            try await connection.connect()
+        } catch {
+            await connection.close()
+            throw error
+        }
         return CompanionPairingHandler(
             config: config,
             service: service,

@@ -50,9 +50,18 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
     }
 
     public func begin() async throws(ATVError) {
+        let existing = lock.withLock {
+            let current = connection
+            connection = nil
+            m2ResponseData = nil
+            _hasPaired = false
+            return current
+        }
+        await existing?.close()
+
         let control = AirPlayControlConnection(host: config.address, port: _service.port)
-        try await control.connect()
         do {
+            try await control.connect()
             let response = try await control.beginPairSetup(setup)
             lock.withLock {
                 connection = control
