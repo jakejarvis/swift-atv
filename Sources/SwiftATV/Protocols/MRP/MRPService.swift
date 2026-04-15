@@ -8,6 +8,9 @@ final class MRPStateStore: @unchecked Sendable {
     private var _currentApp: App?
     private var _artworkID = ""
     private var _hasVolumeState = false
+    private var _volumeControlAvailable = false
+    private var _volumeControlCapabilities: VolumeCapabilities.Enum = .none
+    private var _volumeDeviceID: String?
     private var _hasOutputDevicesState = false
     private var _outputDevicesRevision = 0
     private var _hasPlayingSnapshot = false
@@ -24,6 +27,27 @@ final class MRPStateStore: @unchecked Sendable {
     var currentApp: App? { lock.withLock { _currentApp } }
     var artworkID: String { lock.withLock { _artworkID } }
     var hasVolumeState: Bool { lock.withLock { _hasVolumeState } }
+    var volumeDeviceID: String? { lock.withLock { _volumeDeviceID } }
+    var supportsAbsoluteVolume: Bool {
+        lock.withLock {
+            _volumeControlAvailable && _volumeDeviceID != nil && _volumeControlCapabilities.supportsAbsoluteVolume
+        }
+    }
+
+    var supportsRelativeVolume: Bool {
+        lock.withLock {
+            _volumeControlAvailable && _volumeDeviceID != nil && _volumeControlCapabilities.supportsRelativeVolume
+        }
+    }
+
+    var supportsVolumeStep: Bool {
+        lock.withLock {
+            _volumeControlAvailable && _volumeDeviceID != nil
+                && (_volumeControlCapabilities.supportsRelativeVolume
+                    || _volumeControlCapabilities.supportsAbsoluteVolume)
+        }
+    }
+
     var hasOutputDevicesState: Bool { lock.withLock { _hasOutputDevicesState } }
     var outputDevicesRevision: Int { lock.withLock { _outputDevicesRevision } }
     var hasPlayingSnapshot: Bool { lock.withLock { _hasPlayingSnapshot } }
@@ -32,7 +56,7 @@ final class MRPStateStore: @unchecked Sendable {
     func update(message: ProtocolMessageMessage) {
         switch message.type {
         case .volumeDidChangeMessage:
-            setVolume(message.volumeDidChangeMessage.volume)
+            setVolume(message.volumeDidChangeMessage)
         case .getVolumeResultMessage:
             setVolume(message.getVolumeResultMessage.volume)
         case .updateOutputDeviceMessage:
@@ -51,11 +75,9 @@ final class MRPStateStore: @unchecked Sendable {
         case .setDefaultSupportedCommandsMessage:
             updateCommandInfos(message.setDefaultSupportedCommandsMessage.supportedCommands)
         case .volumeControlAvailabilityMessage:
-            lock.withLock {
-                _hasVolumeState = message.volumeControlAvailabilityMessage.volumeControlAvailable
-            }
+            setVolumeControls(message.volumeControlAvailabilityMessage)
         case .volumeControlCapabilitiesDidChangeMessage:
-            lock.withLock { _hasVolumeState = true }
+            setVolumeControls(message.volumeControlCapabilitiesDidChangeMessage)
         default:
             return
         }
@@ -160,6 +182,45 @@ final class MRPStateStore: @unchecked Sendable {
         }
     }
 
+    private func setVolume(_ message: VolumeDidChangeMessage) {
+        let deviceID = lock.withLock { _volumeDeviceID }
+        let outputDeviceID =
+            message.hasOutputDeviceUid && !message.outputDeviceUid.isEmpty
+            ? message.outputDeviceUid : nil
+
+        if let outputDeviceID, let deviceID, outputDeviceID != deviceID {
+            updateOutputDeviceVolume(identifier: outputDeviceID, volume: message.volume * 100)
+            return
+        }
+
+        if let outputDeviceID, deviceID == nil {
+            updateOutputDeviceVolume(identifier: outputDeviceID, volume: message.volume * 100)
+            return
+        }
+
+        setVolume(message.volume)
+    }
+
+    private func setVolumeControls(_ message: VolumeControlAvailabilityMessage) {
+        lock.withLock {
+            _volumeControlAvailable = message.volumeControlAvailable
+            _volumeControlCapabilities = message.volumeCapabilities
+        }
+    }
+
+    private func setVolumeControls(_ message: VolumeControlCapabilitiesDidChangeMessage) {
+        let shouldUpdate = lock.withLock {
+            guard let deviceID = _volumeDeviceID else {
+                return !message.hasOutputDeviceUid || message.outputDeviceUid.isEmpty
+            }
+            return !message.hasOutputDeviceUid || message.outputDeviceUid.isEmpty || message.outputDeviceUid == deviceID
+        }
+        guard shouldUpdate else {
+            return
+        }
+        setVolumeControls(message.capabilities)
+    }
+
     private func setOutputDevices(_ descriptors: [AVOutputDeviceDescriptor]) {
         let devices = descriptors.compactMap { descriptor -> OutputDevice? in
             guard !descriptor.uniqueIdentifier.isEmpty else {
@@ -206,6 +267,9 @@ final class MRPStateStore: @unchecked Sendable {
         }
 
         let continuations = lock.withLock {
+            if let volumeDeviceID = deviceInfo.volumeControlDeviceID {
+                _volumeDeviceID = volumeDeviceID
+            }
             _outputDevices = devices
             _hasOutputDevicesState = true
             _outputDevicesRevision += 1
@@ -213,6 +277,32 @@ final class MRPStateStore: @unchecked Sendable {
         }
         for continuation in continuations {
             continuation.yield(devices)
+        }
+    }
+
+    private func updateOutputDeviceVolume(identifier: String, volume: Float) {
+        typealias OutputDeviceVolumeUpdate = (
+            devices: [OutputDevice],
+            continuations: [AsyncStream<[OutputDevice]>.Continuation]
+        )
+        let update = lock.withLock { () -> OutputDeviceVolumeUpdate? in
+            guard let index = _outputDevices.firstIndex(where: { $0.identifier == identifier }) else {
+                return nil
+            }
+            _outputDevices[index] = OutputDevice(
+                identifier: _outputDevices[index].identifier,
+                name: _outputDevices[index].name,
+                volume: volume
+            )
+            _hasOutputDevicesState = true
+            _outputDevicesRevision += 1
+            return (_outputDevices, Array(outputContinuations.values))
+        }
+        guard let update else {
+            return
+        }
+        for continuation in update.continuations {
+            continuation.yield(update.devices)
         }
     }
 
@@ -505,18 +595,36 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
         try Self.validateCommandResult(response.sendCommandResultMessage, command: command)
     }
 
-    func sendHID(usagePage: UInt16, usage: UInt16, action: InputAction) async throws(ATVError) {
+    func sendHID(
+        usagePage: UInt16,
+        usage: UInt16,
+        action: InputAction,
+        flush: Bool = true
+    ) async throws(ATVError) {
         switch action {
         case .singleTap:
-            try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: true))
-            try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: false))
+            try await sendHIDPress(usagePage: usagePage, usage: usage, hold: false, flush: flush)
         case .doubleTap:
-            try await sendHID(usagePage: usagePage, usage: usage, action: .singleTap)
-            try await sendHID(usagePage: usagePage, usage: usage, action: .singleTap)
+            try await sendHIDPress(usagePage: usagePage, usage: usage, hold: false, flush: flush)
+            try await sendHIDPress(usagePage: usagePage, usage: usage, hold: false, flush: flush)
         case .hold:
-            try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: true))
+            try await sendHIDPress(usagePage: usagePage, usage: usage, hold: true, flush: flush)
+        }
+    }
+
+    private func sendHIDPress(
+        usagePage: UInt16,
+        usage: UInt16,
+        hold: Bool,
+        flush: Bool
+    ) async throws(ATVError) {
+        try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: true))
+        if hold {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: false))
+        }
+        try await send(MRPMessages.hidEvent(usagePage: usagePage, usage: usage, down: false))
+        if flush {
+            _ = try await exchange(MRPMessages.generic(), responseType: .genericMessage)
         }
     }
 
@@ -694,6 +802,28 @@ extension Command {
         case .reshuffle: return .reshuffle
         case .changeQueueEndAction: return .changeQueueEndAction
         }
+    }
+}
+
+extension VolumeCapabilities.Enum {
+    fileprivate var supportsAbsoluteVolume: Bool {
+        self == .absolute || self == .both
+    }
+
+    fileprivate var supportsRelativeVolume: Bool {
+        self == .relative || self == .both
+    }
+}
+
+extension DeviceInfoMessage {
+    fileprivate var volumeControlDeviceID: String? {
+        if hasClusterID, !clusterID.isEmpty {
+            return clusterID
+        }
+        if hasDeviceUid, !deviceUid.isEmpty {
+            return deviceUid
+        }
+        return nil
     }
 }
 

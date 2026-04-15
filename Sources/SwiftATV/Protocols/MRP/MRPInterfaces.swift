@@ -237,15 +237,26 @@ public final class MRPAudio: @unchecked Sendable, AudioController {
     public var outputDevicesStream: AsyncStream<[OutputDevice]> { stateStore.outputDevicesStream() }
 
     public func setVolume(_ level: Float, device: OutputDevice?) async throws(ATVError) {
-        try await `protocol`.send(MRPMessages.setVolume(level, deviceID: device?.identifier))
+        guard let deviceID = device?.identifier ?? stateStore.volumeDeviceID else {
+            throw ATVError.protocolError("MRP volume target is unavailable")
+        }
+        try await `protocol`.send(MRPMessages.setVolume(level, deviceID: deviceID))
     }
 
     public func volumeUp() async throws(ATVError) {
-        try await `protocol`.sendHID(usagePage: 12, usage: 0xE9, action: .singleTap)
+        if stateStore.supportsAbsoluteVolume, !stateStore.supportsRelativeVolume {
+            try await setVolume(min(stateStore.volume + 5, 100), device: nil)
+            return
+        }
+        try await `protocol`.sendHID(usagePage: 12, usage: 0xE9, action: .singleTap, flush: false)
     }
 
     public func volumeDown() async throws(ATVError) {
-        try await `protocol`.sendHID(usagePage: 12, usage: 0xEA, action: .singleTap)
+        if stateStore.supportsAbsoluteVolume, !stateStore.supportsRelativeVolume {
+            try await setVolume(max(stateStore.volume - 5, 0), device: nil)
+            return
+        }
+        try await `protocol`.sendHID(usagePage: 12, usage: 0xEA, action: .singleTap, flush: false)
     }
 
     public func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
@@ -361,8 +372,8 @@ public final class MRPCapabilities: @unchecked Sendable, CapabilityProvider {
         if capability == .push(.updates) {
             return CapabilityInfo(state: stateStore.clientUpdatesConfigured ? .available : .unavailable)
         }
-        if Self.audioCapabilities.contains(capability) {
-            return CapabilityInfo(state: stateStore.hasVolumeState ? .available : .unavailable)
+        if case .audio(let audioCapability) = capability, Self.audioCapabilities.contains(capability) {
+            return CapabilityInfo(state: audioCapabilityState(audioCapability))
         }
         if Self.outputDeviceCapabilities.contains(capability) {
             return CapabilityInfo(state: stateStore.hasOutputDevicesState ? .available : .unavailable)
@@ -386,6 +397,19 @@ public final class MRPCapabilities: @unchecked Sendable, CapabilityProvider {
 
     public func inState(_ states: [CapabilityState], capabilities: Capability...) -> Bool {
         capabilities.allSatisfy { states.contains(capabilityInfo($0).state) }
+    }
+
+    private func audioCapabilityState(_ capability: AudioCapability) -> CapabilityState {
+        switch capability {
+        case .volume:
+            return stateStore.hasVolumeState ? .available : .unavailable
+        case .setVolume:
+            return stateStore.supportsAbsoluteVolume ? .available : .unavailable
+        case .volumeUp, .volumeDown:
+            return stateStore.supportsVolumeStep ? .available : .unavailable
+        case .outputDevices, .addOutputDevices, .removeOutputDevices, .setOutputDevices:
+            return stateStore.hasOutputDevicesState ? .available : .unavailable
+        }
     }
 
     private static let remoteHIDCapabilities: Set<Capability> = [

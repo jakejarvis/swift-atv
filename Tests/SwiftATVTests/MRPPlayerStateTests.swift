@@ -52,6 +52,52 @@ private final class FakeMRPProtocolHandler: MRPProtocolHandling, @unchecked Send
     }
 }
 
+private final class RecordingMRPTransport: MRPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _sentMessages: [ProtocolMessageMessage] = []
+
+    weak var delegate: MRPConnectionDelegate?
+
+    var messageStream: AsyncStream<ProtocolMessageMessage> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
+
+    var sentMessages: [ProtocolMessageMessage] {
+        lock.withLock { _sentMessages }
+    }
+
+    func connect() async throws(ATVError) {}
+
+    func enableEncryption(outputKey: Data, inputKey: Data) {}
+
+    func send(_ message: ProtocolMessageMessage) async throws(ATVError) {
+        lock.withLock {
+            _sentMessages.append(message)
+        }
+    }
+
+    func sendAndReceive(
+        _ message: ProtocolMessageMessage,
+        responseType: ProtocolMessageMessage.TypeEnum?,
+        timeout: TimeInterval
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        lock.withLock {
+            _sentMessages.append(message)
+        }
+
+        var response = ProtocolMessageMessage()
+        response.type = responseType ?? message.type
+        if response.type == .genericMessage {
+            response.genericMessage = GenericMessage()
+        }
+        return response
+    }
+
+    func close() async {}
+}
+
 /// Ported from pyatv tests/protocols/mrp/test_player_state.py
 final class MRPPlayerStateTests: XCTestCase {
 
@@ -196,6 +242,38 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(bytes.count, 60)
         XCTAssertEqual(Array(bytes[43..<49]), [0x00, 0x0C, 0x00, 0xE2, 0x00, 0x01])
         XCTAssertEqual(Array(bytes.suffix(11)), [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0])
+    }
+
+    func testSendHIDFlushesAfterEachTap() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = Self.mrpProtocolHandler(transport: transport)
+
+        try await handler.sendHID(usagePage: 1, usage: 0x89, action: .doubleTap)
+
+        XCTAssertEqual(
+            transport.sentMessages.map(\.type),
+            [
+                .sendHidEventMessage,
+                .sendHidEventMessage,
+                .genericMessage,
+                .sendHidEventMessage,
+                .sendHidEventMessage,
+                .genericMessage,
+            ]
+        )
+    }
+
+    func testMRPAudioVolumeStepKeepsPyatvNoFlushBehavior() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = Self.mrpProtocolHandler(transport: transport)
+        let audio = MRPAudio(protocol: handler, stateStore: MRPStateStore())
+
+        try await audio.volumeUp()
+
+        XCTAssertEqual(
+            transport.sentMessages.map(\.type),
+            [.sendHidEventMessage, .sendHidEventMessage]
+        )
     }
 
     func testPlaybackQueueRequestAsksForContentItemAssets() {
@@ -352,6 +430,142 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(playCapabilityState, .available)
     }
 
+    func testPausedPlaybackPositionDoesNotAdvanceFromTimestamp() async {
+        let state = MRPPlayerState()
+        var message = Self.setStateMessage(
+            title: "Tunnel Vision",
+            artist: "The Apples",
+            album: "Remote Songs",
+            commands: SupportedCommands()
+        )
+        var inner = message.setStateMessage
+        inner.playbackState = .paused
+        var item = inner.playbackQueue.contentItems[0]
+        item.metadata.elapsedTime = 42
+        item.metadata.elapsedTimeTimestamp = Self.cocoaTimestamp(secondsAgo: 120)
+        item.metadata.playbackRate = 0
+        inner.playbackQueue.contentItems = [item]
+        message.setStateMessage = inner
+
+        await state.process(message)
+
+        let playing = await state.currentPlaying
+        XCTAssertEqual(playing.deviceState, .paused)
+        XCTAssertEqual(playing.position, 42)
+    }
+
+    func testPlayingPlaybackPositionAdvancesFromTimestamp() async {
+        let state = MRPPlayerState()
+        var message = Self.setStateMessage(
+            title: "Tunnel Vision",
+            artist: "The Apples",
+            album: "Remote Songs",
+            commands: SupportedCommands()
+        )
+        var inner = message.setStateMessage
+        var item = inner.playbackQueue.contentItems[0]
+        item.metadata.elapsedTime = 42
+        item.metadata.elapsedTimeTimestamp = Self.cocoaTimestamp(secondsAgo: 120)
+        item.metadata.playbackRate = 1
+        inner.playbackQueue.contentItems = [item]
+        message.setStateMessage = inner
+
+        await state.process(message)
+
+        let playing = await state.currentPlaying
+        XCTAssertEqual(playing.deviceState, .playing)
+        XCTAssertGreaterThanOrEqual(playing.position ?? 0, 150)
+    }
+
+    func testStoppedSetStateClearsStaleMetadata() async {
+        let state = MRPPlayerState()
+        await state.process(
+            Self.setStateMessage(
+                title: "Tunnel Vision",
+                artist: "The Apples",
+                album: "Remote Songs",
+                commands: SupportedCommands()
+            )
+        )
+
+        var stopped = Self.setStateMessage(
+            title: "Tunnel Vision",
+            artist: "The Apples",
+            album: "Remote Songs",
+            commands: SupportedCommands()
+        )
+        var inner = stopped.setStateMessage
+        inner.playbackState = .stopped
+        stopped.setStateMessage = inner
+        await state.process(stopped)
+
+        let playing = await state.currentPlaying
+        let artworkID = await state.artworkID
+
+        XCTAssertEqual(playing.deviceState, .stopped)
+        XCTAssertEqual(playing.mediaType, .unknown)
+        XCTAssertNil(playing.title)
+        XCTAssertNil(playing.artist)
+        XCTAssertNil(playing.album)
+        XCTAssertNil(playing.hash)
+        XCTAssertEqual(artworkID, "")
+    }
+
+    func testContentItemUpdateMergesPartialMetadataForCurrentItem() async {
+        let state = MRPPlayerState()
+        let setState = Self.setStateMessage(
+            title: "Tunnel Vision",
+            artist: "The Apples",
+            album: "Remote Songs",
+            commands: SupportedCommands()
+        )
+        await state.process(setState)
+
+        await state.process(
+            Self.updateContentItemMessage(
+                identifier: "item-id",
+                playerPath: setState.setStateMessage.playerPath
+            ) { metadata in
+                metadata.elapsedTime = 100
+            }
+        )
+
+        let playing = await state.currentPlaying
+
+        XCTAssertEqual(playing.title, "Tunnel Vision")
+        XCTAssertEqual(playing.artist, "The Apples")
+        XCTAssertEqual(playing.album, "Remote Songs")
+        XCTAssertEqual(playing.position, 100)
+        XCTAssertEqual(playing.hash, "item-id")
+    }
+
+    func testContentItemUpdateIgnoresUnrelatedItemIdentifier() async {
+        let state = MRPPlayerState()
+        let setState = Self.setStateMessage(
+            title: "Tunnel Vision",
+            artist: "The Apples",
+            album: "Remote Songs",
+            commands: SupportedCommands()
+        )
+        await state.process(setState)
+
+        await state.process(
+            Self.updateContentItemMessage(
+                identifier: "other-item-id",
+                playerPath: setState.setStateMessage.playerPath
+            ) { metadata in
+                metadata.title = "Wrong Item"
+                metadata.trackArtistName = "Wrong Artist"
+            }
+        )
+
+        let playing = await state.currentPlaying
+
+        XCTAssertEqual(playing.title, "Tunnel Vision")
+        XCTAssertEqual(playing.artist, "The Apples")
+        XCTAssertEqual(playing.hash, "item-id")
+    }
+
     func testSetStateIgnoresNonFinitePlaybackTimes() async {
         let state = MRPPlayerState()
         var message = Self.setStateMessage(
@@ -490,15 +704,67 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.volume)).state, .unavailable)
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
 
-        var message = ProtocolMessageMessage()
-        message.type = .volumeDidChangeMessage
-        var volume = VolumeDidChangeMessage()
-        volume.volume = 0.42
-        message.volumeDidChangeMessage = volume
-        stateStore.update(message: message)
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: 0.42))
 
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.volume)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
+    }
+
+    func testMRPCapabilitiesHonorVolumeControlCapabilities() {
+        let stateStore = MRPStateStore()
+        let capabilities = MRPCapabilities(stateStore: stateStore)
+
+        stateStore.update(
+            message: Self.deviceInfoMessage(
+                localIdentifier: "local",
+                localName: "Apple TV",
+                localDeviceUID: "local-device",
+                clusterID: "cluster-device",
+                groupedDevices: []
+            )
+        )
+
+        stateStore.update(message: Self.volumeControlAvailabilityMessage(available: true, capabilities: .absolute))
+
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeUp)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeDown)).state, .available)
+
+        stateStore.update(message: Self.volumeControlAvailabilityMessage(available: true, capabilities: .relative))
+
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeUp)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeDown)).state, .available)
+
+        stateStore.update(message: Self.volumeControlAvailabilityMessage(available: false, capabilities: .both))
+
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeUp)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeDown)).state, .unavailable)
+    }
+
+    func testMRPCapabilitiesIgnoreVolumeControlUpdatesForOtherDevices() {
+        let stateStore = MRPStateStore()
+        let capabilities = MRPCapabilities(stateStore: stateStore)
+
+        stateStore.update(
+            message: Self.deviceInfoMessage(
+                localIdentifier: "local",
+                localName: "Apple TV",
+                localDeviceUID: "local-device",
+                groupedDevices: []
+            )
+        )
+
+        stateStore.update(
+            message: Self.volumeCapabilitiesDidChangeMessage(
+                outputDeviceID: "other-device",
+                available: true,
+                capabilities: .absolute
+            )
+        )
+
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
     }
 
     func testMRPStateStorePrefersClusterAwareOutputDeviceUpdates() {
@@ -558,6 +824,80 @@ final class MRPPlayerStateTests: XCTestCase {
                 OutputDevice(identifier: "homepod", name: "HomePod"),
             ]
         )
+    }
+
+    func testMRPStateStoreFiltersVolumeUpdatesByLocalDeviceID() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(
+            message: Self.deviceInfoMessage(
+                localIdentifier: "local",
+                localName: "Apple TV",
+                localDeviceUID: "local-device",
+                groupedDevices: [Self.groupedDeviceInfo(identifier: "homepod", name: "HomePod")]
+            )
+        )
+
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: 0.33, outputDeviceID: "homepod"))
+
+        XCTAssertEqual(stateStore.volume, 0)
+        XCTAssertEqual(
+            stateStore.outputDevices,
+            [
+                OutputDevice(identifier: "local", name: "Apple TV"),
+                OutputDevice(identifier: "homepod", name: "HomePod", volume: 33),
+            ]
+        )
+
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: 0.44, outputDeviceID: "local-device"))
+
+        XCTAssertEqual(stateStore.volume, 44)
+    }
+
+    func testMRPAudioSetVolumeUsesLocalVolumeDeviceID() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = Self.mrpProtocolHandler(transport: transport)
+        let stateStore = MRPStateStore()
+        stateStore.update(
+            message: Self.deviceInfoMessage(
+                localIdentifier: "local",
+                localName: "Apple TV",
+                localDeviceUID: "local-device",
+                clusterID: "cluster-device",
+                groupedDevices: []
+            )
+        )
+        let audio = MRPAudio(protocol: handler, stateStore: stateStore)
+
+        try await audio.setVolume(55, device: nil)
+
+        XCTAssertEqual(transport.sentMessages.map(\.type), [.setVolumeMessage])
+        XCTAssertEqual(transport.sentMessages[0].setVolumeMessage.outputDeviceUid, "cluster-device")
+        XCTAssertEqual(transport.sentMessages[0].setVolumeMessage.volume, 0.55, accuracy: 0.0001)
+    }
+
+    func testMRPAudioAbsoluteVolumeStepUsesSetVolume() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = Self.mrpProtocolHandler(transport: transport)
+        let stateStore = MRPStateStore()
+        stateStore.update(
+            message: Self.deviceInfoMessage(
+                localIdentifier: "local",
+                localName: "Apple TV",
+                localDeviceUID: "local-device",
+                clusterID: "cluster-device",
+                groupedDevices: []
+            )
+        )
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: 0.4, outputDeviceID: "cluster-device"))
+        stateStore.update(message: Self.volumeControlAvailabilityMessage(available: true, capabilities: .absolute))
+        let audio = MRPAudio(protocol: handler, stateStore: stateStore)
+
+        try await audio.volumeUp()
+
+        XCTAssertEqual(transport.sentMessages.map(\.type), [.setVolumeMessage])
+        XCTAssertEqual(transport.sentMessages[0].setVolumeMessage.outputDeviceUid, "cluster-device")
+        XCTAssertEqual(transport.sentMessages[0].setVolumeMessage.volume, 0.45, accuracy: 0.0001)
     }
 
     func testMRPStateStoreSkipsOutputDevicesWithEmptyIdentifiers() {
@@ -674,6 +1014,43 @@ final class MRPPlayerStateTests: XCTestCase {
         return message
     }
 
+    private static func mrpProtocolHandler(transport: RecordingMRPTransport) -> MRPProtocolHandler {
+        MRPProtocolHandler(
+            connection: transport,
+            playerState: MRPPlayerState(),
+            stateStore: MRPStateStore(),
+            authenticationMode: .alreadySecure,
+            heartbeatMode: .disabled,
+            runtimeRequestTimeout: 0.1
+        )
+    }
+
+    private static func updateContentItemMessage(
+        identifier: String,
+        playerPath: PlayerPath,
+        mutateMetadata: (inout ContentItemMetadata) -> Void
+    ) -> ProtocolMessageMessage {
+        var metadata = ContentItemMetadata()
+        mutateMetadata(&metadata)
+
+        var item = ContentItem()
+        item.identifier = identifier
+        item.metadata = metadata
+
+        var inner = UpdateContentItemMessage()
+        inner.playerPath = playerPath
+        inner.contentItems = [item]
+
+        var message = ProtocolMessageMessage()
+        message.type = .updateContentItemMessage
+        message.updateContentItemMessage = inner
+        return message
+    }
+
+    private static func cocoaTimestamp(secondsAgo: TimeInterval) -> Double {
+        Date().timeIntervalSince1970 - 978_307_200.0 - secondsAgo
+    }
+
     private static func outputDeviceDescriptor(
         identifier: String,
         name: String,
@@ -710,11 +1087,19 @@ final class MRPPlayerStateTests: XCTestCase {
     private static func deviceInfoMessage(
         localIdentifier: String,
         localName: String,
+        localDeviceUID: String? = nil,
+        clusterID: String? = nil,
         groupedDevices: [DeviceInfoMessage]
     ) -> ProtocolMessageMessage {
         var info = DeviceInfoMessage()
         info.uniqueIdentifier = localIdentifier
         info.name = localName
+        if let localDeviceUID {
+            info.deviceUid = localDeviceUID
+        }
+        if let clusterID {
+            info.clusterID = clusterID
+        }
         info.isGroupLeader = true
         info.isProxyGroupPlayer = false
         info.groupedDevices = groupedDevices
@@ -722,6 +1107,54 @@ final class MRPPlayerStateTests: XCTestCase {
         var message = ProtocolMessageMessage()
         message.type = .deviceInfoMessage
         message.deviceInfoMessage = info
+        return message
+    }
+
+    private static func volumeDidChangeMessage(
+        volume: Float,
+        outputDeviceID: String? = nil
+    ) -> ProtocolMessageMessage {
+        var inner = VolumeDidChangeMessage()
+        inner.volume = volume
+        if let outputDeviceID {
+            inner.outputDeviceUid = outputDeviceID
+        }
+
+        var message = ProtocolMessageMessage()
+        message.type = .volumeDidChangeMessage
+        message.volumeDidChangeMessage = inner
+        return message
+    }
+
+    private static func volumeControlAvailabilityMessage(
+        available: Bool,
+        capabilities: VolumeCapabilities.Enum
+    ) -> ProtocolMessageMessage {
+        var inner = VolumeControlAvailabilityMessage()
+        inner.volumeControlAvailable = available
+        inner.volumeCapabilities = capabilities
+
+        var message = ProtocolMessageMessage()
+        message.type = .volumeControlAvailabilityMessage
+        message.volumeControlAvailabilityMessage = inner
+        return message
+    }
+
+    private static func volumeCapabilitiesDidChangeMessage(
+        outputDeviceID: String,
+        available: Bool,
+        capabilities: VolumeCapabilities.Enum
+    ) -> ProtocolMessageMessage {
+        var inner = VolumeControlCapabilitiesDidChangeMessage()
+        inner.outputDeviceUid = outputDeviceID
+        var availability = VolumeControlAvailabilityMessage()
+        availability.volumeControlAvailable = available
+        availability.volumeCapabilities = capabilities
+        inner.capabilities = availability
+
+        var message = ProtocolMessageMessage()
+        message.type = .volumeControlCapabilitiesDidChangeMessage
+        message.volumeControlCapabilitiesDidChangeMessage = inner
         return message
     }
 }

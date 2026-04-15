@@ -1,4 +1,5 @@
 import Foundation
+import SwiftProtobuf
 
 private let defaultPlayerIdentifier = "MediaRemote-DefaultPlayer"
 private let cocoaEpochDelta = 978_307_200.0
@@ -203,6 +204,9 @@ public actor MRPPlayerState {
         if state.hasPlaybackQueue, let item = state.playbackQueue.contentItems.first {
             snapshot.item = item
         }
+        if state.hasPlaybackState, state.playbackState == .stopped {
+            snapshot.item = nil
+        }
         players[MRPPlayerPathKey(bundleID: bundleID, playerID: playerID)] = snapshot
         activeClientBundleID = bundleID
         activePlayerID = playerID
@@ -211,12 +215,23 @@ public actor MRPPlayerState {
     private func update(with content: UpdateContentItemMessage) {
         let ids = identifiers(from: content.playerPath)
         let bundleID = ids.bundleID ?? activeClientBundleID ?? ""
-        guard !bundleID.isEmpty, let item = content.contentItems.first else {
+        guard !bundleID.isEmpty, !content.contentItems.isEmpty else {
             return
         }
         let playerID = ids.playerID
         var snapshot = ensureSnapshot(bundleID: bundleID, playerID: playerID)
-        snapshot.item = item
+        if let currentItem = snapshot.item, currentItem.hasIdentifier {
+            guard
+                let update = content.contentItems.first(where: { item in
+                    item.hasIdentifier && item.identifier == currentItem.identifier
+                })
+            else {
+                return
+            }
+            snapshot.item = mergeContentItem(currentItem, with: update)
+        } else if let update = content.contentItems.first {
+            snapshot.item = mergeContentItem(snapshot.item, with: update)
+        }
         snapshot.playerPath = content.hasPlayerPath ? content.playerPath : snapshot.playerPath
         players[MRPPlayerPathKey(bundleID: bundleID, playerID: playerID)] = snapshot
     }
@@ -288,7 +303,7 @@ public actor MRPPlayerState {
             album: metadata?.hasAlbumName == true ? metadata?.albumName : nil,
             genre: metadata?.hasGenre == true ? metadata?.genre : nil,
             totalTime: metadata?.hasDuration == true ? Self.intValue(metadata?.duration ?? 0) : nil,
-            position: playbackPosition(metadata),
+            position: playbackPosition(snapshot: snapshot),
             shuffle: shuffleState(snapshot),
             repeatState: repeatState(snapshot),
             seriesName: metadata?.hasSeriesName == true ? metadata?.seriesName : nil,
@@ -325,13 +340,16 @@ public actor MRPPlayerState {
         }
     }
 
-    private func playbackPosition(_ metadata: ContentItemMetadata?) -> Int? {
-        guard let metadata else {
+    private func playbackPosition(snapshot: MRPPlayerSnapshot) -> Int? {
+        guard let metadata = snapshot.item?.metadata else {
             return nil
         }
+        let elapsed = metadata.hasElapsedTime ? metadata.elapsedTime : 0
         if metadata.hasElapsedTimeTimestamp {
-            let elapsed = metadata.hasElapsedTime ? metadata.elapsedTime : 0
             guard metadata.elapsedTimeTimestamp.isFinite else {
+                return Self.intValue(elapsed)
+            }
+            guard deviceState(snapshot: snapshot) == .playing else {
                 return Self.intValue(elapsed)
             }
             let cocoaNow = Date().timeIntervalSince1970 - cocoaEpochDelta
@@ -352,6 +370,63 @@ public actor MRPPlayerState {
             return nil
         }
         return Int(value)
+    }
+
+    private func mergeContentItem(_ existing: ContentItem?, with update: ContentItem) -> ContentItem {
+        var item = existing ?? ContentItem()
+        if update.hasIdentifier {
+            item.identifier = update.identifier
+        }
+        if update.hasMetadata {
+            item.metadata = mergeMetadata(
+                item.hasMetadata ? item.metadata : ContentItemMetadata(),
+                with: update.metadata
+            )
+        }
+        if update.hasArtworkData {
+            item.artworkData = update.artworkData
+        }
+        if update.hasInfo {
+            item.info = update.info
+        }
+        if !update.availableLanguageOptions.isEmpty {
+            item.availableLanguageOptions = update.availableLanguageOptions
+        }
+        if !update.currentLanguageOptions.isEmpty {
+            item.currentLanguageOptions = update.currentLanguageOptions
+        }
+        if update.hasParentIdentifier {
+            item.parentIdentifier = update.parentIdentifier
+        }
+        if update.hasAncestorIdentifier {
+            item.ancestorIdentifier = update.ancestorIdentifier
+        }
+        if update.hasQueueIdentifier {
+            item.queueIdentifier = update.queueIdentifier
+        }
+        if update.hasRequestIdentifier {
+            item.requestIdentifier = update.requestIdentifier
+        }
+        if update.hasArtworkDataWidth {
+            item.artworkDataWidth = update.artworkDataWidth
+        }
+        if update.hasArtworkDataHeight {
+            item.artworkDataHeight = update.artworkDataHeight
+        }
+        return item
+    }
+
+    private func mergeMetadata(
+        _ existing: ContentItemMetadata,
+        with update: ContentItemMetadata
+    ) -> ContentItemMetadata {
+        var metadata = existing
+        do {
+            try metadata.merge(serializedBytes: update.serializedData())
+            return metadata
+        } catch {
+            return update
+        }
     }
 
     private func shuffleState(_ snapshot: MRPPlayerSnapshot) -> ShuffleState? {
