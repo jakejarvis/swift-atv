@@ -92,7 +92,12 @@ extension DeviceInfo {
 
     /// Look up an OperatingSystem from an OS name string.
     public static func lookupOS(name: String) -> OperatingSystem {
-        return osMap[name] ?? .unknown
+        if let operatingSystem = osMap[name] {
+            return operatingSystem
+        }
+        return osMap.first { knownName, _ in
+            knownName.caseInsensitiveCompare(name) == .orderedSame
+        }?.value ?? .unknown
     }
 
     /// Create DeviceInfo from mDNS TXT record properties.

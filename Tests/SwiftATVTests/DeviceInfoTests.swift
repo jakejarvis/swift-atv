@@ -66,15 +66,18 @@ final class DeviceInfoTests: XCTestCase {
     func testLookupOSTvOS() {
         XCTAssertEqual(DeviceInfo.lookupOS(name: "tvOS"), .tvOS)
         XCTAssertEqual(DeviceInfo.lookupOS(name: "TvOS"), .tvOS)
+        XCTAssertEqual(DeviceInfo.lookupOS(name: "tvos"), .tvOS)
     }
 
     func testLookupOSMacOS() {
         XCTAssertEqual(DeviceInfo.lookupOS(name: "macOS"), .macOS)
         XCTAssertEqual(DeviceInfo.lookupOS(name: "MacOSX"), .macOS)
+        XCTAssertEqual(DeviceInfo.lookupOS(name: "macosx"), .macOS)
     }
 
     func testLookupOSAirPortOS() {
         XCTAssertEqual(DeviceInfo.lookupOS(name: "AirPortOS"), .airPortOS)
+        XCTAssertEqual(DeviceInfo.lookupOS(name: "airportos"), .airPortOS)
     }
 
     func testLookupOSBad() {

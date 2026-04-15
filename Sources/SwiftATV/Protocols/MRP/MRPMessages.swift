@@ -216,11 +216,11 @@ enum MRPMessages {
         -> CommandOptions
     {
         var options = CommandOptions()
-        if let position {
+        if let position = finiteDouble(position) {
             options.playbackPosition = position
         }
-        if let skipInterval {
-            options.skipInterval = Float(skipInterval)
+        if let skipInterval = finiteFloat(skipInterval) {
+            options.skipInterval = skipInterval
         }
         if let shuffle {
             options.shuffleMode = shuffle.mrpShuffleMode
@@ -233,16 +233,16 @@ enum MRPMessages {
 
     static func commandOptions(_ mediaOptions: MediaCommandOptions) -> CommandOptions {
         var options = CommandOptions()
-        if let playbackPosition = mediaOptions.playbackPosition {
+        if let playbackPosition = finiteDouble(mediaOptions.playbackPosition) {
             options.playbackPosition = playbackPosition
         }
-        if let skipInterval = mediaOptions.skipInterval {
-            options.skipInterval = Float(skipInterval)
+        if let skipInterval = finiteFloat(mediaOptions.skipInterval) {
+            options.skipInterval = skipInterval
         }
-        if let playbackRate = mediaOptions.playbackRate {
+        if let playbackRate = finiteFloat(mediaOptions.playbackRate) {
             options.playbackRate = playbackRate
         }
-        if let rating = mediaOptions.rating {
+        if let rating = finiteFloat(mediaOptions.rating) {
             options.rating = rating
         }
         if let negative = mediaOptions.negative {
@@ -255,6 +255,31 @@ enum MRPMessages {
             options.repeatMode = repeatState.mrpRepeatMode
         }
         return options
+    }
+
+    private static func finiteDouble(_ value: Double?) -> Double? {
+        guard let value, value.isFinite else {
+            return nil
+        }
+        return value
+    }
+
+    private static func finiteFloat(_ value: Double?) -> Float? {
+        guard let value, value.isFinite else {
+            return nil
+        }
+        let floatValue = Float(value)
+        guard floatValue.isFinite else {
+            return nil
+        }
+        return floatValue
+    }
+
+    private static func finiteFloat(_ value: Float?) -> Float? {
+        guard let value, value.isFinite else {
+            return nil
+        }
+        return value
     }
 }
 

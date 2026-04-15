@@ -69,12 +69,18 @@ public final class MRPRemoteControl: @unchecked Sendable, RemoteControl {
 
     public func skipForward(interval: TimeInterval) async throws(ATVError) {
         let options = MRPMessages.commandOptions(skipInterval: interval)
-        try await `protocol`.sendCommand(.skipForward, options: options)
+        try await `protocol`.sendCommand(
+            .skipForward,
+            options: options.hasSendableMRPFields ? options : nil
+        )
     }
 
     public func skipBackward(interval: TimeInterval) async throws(ATVError) {
         let options = MRPMessages.commandOptions(skipInterval: interval)
-        try await `protocol`.sendCommand(.skipBackward, options: options)
+        try await `protocol`.sendCommand(
+            .skipBackward,
+            options: options.hasSendableMRPFields ? options : nil
+        )
     }
 
     public func setPosition(_ position: Int) async throws(ATVError) {
@@ -326,20 +332,21 @@ public final class MRPMediaCommands: @unchecked Sendable, MediaCommandController
         guard let mrpCommand = command.mrpCommand else {
             throw ATVError.notSupported("Media command \(command) is not supported by MRP")
         }
-        let commandOptions = options.isEmpty ? nil : MRPMessages.commandOptions(options)
+        let options = MRPMessages.commandOptions(options)
+        let commandOptions = options.hasSendableMRPFields ? options : nil
         try await `protocol`.sendCommand(mrpCommand, options: commandOptions)
     }
 }
 
-extension MediaCommandOptions {
-    fileprivate var isEmpty: Bool {
-        playbackPosition == nil
-            && skipInterval == nil
-            && playbackRate == nil
-            && rating == nil
-            && negative == nil
-            && shuffle == nil
-            && repeatState == nil
+extension CommandOptions {
+    fileprivate var hasSendableMRPFields: Bool {
+        hasPlaybackPosition
+            || hasSkipInterval
+            || hasPlaybackRate
+            || hasRating
+            || hasNegative
+            || hasShuffleMode
+            || hasRepeatMode
     }
 }
 

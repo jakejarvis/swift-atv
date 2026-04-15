@@ -77,6 +77,10 @@ Pre-1.0: minor version bumps may contain breaking changes.
   takeover, keeping temporary protocol routing stable under nested callers.
 - Device info TXT parsing now handles case-insensitive keys and Companion
   `rpMac`, improving scan metadata and client-identity collision checks.
+- Device info OS-name lookup now tolerates case differences in Bonjour TXT
+  values.
+- MRP command option builders now omit non-finite public numeric inputs instead
+  of serializing malformed control payloads.
 - AirPlay HAP transport now accepts larger inbound encrypted blocks seen on
   Apple TV DataStream channels while still splitting outbound frames into
   1024-byte chunks.

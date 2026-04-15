@@ -350,6 +350,67 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(request.artworkHeight, 400)
     }
 
+    func testCommandOptionsDropNonFiniteNumericValues() {
+        let options = MRPMessages.commandOptions(
+            position: .nan,
+            skipInterval: .infinity,
+            shuffle: .songs,
+            repeatState: .all
+        )
+
+        XCTAssertFalse(options.hasPlaybackPosition)
+        XCTAssertFalse(options.hasSkipInterval)
+        XCTAssertTrue(options.hasShuffleMode)
+        XCTAssertTrue(options.hasRepeatMode)
+    }
+
+    func testMediaCommandOptionsDropNonFiniteNumericValues() {
+        let options = MRPMessages.commandOptions(
+            MediaCommandOptions(
+                playbackPosition: .nan,
+                skipInterval: Double.greatestFiniteMagnitude,
+                playbackRate: .nan,
+                rating: .infinity,
+                negative: false,
+                shuffle: .albums,
+                repeatState: .track
+            )
+        )
+
+        XCTAssertFalse(options.hasPlaybackPosition)
+        XCTAssertFalse(options.hasSkipInterval)
+        XCTAssertFalse(options.hasPlaybackRate)
+        XCTAssertFalse(options.hasRating)
+        XCTAssertTrue(options.hasNegative)
+        XCTAssertTrue(options.hasShuffleMode)
+        XCTAssertTrue(options.hasRepeatMode)
+    }
+
+    func testMediaCommandsOmitOptionsWhenSanitizingRemovesAllFields() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = Self.mrpProtocolHandler(transport: transport)
+        let mediaCommands = MRPMediaCommands(protocol: handler, stateStore: MRPStateStore())
+
+        try await mediaCommands.send(
+            .changePlaybackRate,
+            options: MediaCommandOptions(playbackRate: .nan, rating: .infinity)
+        )
+
+        let command = try XCTUnwrap(transport.sentMessages.last?.sendCommandMessage)
+        XCTAssertFalse(command.hasOptions)
+    }
+
+    func testRemoteSkipOmitsOptionsWhenSanitizingRemovesInterval() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = Self.mrpProtocolHandler(transport: transport)
+        let remote = MRPRemoteControl(protocol: handler)
+
+        try await remote.skipForward(interval: .nan)
+
+        let command = try XCTUnwrap(transport.sentMessages.last?.sendCommandMessage)
+        XCTAssertFalse(command.hasOptions)
+    }
+
     func testAddOutputDevicesUsesLegacyAndClusterAwareFields() {
         let message = MRPMessages.modifyOutputContext(adding: ["speaker-1", "speaker-2"])
         let inner = message.modifyOutputContextRequestMessage
