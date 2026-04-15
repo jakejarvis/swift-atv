@@ -3,6 +3,12 @@ import Testing
 
 @testable import SwiftATV
 
+#if canImport(CryptoKit)
+    import CryptoKit
+#else
+    import Crypto
+#endif
+
 @Suite("AirPlay support")
 struct AirPlaySupportTests {
     @Test("AirPlay split feature strings parse upper and lower words")
@@ -109,6 +115,43 @@ struct AirPlayHAPSessionTests {
         #expect(throws: ATVError.self) {
             _ = try server.decrypt(encrypted)
         }
+    }
+
+    @Test("HAP session accepts oversized inbound blocks")
+    func acceptsOversizedInboundBlocks() throws {
+        let inboundKey = Data(repeating: 0x33, count: 32)
+        let outboundKey = Data(repeating: 0x44, count: 32)
+        let receiver = HAPSession(outputKey: outboundKey, inputKey: inboundKey)
+        let plaintext = Data((0..<1500).map { UInt8($0 % 251) })
+        let frame = try encryptedInboundHAPFrame(plaintext, key: inboundKey)
+
+        let split = frame.index(frame.startIndex, offsetBy: 700)
+        #expect(try receiver.decrypt(Data(frame[..<split])).isEmpty)
+        let decrypted = try receiver.decrypt(Data(frame[split...]))
+
+        #expect(decrypted == plaintext)
+    }
+
+    private func encryptedInboundHAPFrame(_ plaintext: Data, key: Data) throws -> Data {
+        let lengthBytes = Data([
+            UInt8(plaintext.count & 0xFF),
+            UInt8((plaintext.count >> 8) & 0xFF),
+        ])
+        var counter: UInt64 = 0
+        var nonceBytes = Data(count: 12)
+        withUnsafeBytes(of: &counter) { bytes in
+            nonceBytes.replaceSubrange(4..<12, with: bytes)
+        }
+        let sealed = try ChaChaPoly.seal(
+            plaintext,
+            using: SymmetricKey(data: key),
+            nonce: try ChaChaPoly.Nonce(data: nonceBytes),
+            authenticating: lengthBytes
+        )
+        var frame = lengthBytes
+        frame.append(sealed.ciphertext)
+        frame.append(sealed.tag)
+        return frame
     }
 }
 

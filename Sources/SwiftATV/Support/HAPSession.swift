@@ -8,11 +8,13 @@ import Foundation
 
 /// HAP transport encryption used by AirPlay 2 control, event, and data channels.
 ///
-/// The encrypted transport splits plaintext into 1024-byte chunks. Each chunk
-/// is framed as `[length: UInt16LE][ciphertext][tag]`, where the two length
-/// bytes are also used as ChaCha20-Poly1305 additional authenticated data.
+/// The encrypted transport sends plaintext in 1024-byte chunks. Each chunk is
+/// framed as `[length: UInt16LE][ciphertext][tag]`, where the two length bytes
+/// are also used as ChaCha20-Poly1305 additional authenticated data. Incoming
+/// peers are allowed to use larger blocks, matching Apple TV DataStream behavior
+/// and pyatv's tolerant parser.
 internal final class HAPSession: @unchecked Sendable {
-    private static let blockSize = 1024
+    private static let outboundBlockSize = 1024
     private static let tagSize = 16
 
     private let outputKey: SymmetricKey
@@ -31,7 +33,7 @@ internal final class HAPSession: @unchecked Sendable {
         var offset = 0
 
         while offset < data.count {
-            let chunkSize = min(Self.blockSize, data.count - offset)
+            let chunkSize = min(Self.outboundBlockSize, data.count - offset)
             let end = offset + chunkSize
             let chunk = Data(data[offset..<end])
             let lengthBytes = Self.lengthBytes(chunkSize)
@@ -64,9 +66,6 @@ internal final class HAPSession: @unchecked Sendable {
 
         while decryptBuffer.count >= 2 {
             let length = Int(decryptBuffer[0]) | (Int(decryptBuffer[1]) << 8)
-            guard length <= Self.blockSize else {
-                throw ATVError.invalidData("HAP encrypted block exceeds 1024-byte limit")
-            }
 
             let totalLength = 2 + length + Self.tagSize
             guard decryptBuffer.count >= totalLength else {

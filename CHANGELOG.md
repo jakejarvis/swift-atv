@@ -73,6 +73,9 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Fixed
 
+- AirPlay HAP transport now accepts larger inbound encrypted blocks seen on
+  Apple TV DataStream channels while still splitting outbound frames into
+  1024-byte chunks.
 - Companion encryption now uses pyatv-compatible 12-byte nonce layout, so
   encrypted Companion sessions continue working after the first frame.
 - OPACK now accepts and emits the canonical `0x07` representation for `-1`.
