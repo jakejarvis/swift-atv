@@ -230,6 +230,81 @@
             XCTAssertEqual(content["_idsID"]?.stringValue, "fake-client")
             XCTAssertEqual(content["_pubID"]?.stringValue, "client-device-id")
         }
+
+        func testRemoteSkipUsesCompanionSkipSecondsKeyAndDefaultInterval() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(pairVerify: pairVerify.responder)
+            defer { server.stop() }
+
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                touchStartTimeout: 0.05,
+                keepAliveInterval: 0
+            )
+
+            try await service.setup()
+
+            let remote = try XCTUnwrap(service.remoteControl)
+            try await remote.skipForward(interval: 0)
+            try assertSkipPayload(server.requestContent(for: "_mcc"), seconds: 10)
+
+            try await remote.skipBackward(interval: 0)
+            try assertSkipPayload(server.requestContent(for: "_mcc"), seconds: -10)
+
+            await service.close()
+        }
+
+        func testMediaCommandSkipUsesCompanionSkipSecondsKeyAndRequestedInterval() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(pairVerify: pairVerify.responder)
+            defer { server.stop() }
+
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                touchStartTimeout: 0.05,
+                keepAliveInterval: 0
+            )
+
+            try await service.setup()
+
+            let mediaCommands = try XCTUnwrap(service.mediaCommands)
+            try await mediaCommands.send(.skipForward, options: MediaCommandOptions(skipInterval: 12.5))
+            try assertSkipPayload(server.requestContent(for: "_mcc"), seconds: 12.5)
+
+            try await mediaCommands.send(.skipBackward, options: MediaCommandOptions(skipInterval: 7.25))
+            try assertSkipPayload(server.requestContent(for: "_mcc"), seconds: -7.25)
+
+            await service.close()
+        }
+
+        private func assertSkipPayload(
+            _ content: OPACK.Value?,
+            seconds: Double,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) throws {
+            let payload = try XCTUnwrap(content, file: file, line: line)
+            XCTAssertEqual(
+                payload["_mcc"]?.intValue,
+                Int64(MediaControlCommand.skipBy.rawValue),
+                file: file,
+                line: line
+            )
+            XCTAssertNil(payload["_ski"], file: file, line: line)
+
+            switch payload["_skpS"] {
+            case .double(let value):
+                XCTAssertEqual(value, seconds, accuracy: 0.001, file: file, line: line)
+            case .float(let value):
+                XCTAssertEqual(Double(value), seconds, accuracy: 0.001, file: file, line: line)
+            default:
+                XCTFail("Expected _skpS skip interval", file: file, line: line)
+            }
+        }
     }
 
     private final class FakeCompanionServer: @unchecked Sendable {

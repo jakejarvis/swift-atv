@@ -102,6 +102,8 @@ final class CompanionTests: XCTestCase {
 
         // Audio
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeUp)).state, .unavailable)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeDown)).state, .unavailable)
 
         // Apps
         XCTAssertEqual(capabilities.capabilityInfo(.apps(.list)).state, .unavailable)
@@ -206,6 +208,8 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(capabilities.capabilityInfo(.mediaCommand(.skipBackward)).state, .available)
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.setVolume)).state, .available)
         XCTAssertEqual(capabilities.capabilityInfo(.audio(.volume)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeUp)).state, .available)
+        XCTAssertEqual(capabilities.capabilityInfo(.audio(.volumeDown)).state, .available)
         XCTAssertEqual(capabilities.capabilityInfo(.power(.state)).state, .available)
         XCTAssertEqual(capabilities.capabilityInfo(.power(.turnOn)).state, .available)
         XCTAssertEqual(capabilities.capabilityInfo(.apps(.list)).state, .available)

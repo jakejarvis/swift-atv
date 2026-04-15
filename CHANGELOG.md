@@ -152,6 +152,15 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - AirPlay DataStream MRP parsing now prefers a strict length-prefixed parse
   before falling back to bare protobuf payloads, covering the ambiguous
   leading-`0x08` length case.
+- MRP now clears stale now-playing items when playback stops, merges partial
+  content-item updates only into the matching item, and only advances elapsed
+  position while the device is actually playing.
+- MRP audio now tracks the reported volume-control target and capabilities,
+  filters output-device volume updates by device identifier, and flushes
+  hardware HID key events when required.
+- Companion skip commands now send the pyatv-compatible `_skpS` payload with
+  the 10-second default interval, and Companion audio volume-up/down
+  capabilities now follow the observed volume-control state.
 
 ## [0.3.0] - 2026-04-14
 

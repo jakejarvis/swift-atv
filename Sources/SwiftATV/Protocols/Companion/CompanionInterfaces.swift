@@ -1,6 +1,17 @@
 import Foundation
 
 private let companionStateWaitIntervalNanoseconds: UInt64 = 50_000_000
+private let companionDefaultSkipInterval: TimeInterval = 10
+
+private enum CompanionSkipDirection: Double {
+    case forward = 1
+    case backward = -1
+}
+
+private func companionSkipSeconds(_ interval: TimeInterval, direction: CompanionSkipDirection) -> Double {
+    let seconds = interval > 0 ? interval : companionDefaultSkipInterval
+    return direction.rawValue * seconds
+}
 
 internal struct CompanionMediaControlFlags: OptionSet, Sendable {
     internal let rawValue: Int64
@@ -254,7 +265,7 @@ internal final class CompanionStateStore: @unchecked Sendable {
     ]
 
     private static let volumeCapabilities: Set<Capability> = [
-        .audio(.volume), .audio(.setVolume),
+        .audio(.volume), .audio(.setVolume), .audio(.volumeUp), .audio(.volumeDown),
     ]
 
     private static let powerCapabilities: Set<Capability> = [
@@ -369,7 +380,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
     public func skipForward(interval: TimeInterval) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.skipBy.rawValue))),
-            ("_ski", .double(interval)),
+            ("_skpS", .double(companionSkipSeconds(interval, direction: .forward))),
         ])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
@@ -377,7 +388,7 @@ public struct CompanionRemoteControl: RemoteControl, Sendable {
     public func skipBackward(interval: TimeInterval) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.skipBy.rawValue))),
-            ("_ski", .double(-interval)),
+            ("_skpS", .double(companionSkipSeconds(interval, direction: .backward))),
         ])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
@@ -896,9 +907,9 @@ public struct CompanionMediaCommands: MediaCommandController, Sendable {
         case .previousTrack:
             try await sendMediaControl(.previousTrack)
         case .skipForward:
-            try await sendSkip(interval: options.skipInterval ?? 0)
+            try await sendSkip(interval: options.skipInterval ?? 0, direction: .forward)
         case .skipBackward:
-            try await sendSkip(interval: -(options.skipInterval ?? 0))
+            try await sendSkip(interval: options.skipInterval ?? 0, direction: .backward)
         case .beginFastForward:
             try await sendMediaControl(.fastForwardBegin)
         case .endFastForward:
@@ -917,10 +928,10 @@ public struct CompanionMediaCommands: MediaCommandController, Sendable {
         _ = try await handler.sendRequest("_mcc", content: content)
     }
 
-    private func sendSkip(interval: TimeInterval) async throws(ATVError) {
+    private func sendSkip(interval: TimeInterval, direction: CompanionSkipDirection) async throws(ATVError) {
         let content = OPACK.Value.dictionary([
             ("_mcc", .uint(UInt64(MediaControlCommand.skipBy.rawValue))),
-            ("_ski", .double(interval)),
+            ("_skpS", .double(companionSkipSeconds(interval, direction: direction))),
         ])
         _ = try await handler.sendRequest("_mcc", content: content)
     }
