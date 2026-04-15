@@ -69,12 +69,24 @@ final class HAPCredentialsTests: XCTestCase {
         XCTAssertEqual(none.ltsk, Data())
         XCTAssertEqual(none.atvIdentifier, Data())
         XCTAssertEqual(none.clientIdentifier, Data())
+        XCTAssertEqual(none.authenticationType, .null)
 
         let transient = try HAPCredentials.parse(HAPCredentials.transient.serialize())
         XCTAssertEqual(transient.ltpk, Data("transient".utf8))
         XCTAssertEqual(transient.ltsk, Data())
         XCTAssertEqual(transient.atvIdentifier, Data())
         XCTAssertEqual(transient.clientIdentifier, Data())
+        XCTAssertEqual(transient.authenticationType, .transient)
+    }
+
+    func testAuthenticationTypes() throws {
+        XCTAssertEqual(try HAPCredentials.parse("aa:bb:cc:dd").authenticationType, .hap)
+        XCTAssertEqual(try HAPCredentials.parse(":aa::bb").authenticationType, .legacy)
+        XCTAssertEqual(try HAPCredentials.parse("bb:aa").authenticationType, .legacy)
+        XCTAssertEqual(
+            try HAPCredentials.parse("7472616e7369656e74:aa:bb:cc").authenticationType,
+            .transient
+        )
     }
 
     func testParseBadComponentCount() {
@@ -82,6 +94,7 @@ final class HAPCredentialsTests: XCTestCase {
         XCTAssertThrowsError(try HAPCredentials.parse("a:b:c"))
         XCTAssertThrowsError(try HAPCredentials.parse("a:b:c:d:e"))
         XCTAssertThrowsError(try HAPCredentials.parse("aabbcc::ddeeff"))
+        XCTAssertThrowsError(try HAPCredentials.parse("aa::cc:dd"))
     }
 
     // MARK: - Sentinel values

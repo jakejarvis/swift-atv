@@ -45,7 +45,7 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
 
     public func pin(_ pin: String) async throws(ATVError) {
         lock.withLock {
-            _pin = Self.normalizedPIN(pin)
+            _pin = normalizedPairingPIN(pin)
         }
     }
 
@@ -108,13 +108,5 @@ public final class AirPlayPairingHandler: @unchecked Sendable, PairingHandler {
             return current
         }
         await control?.close()
-    }
-
-    private static func normalizedPIN(_ pin: String) -> String {
-        let trimmed = pin.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.allSatisfy(\.isNumber), trimmed.count < 4 else {
-            return trimmed
-        }
-        return String(repeating: "0", count: 4 - trimmed.count) + trimmed
     }
 }

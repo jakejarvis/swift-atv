@@ -193,7 +193,7 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
     /// Set the PIN displayed on the Apple TV.
     public func pin(_ pin: String) async throws(ATVError) {
         lock.withLock {
-            self._pin = pin
+            self._pin = normalizedPairingPIN(pin)
         }
     }
 
@@ -201,9 +201,16 @@ public final class CompanionPairingHandler: @unchecked Sendable, PairingHandler 
     /// The Apple TV will display a PIN code on screen once this returns.
     public func begin() async throws(ATVError) {
         // M1: state=1, method=pairSetup(0). Wrapped in OPACK envelope.
+        lock.withLock {
+            self.m2ResponseData = nil
+            self._hasPaired = false
+        }
         let m1TLV = try setup.m1()
         let m2Response = try await exchangeAuth(.psStart, innerTLV: m1TLV)
-        lock.withLock { self.m2ResponseData = m2Response }
+        lock.withLock {
+            self.m2ResponseData = m2Response
+            self._hasPaired = false
+        }
     }
 
     /// Complete the pairing process using the entered PIN.

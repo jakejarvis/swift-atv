@@ -61,13 +61,20 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
     }
 
     public func pin(_ pin: String) async throws(ATVError) {
-        lock.withLock { _pin = pin }
+        lock.withLock { _pin = normalizedPairingPIN(pin) }
     }
 
     public func begin() async throws(ATVError) {
+        lock.withLock {
+            m2ResponseData = nil
+            _hasPaired = false
+        }
         let m1 = try setup.m1()
         let response = try await exchange(m1, isPairing: true)
-        lock.withLock { m2ResponseData = response }
+        lock.withLock {
+            m2ResponseData = response
+            _hasPaired = false
+        }
     }
 
     public func finish() async throws(ATVError) -> PairingResult {

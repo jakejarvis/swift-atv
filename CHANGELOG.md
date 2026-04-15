@@ -73,6 +73,28 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Fixed
 
+- Connection preflight now requires reusable HAP credentials for direct MRP,
+  Companion, and Apple TV AirPlay MRP tunnels, so null, transient, or legacy
+  credential strings no longer appear connectable.
+- HAP pair-verify now rejects non-reusable credentials before starting the
+  cryptographic exchange.
+- HAP pair-verify no longer exposes derived encryption keys after a failed
+  accessory proof.
+- HAP pair-verify now lock-protects mutable state and clears stale derived
+  keys when a new verify attempt starts.
+- HAP pair-setup now lock-protects published credentials and clears stale
+  pairing state when a new setup attempt starts.
+- MRP and Companion HAP pairing now zero-pad short numeric PINs to four
+  digits, matching AirPlay and pyatv.
+- MRP and Companion pairing handlers now clear stale begin/paired state when
+  a new pairing attempt starts.
+- HAP credential classification now treats pyatv's `transient` sentinel as
+  transient before reusable-HAP layout checks.
+- Companion scanner pairing flags without a `0x` prefix are now parsed as
+  hexadecimal, matching pyatv's `rpfl` handling.
+- AirPlay TXT parsing now rejects bare feature strings, parses bare status
+  flags as hexadecimal, and lets pairing-required flags take precedence over
+  `act=2`, matching pyatv's pairing policy.
 - HAP credential parsing now preserves empty colon-separated components,
   matching pyatv and allowing sentinel credentials to round-trip.
 - AirPlay feature parsing now rejects malformed split masks with empty or

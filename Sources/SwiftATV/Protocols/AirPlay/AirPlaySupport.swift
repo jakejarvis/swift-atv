@@ -52,7 +52,10 @@ internal struct AirPlayFeatureFlags: OptionSet, Sendable {
 
     private static func hexDigits(_ raw: String, raw original: String) throws(ATVError) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hex = trimmed.lowercased().hasPrefix("0x") ? String(trimmed.dropFirst(2)) : trimmed
+        guard trimmed.lowercased().hasPrefix("0x") else {
+            throw Self.invalidFeatureString(original)
+        }
+        let hex = String(trimmed.dropFirst(2))
         guard !hex.isEmpty, hex.unicodeScalars.allSatisfy(Self.isHexDigit(_:)) else {
             throw Self.invalidFeatureString(original)
         }
@@ -115,11 +118,11 @@ internal enum AirPlaySupport {
         guard settings.protocols.airplay.mrpTunnelMode != .disable else {
             return false
         }
-        if settings.protocols.airplay.mrpTunnelMode == .force {
-            return credentials != nil
-        }
-        guard credentials != nil else {
+        guard credentials?.authenticationType == .hap else {
             return false
+        }
+        if settings.protocols.airplay.mrpTunnelMode == .force {
+            return true
         }
         let isCompanionDerived = isCompanionDerivedService(service)
         if !isCompanionDerived {
@@ -153,15 +156,15 @@ internal enum AirPlaySupport {
     }
 
     static func pairingRequirement(from properties: [String: String]) -> PairingRequirement {
+        let flags = airPlayStatusFlags(from: properties)
+        if flags & pairingRequiredMask != 0 {
+            return .mandatory
+        }
         if property(properties, keys: ["acl"]) == "1" {
             return .disabled
         }
         if property(properties, keys: ["act"]) == accessControlCurrentUser {
             return .unsupported
-        }
-        let flags = airPlayStatusFlags(from: properties)
-        if flags & pairingRequiredMask != 0 {
-            return .mandatory
         }
         return .notNeeded
     }
@@ -204,6 +207,6 @@ internal enum AirPlaySupport {
         if trimmed.lowercased().hasPrefix("0x") {
             return UInt64(trimmed.dropFirst(2), radix: 16) ?? 0
         }
-        return UInt64(trimmed) ?? UInt64(trimmed, radix: 16) ?? 0
+        return UInt64(trimmed, radix: 16) ?? 0
     }
 }

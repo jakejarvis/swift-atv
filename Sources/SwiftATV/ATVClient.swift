@@ -615,8 +615,12 @@ public enum ATVClient {
             throw ATVError.invalidCredentials("Empty \(service.protocol) credentials")
         }
         do {
+            let credentials = try HAPCredentials.parse(serialized)
+            guard credentials.authenticationType == .hap else {
+                throw ATVError.invalidCredentials("\(service.protocol) requires reusable HAP credentials")
+            }
             return CredentialResolution(
-                credentials: try HAPCredentials.parse(serialized),
+                credentials: credentials,
                 source: source
             )
         } catch {
@@ -668,7 +672,14 @@ public enum ATVClient {
                 continue
             }
             do {
-                candidates.append(try HAPCredentials.parse(item.value))
+                let credentials = try HAPCredentials.parse(item.value)
+                guard credentials.authenticationType == .hap else {
+                    firstParseError =
+                        firstParseError
+                        ?? .noCredentials("AirPlay MRP tunnel requires reusable HAP credentials")
+                    continue
+                }
+                candidates.append(credentials)
                 firstSource = firstSource ?? item.source
             } catch let err as ATVError {
                 firstParseError = firstParseError ?? err
@@ -774,7 +785,12 @@ public enum ATVClient {
             companionService.credentials,
         ].contains { candidate in
             guard let candidate else { return false }
-            return !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            guard !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                let credentials = try? HAPCredentials.parse(candidate)
+            else {
+                return false
+            }
+            return credentials.authenticationType == .hap
         }
     }
 

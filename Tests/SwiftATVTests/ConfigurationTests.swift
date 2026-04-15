@@ -134,6 +134,24 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(service.effectivePairingStatus(settings: settings), .paired)
     }
 
+    func testAirPlayTunnelPairingStatusRequiresReusableHAPCredentials() {
+        let service = ServiceInfo(
+            protocol: .airPlay,
+            port: port1,
+            pairingRequirement: .notNeeded
+        )
+        var settings = ATVSettings()
+
+        settings.protocols.airplay.credentials = HAPCredentials.none.serialize()
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .credentialsMissing)
+
+        settings.protocols.airplay.credentials = HAPCredentials.transient.serialize()
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .credentialsMissing)
+
+        settings.protocols.airplay.credentials = ":aa::bb"
+        XCTAssertEqual(service.effectivePairingStatus(settings: settings), .credentialsMissing)
+    }
+
     func testConnectabilityAndPreferredPairingHelpers() {
         var config = makeConfig()
         config.addService(ServiceInfo(protocol: .mrp, port: port2, pairingRequirement: .optional))
@@ -175,6 +193,60 @@ final class ConfigurationTests: XCTestCase {
 
         XCTAssertEqual(config.connectability(settings: settings).map(\.status), [.connectable])
         XCTAssertNil(config.preferredPairingService(settings: settings, protocols: [.airPlay]))
+    }
+
+    func testAirPlayTunnelConnectabilityRequiresReusableHAPCredentials() {
+        var config = makeConfig()
+        config.addService(
+            ServiceInfo(
+                protocol: .airPlay,
+                port: port1,
+                properties: ["features": "0x4000000000", "model": "AppleTV11,1", "osvers": "16.0"],
+                pairingRequirement: .notNeeded
+            )
+        )
+        var settings = ATVSettings()
+
+        settings.protocols.airplay.credentials = HAPCredentials.none.serialize()
+        XCTAssertEqual(config.connectability(settings: settings).map(\.status), [.missingCredentials])
+
+        settings.protocols.airplay.credentials = HAPCredentials.transient.serialize()
+        XCTAssertEqual(config.connectability(settings: settings).map(\.status), [.missingCredentials])
+
+        settings.protocols.airplay.credentials = ":aa::bb"
+        XCTAssertEqual(config.connectability(settings: settings).map(\.status), [.missingCredentials])
+    }
+
+    func testCompanionDerivedAirPlayRequiresReusableHAPCredentials() {
+        var config = makeConfig()
+        config.deviceInfo = DeviceInfo(version: "18.4", model: .gen4K2, modelString: "AppleTV11,1")
+        config.addService(
+            ServiceInfo(
+                protocol: .companion,
+                port: port3,
+                properties: ["rpMd": "AppleTV11,1", "rpVr": "18.4"],
+                pairingRequirement: .mandatory
+            )
+        )
+        var settings = ATVSettings()
+
+        settings.protocols.companion.credentials = HAPCredentials.none.serialize()
+        XCTAssertNil(
+            ATVClient.companionDerivedAirPlayServiceIfAvailable(
+                from: config,
+                requestedProtocols: [.airPlay],
+                settings: settings
+            )
+        )
+
+        settings.protocols.companion.credentials = "01:02:03:04"
+        XCTAssertNotNil(
+            ATVClient.companionDerivedAirPlayServiceIfAvailable(
+                from: config,
+                requestedProtocols: [.airPlay],
+                settings: settings
+            )
+        )
     }
 
     func testConnectableProtocolsUsesRequestedProtocolOrder() {

@@ -428,7 +428,7 @@
             if trimmed.lowercased().hasPrefix("0x") {
                 return Int(trimmed.dropFirst(2), radix: 16)
             }
-            return Int(trimmed) ?? Int(trimmed, radix: 16)
+            return Int(trimmed, radix: 16)
         }
 
         private struct BrowseOutput: Sendable {

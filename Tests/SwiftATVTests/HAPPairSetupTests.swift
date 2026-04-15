@@ -8,6 +8,12 @@ import Testing
 
 @testable import SwiftATV
 
+#if canImport(CryptoKit)
+    import CryptoKit
+#else
+    import Crypto
+#endif
+
 /// Tests for the HAP pair-setup state machine.
 ///
 /// End-to-end pair-setup requires a real Apple TV displaying a PIN, so the
@@ -186,6 +192,64 @@ struct HAPPairSetupTests {
         #expect(throws: ATVError.self) {
             try handler.finish(fromResponse: m6)
         }
+    }
+}
+
+@Suite("HAP pair-verify state machine")
+struct HAPPairVerifyTests {
+    @Test("step1 rejects non-reusable HAP credentials")
+    func step1RejectsNonReusableCredentials() throws {
+        let credentials = [
+            HAPCredentials.none,
+            HAPCredentials.transient,
+            try HAPCredentials.parse(":aa::bb"),
+            HAPCredentials(ltpk: Data([0x01]), ltsk: Data(), atvIdentifier: Data(), clientIdentifier: Data()),
+        ]
+
+        for credential in credentials {
+            let verifier = HAPPairVerifyHandler(credentials: credential)
+            var thrown: ATVError?
+            do {
+                _ = try verifier.step1()
+            } catch {
+                thrown = error
+            }
+            guard case .invalidCredentials = thrown else {
+                Issue.record("Expected invalidCredentials, got \(String(describing: thrown))")
+                continue
+            }
+        }
+    }
+
+    @Test("deriveKeys remains unavailable after a failed step2")
+    func deriveKeysUnavailableAfterFailedStep2() throws {
+        let verifier = HAPPairVerifyHandler(credentials: try HAPCredentials.parse("aa:bb:cc:dd"))
+        _ = try verifier.step1()
+
+        let peer = Curve25519.KeyAgreement.PrivateKey()
+        let response = TLV8.encode([
+            TLV8.Entry(tag: .publicKey, data: Data(peer.publicKey.rawRepresentation)),
+            TLV8.Entry(tag: .encryptedData, data: Data(repeating: 0x00, count: 16)),
+        ])
+
+        #expect(throws: ATVError.self) {
+            try verifier.step2(response)
+        }
+        #expect(throws: ATVError.self) {
+            try verifier.deriveKeys()
+        }
+    }
+}
+
+@Suite("HAP pairing helpers")
+struct HAPPairingHelperTests {
+    @Test("PIN normalization zero-pads short numeric codes")
+    func pinNormalization() {
+        #expect(normalizedPairingPIN("7") == "0007")
+        #expect(normalizedPairingPIN(" 123 ") == "0123")
+        #expect(normalizedPairingPIN("1234") == "1234")
+        #expect(normalizedPairingPIN("12a") == "12a")
+        #expect(normalizedPairingPIN("   ") == "")
     }
 }
 

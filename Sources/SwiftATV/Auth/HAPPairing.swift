@@ -24,6 +24,15 @@ func hapNonce(_ label: String) -> Data {
     return nonce
 }
 
+/// Normalize short numeric pairing PINs with pyatv-compatible zero-padding.
+internal func normalizedPairingPIN(_ pin: String) -> String {
+    let trimmed = pin.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.allSatisfy(\.isNumber), trimmed.count < 4 else {
+        return trimmed
+    }
+    return String(repeating: "0", count: 4 - trimmed.count) + trimmed
+}
+
 /// Encrypt `data` with a fixed 12-byte nonce using ChaCha20-Poly1305.
 /// Returns `ciphertext || tag` (16-byte tag appended).
 func hapEncrypt(_ data: Data, key: Data, nonce: Data) throws(ATVError) -> Data {
@@ -74,8 +83,8 @@ public protocol PairSetupProcedure: Sendable {
 
 /// HAP pair verify procedure.
 ///
-/// Implements the pair-verify flow using existing credentials to
-/// establish session encryption keys.
+/// Implements the pair-verify flow using existing reusable HAP credentials
+/// to establish session encryption keys.
 ///
 /// Thread safety: Steps must be called sequentially. Mutable state
 /// is protected by `NSLock` for safety.
@@ -93,8 +102,14 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
     /// Step 1: Generate verify start message.
     /// Returns TLV8 data to send to device.
     public func step1() throws(ATVError) -> Data {
+        try validateReusableHAPCredentials()
+
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
-        self.verifyPrivateKey = privateKey
+        lock.withLock {
+            self.verifyPrivateKey = privateKey
+            self.sharedSecret = nil
+            self.peerPublicKey = nil
+        }
         let publicKey = Data(privateKey.publicKey.rawRepresentation)
 
         return TLV8.encode([
@@ -105,6 +120,8 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
 
     /// Step 2: Process device response, verify device identity, return encrypted proof.
     public func step2(_ responseData: Data) throws(ATVError) -> Data {
+        try validateReusableHAPCredentials()
+
         let response = try TLV8.decodeStrict(responseData)
 
         guard let peerPubKeyData = response[TLVTag.publicKey.rawValue],
@@ -113,9 +130,11 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
             throw ATVError.pairingFailed("Missing public key or encrypted data in verify response")
         }
 
-        self.peerPublicKey = peerPubKeyData
-
-        guard let privateKey = verifyPrivateKey else {
+        let privateKey = lock.withLock {
+            self.peerPublicKey = peerPubKeyData
+            return self.verifyPrivateKey
+        }
+        guard let privateKey else {
             throw ATVError.invalidState("Verify private key not initialized")
         }
 
@@ -129,7 +148,6 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
         } catch {
             throw ATVError.wrap(error)
         }
-        self.sharedSecret = shared
 
         // Derive session key
         let sessionKey = hkdfExpand(
@@ -197,6 +215,9 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
             nonce: hapNonce("PV-Msg03")
         )
 
+        lock.withLock {
+            self.sharedSecret = shared
+        }
         return TLV8.encode([
             TLV8.Entry(tag: .state, value: 3),
             TLV8.Entry(tag: .encryptedData, data: encrypted),
@@ -209,7 +230,7 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
         outputInfo: String = "MediaRemote-Write-Encryption-Key",
         inputInfo: String = "MediaRemote-Read-Encryption-Key"
     ) throws(ATVError) -> (outputKey: Data, inputKey: Data) {
-        guard let shared = sharedSecret else {
+        guard let shared = lock.withLock({ sharedSecret }) else {
             throw ATVError.invalidState("Shared secret not established")
         }
 
@@ -218,6 +239,11 @@ public final class HAPPairVerifyHandler: @unchecked Sendable {
         return (outputKey, inputKey)
     }
 
+    private func validateReusableHAPCredentials() throws(ATVError) {
+        guard credentials.authenticationType == .hap else {
+            throw ATVError.invalidCredentials("Pair-verify requires reusable HAP credentials")
+        }
+    }
 }
 
 // MARK: - HAP Pair-Setup State Machine
@@ -248,8 +274,11 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
     private var srp: SRPClient?
     private var sessionKey: Data?  // HKDF output for M5/M6 encryption
     private var srpSharedK: Data?  // full SHA-512(S), for signing HKDFs
+    private var _credentials: HAPCredentials?
 
-    public private(set) var credentials: HAPCredentials?
+    public var credentials: HAPCredentials? {
+        lock.withLock { _credentials }
+    }
 
     /// - Parameter clientIdentifier: The controller's pairing identifier.
     ///   Defaults to a fresh random UUID as ASCII lowercase hyphenated bytes
@@ -280,7 +309,13 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
     /// Build the M1 TLV (`state=1, method=pairSetup(0)`). Send this over
     /// the protocol-specific pair-setup start frame (e.g. Companion PS_Start).
     public func m1() throws(ATVError) -> Data {
-        TLV8.encode([
+        lock.withLock {
+            self.srp = nil
+            self.sessionKey = nil
+            self.srpSharedK = nil
+            self._credentials = nil
+        }
+        return TLV8.encode([
             TLV8.Entry(tag: .state, value: 1),
             TLV8.Entry(tag: .method, value: 0),
         ])
@@ -310,6 +345,8 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
         lock.withLock {
             self.srp = client
             self.srpSharedK = k
+            self.sessionKey = nil
+            self._credentials = nil
         }
 
         return TLV8.encode([
@@ -388,6 +425,7 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
 
         lock.withLock {
             self.sessionKey = sessionKey
+            self._credentials = nil
         }
 
         return TLV8.encode([
@@ -460,7 +498,7 @@ public final class HAPPairSetupHandler: @unchecked Sendable {
             atvIdentifier: accessoryID,
             clientIdentifier: clientIdentifier
         )
-        lock.withLock { self.credentials = creds }
+        lock.withLock { self._credentials = creds }
     }
 
     // MARK: - Helpers

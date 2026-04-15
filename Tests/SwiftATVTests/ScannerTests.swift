@@ -14,6 +14,13 @@
             )
             XCTAssertEqual(
                 ATVScanner.pairingRequirement(
+                    from: ["rpfl": "4000"],
+                    for: .companion
+                ),
+                .mandatory
+            )
+            XCTAssertEqual(
+                ATVScanner.pairingRequirement(
                     from: ["rpFl": "0x627B6"],
                     for: .companion
                 ),

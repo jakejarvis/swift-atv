@@ -69,7 +69,7 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
         guard let credentials = settings.credentials(for: `protocol`) ?? credentials else {
             return false
         }
-        return !credentials.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return Self.isReusableHAPCredentialString(credentials)
     }
 
     private func hasAirPlayTunnelCredentials(settings: ATVSettings) -> Bool {
@@ -81,8 +81,18 @@ public struct ServiceInfo: Codable, Sendable, Hashable, CustomStringConvertible 
             credentials,
             settings.protocols.companion.credentials,
         ].contains { credentials in
-            credentials?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            guard let credentials else { return false }
+            return Self.isReusableHAPCredentialString(credentials)
         }
+    }
+
+    private static func isReusableHAPCredentialString(_ serialized: String) -> Bool {
+        guard !serialized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            let credentials = try? HAPCredentials.parse(serialized)
+        else {
+            return false
+        }
+        return credentials.authenticationType == .hap
     }
 }
 
@@ -384,7 +394,14 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
             )
         }
         do {
-            _ = try HAPCredentials.parse(serialized)
+            let credentials = try HAPCredentials.parse(serialized)
+            guard credentials.authenticationType == .hap else {
+                return ServiceConnectability(
+                    service: service,
+                    status: .invalidCredentials,
+                    diagnostic: "\(service.protocol) requires reusable HAP credentials"
+                )
+            }
             return ServiceConnectability(service: service, status: .connectable)
         } catch {
             return ServiceConnectability(
@@ -405,7 +422,14 @@ public struct AppleTVConfiguration: Codable, Sendable, Hashable, CustomStringCon
             return ServiceConnectability(service: service, status: .connectable)
         }
         do {
-            _ = try HAPCredentials.parse(serialized)
+            let credentials = try HAPCredentials.parse(serialized)
+            guard credentials.authenticationType == .hap else {
+                return ServiceConnectability(
+                    service: service,
+                    status: .invalidCredentials,
+                    diagnostic: "\(service.protocol) requires reusable HAP credentials"
+                )
+            }
             return ServiceConnectability(service: service, status: .connectable)
         } catch {
             return ServiceConnectability(

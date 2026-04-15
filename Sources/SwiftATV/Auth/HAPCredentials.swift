@@ -57,8 +57,9 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
     public static func parse(_ string: String) throws -> HAPCredentials {
         let parts = string.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
 
+        let credentials: HAPCredentials
         if parts.count == 4 {
-            return HAPCredentials(
+            credentials = HAPCredentials(
                 ltpk: try Data(hexString: parts[0]),
                 ltsk: try Data(hexString: parts[1]),
                 atvIdentifier: try Data(hexString: parts[2]),
@@ -66,19 +67,42 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
             )
         } else if parts.count == 2 {
             // Legacy pyatv format: clientIdentifier:ltsk.
-            return HAPCredentials(
+            credentials = HAPCredentials(
                 ltpk: Data(),
                 ltsk: try Data(hexString: parts[1]),
                 atvIdentifier: Data(),
                 clientIdentifier: try Data(hexString: parts[0])
             )
+        } else {
+            throw ATVError.invalidCredentials("Expected 2 or 4 colon-separated hex components")
         }
 
-        throw ATVError.invalidCredentials("Expected 2 or 4 colon-separated hex components")
+        guard credentials.authenticationType != nil else {
+            throw ATVError.invalidCredentials("Invalid HAP credential component layout")
+        }
+        return credentials
     }
 
     public var description: String {
         "HAPCredentials(ltpk: \(ltpk.count)B, ltsk: \(ltsk.count)B)"
+    }
+}
+
+extension HAPCredentials {
+    var authenticationType: AuthenticationType? {
+        if ltpk.isEmpty, ltsk.isEmpty, atvIdentifier.isEmpty, clientIdentifier.isEmpty {
+            return .null
+        }
+        if ltpk == Data("transient".utf8) {
+            return .transient
+        }
+        if ltpk.isEmpty, !ltsk.isEmpty, atvIdentifier.isEmpty, !clientIdentifier.isEmpty {
+            return .legacy
+        }
+        if !ltpk.isEmpty, !ltsk.isEmpty, !atvIdentifier.isEmpty, !clientIdentifier.isEmpty {
+            return .hap
+        }
+        return nil
     }
 }
 

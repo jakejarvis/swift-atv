@@ -21,6 +21,7 @@ struct AirPlaySupportTests {
     func parseRejectsMalformedSplitFeatureStrings() {
         let invalidFeatures = [
             "foo",
+            "1234",
             "0x00000001,",
             ",0x00000001",
             "0x00000001,0x00000001,0x00000001",
@@ -43,6 +44,8 @@ struct AirPlaySupportTests {
     @Test("AirPlay pairing requirement uses status flags, not password flag")
     func pairingRequirementUsesStatusFlags() {
         #expect(AirPlaySupport.pairingRequirement(from: ["sf": "0x208"]) == .mandatory)
+        #expect(AirPlaySupport.pairingRequirement(from: ["sf": "208"]) == .mandatory)
+        #expect(AirPlaySupport.pairingRequirement(from: ["sf": "0x208", "act": "2"]) == .mandatory)
         #expect(AirPlaySupport.pairingRequirement(from: ["pw": "true"]) == .notNeeded)
         #expect(AirPlaySupport.pairingRequirement(from: ["acl": "1"]) == .disabled)
         #expect(AirPlaySupport.pairingRequirement(from: ["act": "2"]) == .unsupported)
@@ -67,6 +70,13 @@ struct AirPlaySupportTests {
             !AirPlaySupport.supportsRemoteControlTunnel(
                 service: service,
                 credentials: nil,
+                settings: ATVSettings()
+            )
+        )
+        #expect(
+            !AirPlaySupport.supportsRemoteControlTunnel(
+                service: service,
+                credentials: HAPCredentials.transient,
                 settings: ATVSettings()
             )
         )
