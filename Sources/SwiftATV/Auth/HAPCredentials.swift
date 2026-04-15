@@ -55,7 +55,7 @@ public struct HAPCredentials: Codable, Sendable, CustomStringConvertible {
     /// `ltpk:ltsk:atvIdentifier:clientIdentifier`. Two-component strings
     /// use pyatv's legacy format: `clientIdentifier:ltsk`.
     public static func parse(_ string: String) throws -> HAPCredentials {
-        let parts = string.split(separator: ":").map(String.init)
+        let parts = string.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
 
         if parts.count == 4 {
             return HAPCredentials(

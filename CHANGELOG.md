@@ -73,6 +73,8 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Fixed
 
+- HAP credential parsing now preserves empty colon-separated components,
+  matching pyatv and allowing sentinel credentials to round-trip.
 - Relayer takeover release closures no longer clear a newer overlapping
   takeover, keeping temporary protocol routing stable under nested callers.
 - Device info TXT parsing now handles case-insensitive keys and Companion

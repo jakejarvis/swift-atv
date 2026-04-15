@@ -63,10 +63,25 @@ final class HAPCredentialsTests: XCTestCase {
         XCTAssertEqual(parsed.clientIdentifier, Data([0xAA, 0xBB, 0xCC]))
     }
 
+    func testParsePreservesEmptyModernComponents() throws {
+        let none = try HAPCredentials.parse(HAPCredentials.none.serialize())
+        XCTAssertEqual(none.ltpk, Data())
+        XCTAssertEqual(none.ltsk, Data())
+        XCTAssertEqual(none.atvIdentifier, Data())
+        XCTAssertEqual(none.clientIdentifier, Data())
+
+        let transient = try HAPCredentials.parse(HAPCredentials.transient.serialize())
+        XCTAssertEqual(transient.ltpk, Data("transient".utf8))
+        XCTAssertEqual(transient.ltsk, Data())
+        XCTAssertEqual(transient.atvIdentifier, Data())
+        XCTAssertEqual(transient.clientIdentifier, Data())
+    }
+
     func testParseBadComponentCount() {
         XCTAssertThrowsError(try HAPCredentials.parse("abc"))
         XCTAssertThrowsError(try HAPCredentials.parse("a:b:c"))
         XCTAssertThrowsError(try HAPCredentials.parse("a:b:c:d:e"))
+        XCTAssertThrowsError(try HAPCredentials.parse("aabbcc::ddeeff"))
     }
 
     // MARK: - Sentinel values
