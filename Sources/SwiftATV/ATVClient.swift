@@ -127,7 +127,7 @@ public struct ConnectResult: Sendable {
 public enum ATVClient {
 
     /// Library version.
-    public static let version = "0.3.0"
+    public static let version = "0.4.0"
 
     fileprivate static let connectProtocolPriority = ConnectOptions.defaultProtocolOrder
 
