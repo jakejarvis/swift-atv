@@ -47,13 +47,13 @@ public enum OPACK {
     private static let data32Tag: UInt8 = 0x93
     private static let data64Tag: UInt8 = 0x94
 
-    // Object references (0xA0-0xC0 inline, 0xC1-0xC4 extended)
+    // Object references (0xA0-0xC0 inline, 0xC1-0xC4 with 1...4 byte indexes)
     private static let objectRefBase: UInt8 = 0xA0
     private static let objectRefMax: UInt8 = 0xC0
     private static let objectRef8Tag: UInt8 = 0xC1
     private static let objectRef16Tag: UInt8 = 0xC2
-    private static let objectRef32Tag: UInt8 = 0xC3
-    private static let objectRef64Tag: UInt8 = 0xC4
+    private static let objectRef24Tag: UInt8 = 0xC3
+    private static let objectRef32Tag: UInt8 = 0xC4
 
     // Lists (0xD0-0xDE fixed, 0xDF endless)
     private static let listBase: UInt8 = 0xD0
@@ -468,16 +468,16 @@ public enum OPACK {
             let index = Int(tag - objectRefBase)
             return try objectReference(index, from: objectList)
         case objectRef8Tag:
-            let index = Int(try readUInt8(data, offset: &offset))
+            let index = try readObjectReferenceIndex(data, offset: &offset, byteCount: 1)
             return try objectReference(index, from: objectList)
         case objectRef16Tag:
-            let index = Int(try readUInt16LE(data, offset: &offset))
+            let index = try readObjectReferenceIndex(data, offset: &offset, byteCount: 2)
+            return try objectReference(index, from: objectList)
+        case objectRef24Tag:
+            let index = try readObjectReferenceIndex(data, offset: &offset, byteCount: 3)
             return try objectReference(index, from: objectList)
         case objectRef32Tag:
-            let index = try intLength(UInt64(try readUInt32LE(data, offset: &offset)))
-            return try objectReference(index, from: objectList)
-        case objectRef64Tag:
-            let index = try intLength(try readUInt64LE(data, offset: &offset))
+            let index = try readObjectReferenceIndex(data, offset: &offset, byteCount: 4)
             return try objectReference(index, from: objectList)
 
         // Fixed-size lists
@@ -582,6 +582,26 @@ public enum OPACK {
             throw ATVError.invalidData("OPACK: length too large")
         }
         return length
+    }
+
+    private static func readObjectReferenceIndex(
+        _ data: Data,
+        offset: inout Int,
+        byteCount: Int
+    ) throws -> Int {
+        guard byteCount > 0, byteCount <= 4 else {
+            throw ATVError.invalidData("OPACK: invalid object reference index size")
+        }
+        guard offset + byteCount <= data.count else {
+            throw ATVError.invalidData("OPACK: unexpected end of data reading object reference")
+        }
+
+        var index: UInt64 = 0
+        for shift in 0..<byteCount {
+            index |= UInt64(data[offset + shift]) << UInt64(shift * 8)
+        }
+        offset += byteCount
+        return try intLength(index)
     }
 
     private static func negativeMagnitude(_ magnitude: UInt64) throws -> Int64 {

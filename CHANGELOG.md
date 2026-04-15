@@ -75,6 +75,10 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 - HAP credential parsing now preserves empty colon-separated components,
   matching pyatv and allowing sentinel credentials to round-trip.
+- AirPlay feature parsing now rejects malformed split masks with empty or
+  oversized components, aligning those Bonjour TXT validation cases with pyatv.
+- OPACK decoding now reads extended object-reference indexes with pyatv's
+  1...4 byte widths, fixing valid Companion payloads that use C3/C4 references.
 - Relayer takeover release closures no longer clear a newer overlapping
   takeover, keeping temporary protocol routing stable under nested callers.
 - Device info TXT parsing now handles case-insensitive keys and Companion

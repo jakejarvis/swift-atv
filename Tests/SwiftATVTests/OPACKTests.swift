@@ -415,6 +415,24 @@ final class OPACKTests: XCTestCase {
         XCTAssertEqual(decoded[34]?.stringValue, "v33")
     }
 
+    func testDecodeObjectReferenceIndexWidthsMatchPyatv() throws {
+        let prefixes: [(UInt8, [UInt8])] = [
+            (0xC1, [0x01]),
+            (0xC2, [0x01, 0x00]),
+            (0xC3, [0x01, 0x00, 0x00]),
+            (0xC4, [0x01, 0x00, 0x00, 0x00]),
+        ]
+
+        for (tag, indexBytes) in prefixes {
+            let data = Data([0xDF, 0x30, 0x01, 0x30, 0x02, tag] + indexBytes + [0x03])
+            let decoded = try OPACK.decode(data)
+
+            XCTAssertEqual(decoded[0]?.intValue, 1)
+            XCTAssertEqual(decoded[1]?.intValue, 2)
+            XCTAssertEqual(decoded[2]?.intValue, 2, "Failed for tag 0x\(String(tag, radix: 16))")
+        }
+    }
+
     // MARK: - Round-trip complex
 
     func testRoundTripComplex() throws {

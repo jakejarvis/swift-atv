@@ -15,32 +15,61 @@ internal struct AirPlayFeatureFlags: OptionSet, Sendable {
     static let supportsAirPlayVideoV2 = AirPlayFeatureFlags(rawValue: 1 << 49)
 
     static func parse(_ raw: String?) throws(ATVError) -> AirPlayFeatureFlags {
-        guard let raw, !raw.isEmpty else {
+        guard let raw else {
             return []
         }
 
-        let parts = raw.split(separator: ",", maxSplits: 1).map(String.init)
+        let trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedRaw.isEmpty else {
+            return []
+        }
+
+        let parts = trimmedRaw.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 1 || parts.count == 2 else {
+            throw Self.invalidFeatureString(raw)
+        }
+
+        let lower = try Self.hexDigits(parts[0], raw: raw)
         let combined: String
         switch parts.count {
         case 1:
-            combined = Self.hexDigits(parts[0])
+            combined = lower
         case 2:
-            combined = Self.hexDigits(parts[1]) + Self.hexDigits(parts[0]).leftPadded(to: 8, with: "0")
+            let upper = try Self.hexDigits(parts[1], raw: raw)
+            guard lower.count <= 8, upper.count <= 8 else {
+                throw Self.invalidFeatureString(raw)
+            }
+            combined = upper + lower.leftPadded(to: 8, with: "0")
         default:
-            throw ATVError.invalidData("Invalid AirPlay feature string: \(raw)")
+            throw Self.invalidFeatureString(raw)
         }
 
-        let trimmed = combined.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hex = trimmed.lowercased().hasPrefix("0x") ? String(trimmed.dropFirst(2)) : trimmed
-        guard let value = UInt64(hex, radix: 16) else {
-            throw ATVError.invalidData("Invalid AirPlay feature string: \(raw)")
+        guard let value = UInt64(combined, radix: 16) else {
+            throw Self.invalidFeatureString(raw)
         }
         return AirPlayFeatureFlags(rawValue: value)
     }
 
-    private static func hexDigits(_ raw: String) -> String {
+    private static func hexDigits(_ raw: String, raw original: String) throws(ATVError) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.lowercased().hasPrefix("0x") ? String(trimmed.dropFirst(2)) : trimmed
+        let hex = trimmed.lowercased().hasPrefix("0x") ? String(trimmed.dropFirst(2)) : trimmed
+        guard !hex.isEmpty, hex.unicodeScalars.allSatisfy(Self.isHexDigit(_:)) else {
+            throw Self.invalidFeatureString(original)
+        }
+        return hex
+    }
+
+    private static func isHexDigit(_ scalar: UnicodeScalar) -> Bool {
+        switch scalar.value {
+        case 48...57, 65...70, 97...102:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func invalidFeatureString(_ raw: String) -> ATVError {
+        ATVError.invalidData("Invalid AirPlay feature string: \(raw)")
     }
 }
 

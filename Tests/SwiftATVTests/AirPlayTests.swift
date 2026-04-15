@@ -17,6 +17,29 @@ struct AirPlaySupportTests {
         #expect(flags.contains(.supportsUnifiedMediaControl))
     }
 
+    @Test("AirPlay feature parser rejects malformed split strings")
+    func parseRejectsMalformedSplitFeatureStrings() {
+        let invalidFeatures = [
+            "foo",
+            "0x00000001,",
+            ",0x00000001",
+            "0x00000001,0x00000001,0x00000001",
+            "0x000000000,0x0",
+        ]
+
+        for featureString in invalidFeatures {
+            #expect(throws: ATVError.self) {
+                _ = try AirPlayFeatureFlags.parse(featureString)
+            }
+        }
+    }
+
+    @Test("AirPlay single wide feature strings remain supported")
+    func parseSingleWideFeatureString() throws {
+        let flags = try AirPlayFeatureFlags.parse("0x4000000000")
+        #expect(flags.contains(.supportsUnifiedMediaControl))
+    }
+
     @Test("AirPlay pairing requirement uses status flags, not password flag")
     func pairingRequirementUsesStatusFlags() {
         #expect(AirPlaySupport.pairingRequirement(from: ["sf": "0x208"]) == .mandatory)
