@@ -231,6 +231,38 @@
             XCTAssertEqual(content["_pubID"]?.stringValue, "client-device-id")
         }
 
+        func testConnectionLossDuringOptionalCompanionSetupFailsSetup() async throws {
+            let pairVerify = FakePairVerifyFixture()
+            let server = try await FakeCompanionServer.start(
+                disconnectOnInterestEvent: "SystemStatus",
+                pairVerify: pairVerify.responder
+            )
+            defer { server.stop() }
+
+            let service = CompanionService(
+                host: "127.0.0.1",
+                port: server.port,
+                credentials: pairVerify.credentials,
+                requestTimeout: 0.2,
+                touchStartTimeout: 0.05,
+                keepAliveInterval: 0
+            )
+
+            do {
+                try await service.setup()
+                XCTFail("Expected setup to fail after the Companion connection closed")
+            } catch {
+                guard case .connectionLost = error else {
+                    XCTFail("Expected connectionLost, got \(error)")
+                    return
+                }
+            }
+
+            await service.close()
+            XCTAssertNil(service.remoteControl)
+            XCTAssertTrue(server.requests.contains("_interest"))
+        }
+
         func testRemoteSkipUsesCompanionSkipSecondsKeyAndDefaultInterval() async throws {
             let pairVerify = FakePairVerifyFixture()
             let server = try await FakeCompanionServer.start(pairVerify: pairVerify.responder)
@@ -312,6 +344,7 @@
         private let queue = DispatchQueue(label: "SwiftATVTests.FakeCompanionServer")
         private let ignoredRequests: Set<String>
         private let responseContent: [String: OPACK.Value]
+        private let disconnectOnInterestEvent: String?
         private let pairVerify: FakePairVerifyResponder?
         private let lock = NSLock()
         private var connection: NWConnection?
@@ -340,11 +373,13 @@
         static func start(
             ignoredRequests: Set<String> = [],
             responseContent: [String: OPACK.Value] = [:],
+            disconnectOnInterestEvent: String? = nil,
             pairVerify: FakePairVerifyResponder? = nil
         ) async throws -> FakeCompanionServer {
             let server = try FakeCompanionServer(
                 ignoredRequests: ignoredRequests,
                 responseContent: responseContent,
+                disconnectOnInterestEvent: disconnectOnInterestEvent,
                 pairVerify: pairVerify
             )
             try await server.start()
@@ -354,10 +389,12 @@
         private init(
             ignoredRequests: Set<String>,
             responseContent: [String: OPACK.Value],
+            disconnectOnInterestEvent: String?,
             pairVerify: FakePairVerifyResponder?
         ) throws {
             self.ignoredRequests = ignoredRequests
             self.responseContent = responseContent
+            self.disconnectOnInterestEvent = disconnectOnInterestEvent
             self.pairVerify = pairVerify
             self.listener = try NWListener(using: .tcp, on: .any)
         }
@@ -506,6 +543,11 @@
                 }
             }
 
+            if shouldDisconnectAfterInterest(message) {
+                connection.cancel()
+                return
+            }
+
             guard
                 message["_t"]?.intValue == Int64(CompanionMessageType.request.rawValue),
                 !ignoredRequests.contains(identifier),
@@ -535,6 +577,17 @@
             ])
             let payload = OPACK.encode(response)
             sendFrame(type: .eOPACK, payload: payload, connection: connection)
+        }
+
+        private func shouldDisconnectAfterInterest(_ message: OPACK.Value) -> Bool {
+            guard
+                let disconnectOnInterestEvent,
+                message["_i"]?.stringValue == "_interest",
+                case .array(let events) = message["_c"]?["_regEvents"]
+            else {
+                return false
+            }
+            return events.contains { $0.stringValue == disconnectOnInterestEvent }
         }
 
         private func sendFrame(type: CompanionFrameType, payload: Data, connection: NWConnection) {

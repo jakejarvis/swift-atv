@@ -189,6 +189,56 @@
             XCTAssertEqual(configs[0].deviceInfo.model, .gen4K)
         }
 
+        func testSparseDeviceInfoDoesNotEraseProtocolDeviceInfo() {
+            let services = [
+                DiscoveredService(
+                    serviceType: .mrp,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49152,
+                    txtRecord: ["UniqueIdentifier": "device-1", "model": "AppleTV6,2"]
+                ),
+                DiscoveredService(
+                    serviceType: .deviceInfo,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 0,
+                    txtRecord: [:]
+                ),
+            ]
+
+            let config = ATVScanner.configurations(from: services)[0]
+
+            XCTAssertEqual(config.deviceInfo.model, .gen4K)
+            XCTAssertEqual(config.deviceInfo.modelString, "AppleTV6,2")
+        }
+
+        func testPartialDeviceInfoMergesWithoutErasingExistingFields() {
+            let services = [
+                DiscoveredService(
+                    serviceType: .mrp,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 49152,
+                    txtRecord: ["UniqueIdentifier": "device-1", "model": "AppleTV6,2"]
+                ),
+                DiscoveredService(
+                    serviceType: .deviceInfo,
+                    name: "Living Room",
+                    host: "192.168.1.10",
+                    port: 0,
+                    txtRecord: ["OSVersion": "17.4", "OSName": "tvOS"]
+                ),
+            ]
+
+            let config = ATVScanner.configurations(from: services)[0]
+
+            XCTAssertEqual(config.deviceInfo.model, .gen4K)
+            XCTAssertEqual(config.deviceInfo.modelString, "AppleTV6,2")
+            XCTAssertEqual(config.deviceInfo.version, "17.4")
+            XCTAssertEqual(config.deviceInfo.operatingSystem, .tvOS)
+        }
+
         func testConfigurationsMergeBySharedCompanionIdentifierAcrossAddresses() {
             let services = [
                 DiscoveredService(

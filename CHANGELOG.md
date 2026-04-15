@@ -95,6 +95,9 @@ Pre-1.0: minor version bumps may contain breaking changes.
   integer conversion/overflow.
 - Companion `_sessionStart` responses that omit `_sid` now degrade optional
   session/touch setup instead of failing basic Companion remote-control setup.
+- Companion protocol events received before the event consumer attaches are
+  now replayed instead of being dropped, preventing stale event-backed
+  capabilities immediately after setup.
 - AirPlay HTTP/RTSP setup now applies real TCP connect and response timeouts,
   preventing AirPlay services that accept TCP but never send a full response
   from hanging connection fallback.
@@ -117,10 +120,20 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - Companion optional `_sessionStart` and `_touchStart` degradation is now
   surfaced in `ConnectResult.setupDiagnostics` and capability diagnostics for
   affected touch capabilities.
+- MRP optional client-update setup now fails connection setup when the
+  transport has already closed instead of registering a dead MRP/AirPlay
+  connection with only capability diagnostics.
+- Companion optional setup now propagates terminal connection loss instead of
+  registering a dead Companion service with degraded capability state.
 - Companion `_systemInfo` now sends a stable per-client Rapport identifier for
   `_i`, matching pyatv's tvOS 18.4+ connection fix.
 - Duplicate sparse service records no longer erase discovered identifiers,
   TXT properties, credentials, or pairing requirements from existing services.
+- Sparse `_device-info._tcp` records no longer erase model, OS, version, build,
+  or MAC metadata already learned from protocol TXT records.
+- MRP and Companion volume state now ignore non-finite protocol values and
+  clamp malformed finite values before exposing them through the public audio
+  APIs.
 - Removing Companion as a secondary protocol now closes the removed Companion
   service instead of only unregistering it from facade relayers.
 - MRP, AirPlay, and Companion pairing setup now close partially opened

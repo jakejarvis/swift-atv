@@ -98,6 +98,65 @@ private final class RecordingMRPTransport: MRPTransport, @unchecked Sendable {
     func close() async {}
 }
 
+private final class ClientUpdatesErrorMRPTransport: MRPTransport, @unchecked Sendable {
+    let clientUpdatesError: ATVError
+    private let lock = NSLock()
+    private var _sentTypes: [ProtocolMessageMessage.TypeEnum] = []
+
+    weak var delegate: MRPConnectionDelegate?
+
+    var messageStream: AsyncStream<ProtocolMessageMessage> {
+        AsyncStream { continuation in
+            continuation.finish()
+        }
+    }
+
+    var sentTypes: [ProtocolMessageMessage.TypeEnum] {
+        lock.withLock { _sentTypes }
+    }
+
+    init(clientUpdatesError: ATVError) {
+        self.clientUpdatesError = clientUpdatesError
+    }
+
+    func connect() async throws(ATVError) {}
+
+    func enableEncryption(outputKey: Data, inputKey: Data) {}
+
+    func send(_ message: ProtocolMessageMessage) async throws(ATVError) {
+        lock.withLock {
+            _sentTypes.append(message.type)
+        }
+    }
+
+    func sendAndReceive(
+        _ message: ProtocolMessageMessage,
+        responseType: ProtocolMessageMessage.TypeEnum?,
+        timeout: TimeInterval
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        lock.withLock {
+            _sentTypes.append(message.type)
+        }
+
+        if message.type == .clientUpdatesConfigMessage {
+            throw clientUpdatesError
+        }
+
+        var response = ProtocolMessageMessage()
+        response.type = responseType ?? message.type
+        if response.type == .deviceInfoMessage {
+            response.deviceInfoMessage = DeviceInfoMessage()
+        } else if response.type == .getKeyboardSessionMessage {
+            response.getKeyboardSessionMessage = ""
+        } else if response.type == .genericMessage {
+            response.genericMessage = GenericMessage()
+        }
+        return response
+    }
+
+    func close() async {}
+}
+
 /// Ported from pyatv tests/protocols/mrp/test_player_state.py
 final class MRPPlayerStateTests: XCTestCase {
 
@@ -233,6 +292,8 @@ final class MRPPlayerStateTests: XCTestCase {
     func testSetVolumeClampsPercentRange() {
         XCTAssertEqual(MRPMessages.setVolume(-10, deviceID: nil).setVolumeMessage.volume, 0)
         XCTAssertEqual(MRPMessages.setVolume(125, deviceID: nil).setVolumeMessage.volume, 1)
+        XCTAssertEqual(MRPMessages.setVolume(.nan, deviceID: nil).setVolumeMessage.volume, 0)
+        XCTAssertEqual(MRPMessages.setVolume(.infinity, deviceID: nil).setVolumeMessage.volume, 0)
     }
 
     func testHIDEventPayloadMatchesPyatvLayout() {
@@ -854,6 +915,33 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(stateStore.volume, 44)
     }
 
+    func testMRPStateStoreClampsInboundVolumeRange() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: -0.25))
+
+        XCTAssertEqual(stateStore.volume, 0)
+        XCTAssertTrue(stateStore.hasVolumeState)
+
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: 1.25))
+
+        XCTAssertEqual(stateStore.volume, 100)
+    }
+
+    func testMRPStateStoreIgnoresNonFiniteInboundVolume() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: .nan))
+
+        XCTAssertFalse(stateStore.hasVolumeState)
+        XCTAssertEqual(stateStore.volume, 0)
+
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: 0.42))
+        stateStore.update(message: Self.volumeDidChangeMessage(volume: .infinity))
+
+        XCTAssertEqual(stateStore.volume, 42)
+    }
+
     func testMRPAudioSetVolumeUsesLocalVolumeDeviceID() async throws {
         let transport = RecordingMRPTransport()
         let handler = Self.mrpProtocolHandler(transport: transport)
@@ -919,6 +1007,30 @@ final class MRPPlayerStateTests: XCTestCase {
         )
     }
 
+    func testMRPStateStoreSanitizesOutputDeviceVolumes() {
+        let stateStore = MRPStateStore()
+
+        stateStore.update(
+            message: Self.updateOutputDevicesMessage(
+                outputDevices: [
+                    Self.outputDeviceDescriptor(identifier: "low", name: "Low", volume: -0.25),
+                    Self.outputDeviceDescriptor(identifier: "high", name: "High", volume: 1.25),
+                    Self.outputDeviceDescriptor(identifier: "invalid", name: "Invalid", volume: .nan),
+                ],
+                clusterAwareOutputDevices: []
+            )
+        )
+
+        XCTAssertEqual(
+            stateStore.outputDevices,
+            [
+                OutputDevice(identifier: "low", name: "Low", volume: 0),
+                OutputDevice(identifier: "high", name: "High", volume: 100),
+                OutputDevice(identifier: "invalid", name: "Invalid", volume: 0),
+            ]
+        )
+    }
+
     func testMRPCapabilitiesExposeOptionalSetupDiagnostics() {
         let stateStore = MRPStateStore()
         let capabilities = MRPCapabilities(stateStore: stateStore)
@@ -928,6 +1040,70 @@ final class MRPPlayerStateTests: XCTestCase {
         let info = capabilities.capabilityInfo(.push(.updates))
         XCTAssertEqual(info.state, .unavailable)
         XCTAssertEqual(info.options["diagnostic"], "client updates failed")
+    }
+
+    func testMRPSetupPropagatesConnectionLostDuringOptionalClientUpdates() async throws {
+        let transport = ClientUpdatesErrorMRPTransport(
+            clientUpdatesError: .connectionLost("closed during client updates")
+        )
+        let stateStore = MRPStateStore()
+        let handler = MRPProtocolHandler(
+            connection: transport,
+            playerState: MRPPlayerState(),
+            stateStore: stateStore,
+            authenticationMode: .alreadySecure,
+            heartbeatMode: .disabled,
+            runtimeRequestTimeout: 0.1
+        )
+
+        do {
+            try await handler.start(settings: ATVSettings(), credentials: nil, requestTimeout: 0.1)
+            XCTFail("Expected connectionLost")
+        } catch let error {
+            guard case .connectionLost = error else {
+                XCTFail("Expected connectionLost, got \(error)")
+                return
+            }
+        }
+
+        XCTAssertTrue(stateStore.setupDiagnosticEntries().isEmpty)
+        XCTAssertEqual(
+            transport.sentTypes,
+            [.deviceInfoMessage, .setConnectionStateMessage, .clientUpdatesConfigMessage]
+        )
+    }
+
+    func testMRPSetupKeepsRecoverableClientUpdateFailureAsDiagnostics() async throws {
+        let timeout = ATVError.operationTimeout(
+            TimeoutContext(
+                protocol: .mrp,
+                operation: "request",
+                requestID: "client-updates",
+                duration: 0.1
+            ))
+        let transport = ClientUpdatesErrorMRPTransport(clientUpdatesError: timeout)
+        let stateStore = MRPStateStore()
+        let handler = MRPProtocolHandler(
+            connection: transport,
+            playerState: MRPPlayerState(),
+            stateStore: stateStore,
+            authenticationMode: .alreadySecure,
+            heartbeatMode: .disabled,
+            runtimeRequestTimeout: 0.1
+        )
+
+        try await handler.start(settings: ATVSettings(), credentials: nil, requestTimeout: 0.1)
+
+        let diagnostics = stateStore.setupDiagnosticEntries()
+        XCTAssertTrue(diagnostics.contains { $0.0 == .push(.updates) })
+        XCTAssertTrue(diagnostics.contains { $0.0 == .audio(.volume) })
+        XCTAssertEqual(
+            transport.sentTypes,
+            [
+                .deviceInfoMessage, .setConnectionStateMessage,
+                .clientUpdatesConfigMessage, .getKeyboardSessionMessage,
+            ]
+        )
     }
 
     func testMRPCapabilitiesExposeSupportedMediaCommands() {

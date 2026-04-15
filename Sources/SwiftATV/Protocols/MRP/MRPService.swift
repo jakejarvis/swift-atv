@@ -58,7 +58,10 @@ final class MRPStateStore: @unchecked Sendable {
         case .volumeDidChangeMessage:
             setVolume(message.volumeDidChangeMessage)
         case .getVolumeResultMessage:
-            setVolume(message.getVolumeResultMessage.volume)
+            guard let percent = Self.volumePercent(fromProtocolValue: message.getVolumeResultMessage.volume) else {
+                return
+            }
+            setVolumePercent(percent)
         case .updateOutputDeviceMessage:
             let update = message.updateOutputDeviceMessage
             let descriptors =
@@ -170,8 +173,14 @@ final class MRPStateStore: @unchecked Sendable {
         }
     }
 
-    private func setVolume(_ volume: Float) {
-        let percent = volume * 100
+    private static func volumePercent(fromProtocolValue volume: Float) -> Float? {
+        guard volume.isFinite else {
+            return nil
+        }
+        return max(0, min(volume, 1)) * 100
+    }
+
+    private func setVolumePercent(_ percent: Float) {
         let continuations = lock.withLock {
             _volume = percent
             _hasVolumeState = true
@@ -183,22 +192,25 @@ final class MRPStateStore: @unchecked Sendable {
     }
 
     private func setVolume(_ message: VolumeDidChangeMessage) {
+        guard let percent = Self.volumePercent(fromProtocolValue: message.volume) else {
+            return
+        }
         let deviceID = lock.withLock { _volumeDeviceID }
         let outputDeviceID =
             message.hasOutputDeviceUid && !message.outputDeviceUid.isEmpty
             ? message.outputDeviceUid : nil
 
         if let outputDeviceID, let deviceID, outputDeviceID != deviceID {
-            updateOutputDeviceVolume(identifier: outputDeviceID, volume: message.volume * 100)
+            updateOutputDeviceVolume(identifier: outputDeviceID, volume: percent)
             return
         }
 
         if let outputDeviceID, deviceID == nil {
-            updateOutputDeviceVolume(identifier: outputDeviceID, volume: message.volume * 100)
+            updateOutputDeviceVolume(identifier: outputDeviceID, volume: percent)
             return
         }
 
-        setVolume(message.volume)
+        setVolumePercent(percent)
     }
 
     private func setVolumeControls(_ message: VolumeControlAvailabilityMessage) {
@@ -229,7 +241,9 @@ final class MRPStateStore: @unchecked Sendable {
             return OutputDevice(
                 identifier: descriptor.uniqueIdentifier,
                 name: descriptor.hasName ? descriptor.name : nil,
-                volume: descriptor.hasVolume ? descriptor.volume * 100 : 0
+                volume: descriptor.hasVolume
+                    ? Self.volumePercent(fromProtocolValue: descriptor.volume) ?? 0
+                    : 0
             )
         }
         let continuations = lock.withLock {
@@ -544,7 +558,10 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
                 timeout: requestTimeout
             )
             stateStore.markClientUpdatesConfigured()
-        } catch {
+        } catch let error {
+            guard !Self.isTerminalOptionalSetupFailure(error) else {
+                throw error
+            }
             stateStore.recordSetupFailure(
                 "MRP client update subscription failed: \(String(describing: error))",
                 affectedCapabilities: Self.clientUpdateDependentCapabilities
@@ -556,7 +573,10 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
                 responseType: .getKeyboardSessionMessage,
                 timeout: requestTimeout
             )
-        } catch {
+        } catch let error {
+            guard !Self.isTerminalOptionalSetupFailure(error) else {
+                throw error
+            }
             // MRP keyboard setup is optional and SwiftATV does not expose an
             // MRP keyboard interface yet, so no public capabilities are downgraded.
         }
@@ -647,6 +667,15 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
             throw ATVError.protocolError(
                 "MRP command\(commandDescription) failed with commandResult.sendError=\(result.commandResult.sendError)"
             )
+        }
+    }
+
+    private static func isTerminalOptionalSetupFailure(_ error: ATVError) -> Bool {
+        switch error {
+        case .connectionFailed, .connectionLost, .operationCancelled:
+            return true
+        default:
+            return false
         }
     }
 

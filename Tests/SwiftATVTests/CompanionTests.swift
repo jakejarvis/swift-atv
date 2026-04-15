@@ -218,6 +218,21 @@ final class CompanionTests: XCTestCase {
         XCTAssertEqual(capabilities.capabilityInfo(.keyboard(.textGet)).state, .available)
     }
 
+    func testCompanionStateStoreIgnoresNonFiniteVolume() {
+        let stateStore = CompanionStateStore(isConnected: true, touchAvailable: true)
+
+        stateStore.setVolume(.nan)
+
+        XCTAssertFalse(stateStore.hasVolume)
+        XCTAssertEqual(stateStore.volume, 0)
+
+        stateStore.setVolume(45)
+        stateStore.setVolume(.infinity)
+
+        XCTAssertTrue(stateStore.hasVolume)
+        XCTAssertEqual(stateStore.volume, 45)
+    }
+
     private func assertNotSupported(
         _ expression: @autoclosure () async throws(ATVError) -> Void,
         file: StaticString = #filePath,

@@ -311,9 +311,7 @@
                 target.identifier = source.identifier
             }
             target.deepSleep = target.deepSleep || source.deepSleep
-            if target.deviceInfo.model == .unknown, source.deviceInfo.model != .unknown {
-                target.deviceInfo = source.deviceInfo
-            }
+            mergeDeviceInfo(source.deviceInfo, into: &target.deviceInfo)
             for service in source.services {
                 target.addService(service)
             }
@@ -329,7 +327,7 @@
             }
 
             if service.serviceType == .deviceInfo {
-                config.deviceInfo = DeviceInfo.fromProperties(service.txtRecord)
+                mergeDeviceInfo(DeviceInfo.fromProperties(service.txtRecord), into: &config.deviceInfo)
                 return
             }
 
@@ -350,11 +348,27 @@
 
             config.addService(serviceInfo)
 
-            if config.deviceInfo.model == .unknown {
-                let info = DeviceInfo.fromProperties(service.txtRecord)
-                if info.model != .unknown {
-                    config.deviceInfo = info
-                }
+            mergeDeviceInfo(DeviceInfo.fromProperties(service.txtRecord), into: &config.deviceInfo)
+        }
+
+        private static func mergeDeviceInfo(_ source: DeviceInfo, into target: inout DeviceInfo) {
+            if source.operatingSystem != .unknown {
+                target.operatingSystem = source.operatingSystem
+            }
+            if let version = source.version {
+                target.version = version
+            }
+            if let buildNumber = source.buildNumber {
+                target.buildNumber = buildNumber
+            }
+            if source.model != .unknown {
+                target.model = source.model
+            }
+            if let modelString = source.modelString {
+                target.modelString = modelString
+            }
+            if let macAddress = source.macAddress {
+                target.macAddress = macAddress
             }
         }
 

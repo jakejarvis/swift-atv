@@ -88,6 +88,7 @@ public actor CompanionProtocolHandler {
     private var pendingRequests: [Int: PendingCompanionRequest] = [:]
     private var eventContinuation: AsyncStream<(String, OPACK.Value)>.Continuation?
     private var _eventStream: AsyncStream<(String, OPACK.Value)>?
+    private var pendingEvents: [(String, OPACK.Value)] = []
     private var sessionID: UInt64 = 0
     private var isRunning = false
     private var receiveTask: Task<Void, Never>?
@@ -97,6 +98,11 @@ public actor CompanionProtocolHandler {
         if let existing = _eventStream { return existing }
         let stream = AsyncStream<(String, OPACK.Value)> { continuation in
             self.eventContinuation = continuation
+            let events = self.pendingEvents
+            self.pendingEvents.removeAll()
+            for event in events {
+                continuation.yield(event)
+            }
         }
         _eventStream = stream
         return stream
@@ -144,6 +150,9 @@ public actor CompanionProtocolHandler {
         receiveTask?.cancel()
         receiveTask = nil
         eventContinuation?.finish()
+        eventContinuation = nil
+        _eventStream = nil
+        pendingEvents.removeAll()
         failPendingRequests(reason: .connectionLost("Protocol stopped"))
     }
 
@@ -194,6 +203,10 @@ public actor CompanionProtocolHandler {
 
     internal func _testPendingRequestCount() -> Int {
         pendingRequests.count
+    }
+
+    internal func _testHandleFrame(_ frame: CompanionFrame) {
+        handleFrame(frame)
     }
 
     // MARK: - Sending Messages
@@ -492,7 +505,11 @@ public actor CompanionProtocolHandler {
         } else if messageType == CompanionMessageType.event.rawValue {
             // Event from device
             if let identifier = message["_i"]?.stringValue {
-                eventContinuation?.yield((identifier, message))
+                if let eventContinuation {
+                    eventContinuation.yield((identifier, message))
+                } else {
+                    pendingEvents.append((identifier, message))
+                }
             }
         }
     }

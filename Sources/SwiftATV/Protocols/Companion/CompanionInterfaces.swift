@@ -78,6 +78,9 @@ internal final class CompanionStateStore: @unchecked Sendable {
     }
 
     internal func setVolume(_ volume: Float) {
+        guard volume.isFinite else {
+            return
+        }
         let percent = max(0, min(volume, 100))
         let continuations = lock.withLock {
             _volume = percent

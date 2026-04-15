@@ -171,7 +171,7 @@ enum MRPMessages {
 
     static func setVolume(_ volume: Float, deviceID: String?) -> ProtocolMessageMessage {
         var inner = SetVolumeMessage()
-        inner.volume = max(0, min(volume, 100)) / 100
+        inner.volume = clampedPercent(volume) / 100
         if let deviceID {
             inner.outputDeviceUid = deviceID
         }
@@ -179,6 +179,13 @@ enum MRPMessages {
         var message = base(.setVolumeMessage)
         message.setVolumeMessage = inner
         return message
+    }
+
+    private static func clampedPercent(_ volume: Float) -> Float {
+        guard volume.isFinite else {
+            return 0
+        }
+        return max(0, min(volume, 100))
     }
 
     static func modifyOutputContext(

@@ -20,6 +20,8 @@ private final class WaiterOutcomeBox: @unchecked Sendable {
     }
 }
 
+private struct TestTimeoutError: Error {}
+
 /// Tests for `CompanionConnection`'s frame routing, specifically the
 /// asymmetric pair-setup / pair-verify response channel.
 ///
@@ -713,5 +715,45 @@ struct CompanionConnectionTests {
                 return
             }
         }
+    }
+
+    @Test(
+        "Companion events received before eventStream subscription are replayed",
+        .timeLimit(.minutes(1))
+    )
+    func companionEventsBufferedUntilSubscriberAttaches() async throws {
+        let connection = CompanionConnection(host: "127.0.0.1", port: 0)
+        let handler = CompanionProtocolHandler(connection: connection)
+        let message = OPACK.Value.dictionary([
+            ("_i", .string("_iMC")),
+            ("_t", .uint(UInt64(CompanionMessageType.event.rawValue))),
+            ("_c", .dictionary([("_mcF", .uint(0x0100))])),
+        ])
+
+        await handler._testHandleFrame(
+            CompanionFrame(type: .eOPACK, payload: OPACK.encode(message))
+        )
+
+        let stream = await handler.eventStream
+        let received = try await withThrowingTaskGroup(of: (String, OPACK.Value)?.self) { group in
+            group.addTask {
+                var iterator = stream.makeAsyncIterator()
+                return await iterator.next()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 500_000_000)
+                throw TestTimeoutError()
+            }
+            let first = try await group.next()
+            group.cancelAll()
+            return first ?? nil
+        }
+
+        guard let received else {
+            Issue.record("Expected buffered Companion event")
+            return
+        }
+        #expect(received.0 == "_iMC")
+        #expect(received.1["_c"]?["_mcF"]?.intValue == 0x0100)
     }
 }

@@ -185,9 +185,15 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         startEventLoop()
         try await protocolHandler.subscribeEvents(["_iMC"])
         for optionalEvent in ["SystemStatus", "TVSystemStatus", "_tiStarted", "_tiStopped"] {
-            try? await protocolHandler.subscribeEvents([optionalEvent])
+            do {
+                try await protocolHandler.subscribeEvents([optionalEvent])
+            } catch let error {
+                guard !Self.isTerminalOptionalSetupFailure(error) else {
+                    throw error
+                }
+            }
         }
-        await initializeState()
+        try await initializeState()
         startKeepAlive()
 
         lock.withLock {
@@ -276,6 +282,15 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         return false
     }
 
+    private static func isTerminalOptionalSetupFailure(_ error: ATVError) -> Bool {
+        switch error {
+        case .connectionFailed, .connectionLost, .operationCancelled:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func startEventLoop() {
         eventTask?.cancel()
         eventTask = Task { [weak self] in
@@ -317,8 +332,8 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         }
     }
 
-    private func initializeState() async {
-        await refreshPowerState()
+    private func initializeState() async throws(ATVError) {
+        try await refreshPowerState()
     }
 
     private func handleEvent(identifier: String, message: OPACK.Value) async {
@@ -360,12 +375,15 @@ public final class CompanionService: @unchecked Sendable, CompanionConnectionDel
         stateStore.setPowerState(Self.powerState(from: status))
     }
 
-    private func refreshPowerState() async {
+    private func refreshPowerState() async throws(ATVError) {
         do {
             let response = try await protocolHandler.sendRequest("FetchAttentionState")
             let content = response["_c"] ?? response
             handleSystemStatusEvent(content)
-        } catch {
+        } catch let error {
+            guard !Self.isTerminalOptionalSetupFailure(error) else {
+                throw error
+            }
             // Power remains unavailable until a status event arrives.
         }
     }
