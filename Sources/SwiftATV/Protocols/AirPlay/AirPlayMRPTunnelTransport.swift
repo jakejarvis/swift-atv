@@ -230,16 +230,12 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
         timeout: TimeInterval = 5.0
     ) async throws(ATVError) -> ProtocolMessageMessage {
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
-        var outbound = message
-        if !outbound.hasIdentifier {
-            outbound.identifier = UUID().uuidString
-        }
-
+        let prepared = prepareMRPRequestForResponse(message, responseType: responseType)
         let waitKey = AirPlayMRPWaiterKey(
-            identifier: outbound.identifier,
-            type: responseType ?? outbound.type
+            identifier: prepared.responseIdentifier,
+            type: prepared.responseType
         )
-        let messageToSend = outbound
+        let messageToSend = prepared.message
         let waiterID = UUID()
         let context = TimeoutContext(
             protocol: .airPlay,
@@ -428,6 +424,23 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
     ) async throws(ATVError) -> ProtocolMessageMessage {
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         let key = AirPlayMRPWaiterKey(identifier: identifier, type: type)
+        return try await _testWaitForResponse(key: key, timeout: timeout, timeoutNs: timeoutNs)
+    }
+
+    internal func _testWaitForTypeResponse(
+        type: ProtocolMessageMessage.TypeEnum,
+        timeout: TimeInterval = 60
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let key = AirPlayMRPWaiterKey(identifier: nil, type: type)
+        return try await _testWaitForResponse(key: key, timeout: timeout, timeoutNs: timeoutNs)
+    }
+
+    private func _testWaitForResponse(
+        key: AirPlayMRPWaiterKey,
+        timeout: TimeInterval,
+        timeoutNs: UInt64
+    ) async throws(ATVError) -> ProtocolMessageMessage {
         let waiterID = UUID()
         let context = TimeoutContext(
             protocol: .airPlay,

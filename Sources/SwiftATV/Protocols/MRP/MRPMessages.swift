@@ -47,12 +47,16 @@ enum MRPMessages {
         return message
     }
 
-    static func cryptoPairing(_ pairingData: Data) -> ProtocolMessageMessage {
+    static func cryptoPairing(_ pairingData: Data, isPairing: Bool = false) -> ProtocolMessageMessage {
         var pairing = CryptoPairingMessage()
         pairing.pairingData = pairingData
         pairing.status = 0
+        pairing.isRetrying = false
+        pairing.isUsingSystemPairing = false
+        pairing.state = isPairing ? 2 : 0
 
         var message = base(.cryptoPairingMessage)
+        message.clearIdentifier()
         message.cryptoPairingMessage = pairing
         return message
     }

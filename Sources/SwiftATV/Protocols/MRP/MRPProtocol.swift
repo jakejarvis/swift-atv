@@ -188,6 +188,40 @@ private struct MRPWaiterKey: Hashable, Sendable, CustomStringConvertible {
     }
 }
 
+internal struct MRPPreparedRequest: Sendable {
+    let message: ProtocolMessageMessage
+    let responseIdentifier: String?
+    let responseType: ProtocolMessageMessage.TypeEnum
+}
+
+internal func prepareMRPRequestForResponse(
+    _ message: ProtocolMessageMessage,
+    responseType: ProtocolMessageMessage.TypeEnum?
+) -> MRPPreparedRequest {
+    var outbound = message
+    let responseType = responseType ?? outbound.type
+
+    // Crypto-pairing responses do not include identifiers. pyatv matches these
+    // exchanges by message type and only allows one outstanding request.
+    if outbound.type == .cryptoPairingMessage {
+        outbound.clearIdentifier()
+        return MRPPreparedRequest(
+            message: outbound,
+            responseIdentifier: nil,
+            responseType: responseType
+        )
+    }
+
+    if !outbound.hasIdentifier {
+        outbound.identifier = UUID().uuidString
+    }
+    return MRPPreparedRequest(
+        message: outbound,
+        responseIdentifier: outbound.identifier,
+        responseType: responseType
+    )
+}
+
 /// Low-level direct-MRP TCP connection.
 ///
 /// The wire format is `[varint payload length][protobuf payload]`. Once
@@ -361,16 +395,12 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
         timeout: TimeInterval = 5.0
     ) async throws(ATVError) -> ProtocolMessageMessage {
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
-        var outbound = message
-        if !outbound.hasIdentifier {
-            outbound.identifier = UUID().uuidString
-        }
-
+        let prepared = prepareMRPRequestForResponse(message, responseType: responseType)
         let waitKey = MRPWaiterKey(
-            identifier: outbound.identifier,
-            type: responseType ?? outbound.type
+            identifier: prepared.responseIdentifier,
+            type: prepared.responseType
         )
-        let messageToSend = outbound
+        let messageToSend = prepared.message
         let waiterID = UUID()
         let context = TimeoutContext(
             protocol: .mrp,
@@ -527,6 +557,23 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
     ) async throws(ATVError) -> ProtocolMessageMessage {
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         let key = MRPWaiterKey(identifier: identifier, type: type)
+        return try await _testWaitForResponse(key: key, timeout: timeout, timeoutNs: timeoutNs)
+    }
+
+    internal func _testWaitForTypeResponse(
+        type: ProtocolMessageMessage.TypeEnum,
+        timeout: TimeInterval = 60
+    ) async throws(ATVError) -> ProtocolMessageMessage {
+        let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let key = MRPWaiterKey(identifier: nil, type: type)
+        return try await _testWaitForResponse(key: key, timeout: timeout, timeoutNs: timeoutNs)
+    }
+
+    private func _testWaitForResponse(
+        key: MRPWaiterKey,
+        timeout: TimeInterval,
+        timeoutNs: UInt64
+    ) async throws(ATVError) -> ProtocolMessageMessage {
         let waiterID = UUID()
         let context = TimeoutContext(
             protocol: .mrp,

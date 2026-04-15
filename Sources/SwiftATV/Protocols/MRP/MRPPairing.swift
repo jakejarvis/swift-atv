@@ -66,7 +66,7 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
 
     public func begin() async throws(ATVError) {
         let m1 = try setup.m1()
-        let response = try await exchange(m1)
+        let response = try await exchange(m1, isPairing: true)
         lock.withLock { m2ResponseData = response }
     }
 
@@ -96,9 +96,9 @@ public final class MRPPairingHandler: @unchecked Sendable, PairingHandler {
         await connection.close()
     }
 
-    private func exchange(_ pairingData: Data) async throws(ATVError) -> Data {
+    private func exchange(_ pairingData: Data, isPairing: Bool = false) async throws(ATVError) -> Data {
         let response = try await connection.sendAndReceive(
-            MRPMessages.cryptoPairing(pairingData),
+            MRPMessages.cryptoPairing(pairingData, isPairing: isPairing),
             responseType: .cryptoPairingMessage
         )
         let crypto = response.cryptoPairingMessage

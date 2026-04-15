@@ -11,11 +11,13 @@ struct RequestWaiterTests {
 
     private func protocolMessage(
         type: ProtocolMessageMessage.TypeEnum,
-        identifier: String
+        identifier: String? = nil
     ) -> ProtocolMessageMessage {
         var message = ProtocolMessageMessage()
         message.type = type
-        message.identifier = identifier
+        if let identifier {
+            message.identifier = identifier
+        }
         return message
     }
 
@@ -66,6 +68,59 @@ struct RequestWaiterTests {
         #expect(connection._testPendingWaiterCount == 0)
     }
 
+    @Test("MRP crypto-pairing requests omit identifiers")
+    func mrpCryptoPairingRequestsOmitIdentifiers() {
+        let request = MRPMessages.cryptoPairing(Data([0x06, 0x01, 0x01]))
+        let prepared = prepareMRPRequestForResponse(request, responseType: nil)
+        let crypto = request.cryptoPairingMessage
+
+        #expect(request.type == .cryptoPairingMessage)
+        #expect(!request.hasIdentifier)
+        #expect(crypto.hasIsRetrying)
+        #expect(!crypto.isRetrying)
+        #expect(crypto.hasIsUsingSystemPairing)
+        #expect(!crypto.isUsingSystemPairing)
+        #expect(crypto.hasState)
+        #expect(crypto.state == 0)
+        #expect(prepared.responseIdentifier == nil)
+        #expect(prepared.responseType == .cryptoPairingMessage)
+        #expect(!prepared.message.hasIdentifier)
+    }
+
+    @Test("MRP pair-setup start request uses pairing state")
+    func mrpPairSetupStartRequestUsesPairingState() {
+        let request = MRPMessages.cryptoPairing(Data([0x06, 0x01, 0x01]), isPairing: true)
+
+        #expect(request.cryptoPairingMessage.hasState)
+        #expect(request.cryptoPairingMessage.state == 2)
+    }
+
+    @Test("direct MRP type-only waiter matches identifierless crypto pairing response")
+    func directMRPTypeOnlyWaiterMatchesIdentifierlessCryptoPairingResponse() async throws {
+        let connection = MRPConnection(host: "127.0.0.1", port: 0)
+        let task = Task {
+            try await connection._testWaitForTypeResponse(
+                type: .cryptoPairingMessage,
+                timeout: 5
+            )
+        }
+        await waitForInstall()
+
+        connection.handleReceivedData(
+            try frame(protocolMessage(type: .cryptoPairingMessage, identifier: "unexpected-id"))
+        )
+        await waitForInstall()
+        #expect(connection._testPendingWaiterCount == 1)
+
+        connection.handleReceivedData(
+            try frame(protocolMessage(type: .cryptoPairingMessage))
+        )
+        let response = try await task.value
+        #expect(response.type == .cryptoPairingMessage)
+        #expect(!response.hasIdentifier)
+        #expect(connection._testPendingWaiterCount == 0)
+    }
+
     @Test("AirPlay MRP tunnel waiter requires matching identifier and response type")
     func airPlayMRPWaiterMatchesIdentifierAndType() async throws {
         let transport = AirPlayMRPTunnelTransport(
@@ -94,6 +149,37 @@ struct RequestWaiterTests {
         )
         let response = try await task.value
         #expect(response.type == .sendCommandResultMessage)
+        #expect(transport._testPendingWaiterCount == 0)
+    }
+
+    @Test("AirPlay MRP tunnel type-only waiter matches identifierless crypto pairing response")
+    func airPlayMRPTypeOnlyWaiterMatchesIdentifierlessCryptoPairingResponse() async throws {
+        let transport = AirPlayMRPTunnelTransport(
+            host: "127.0.0.1",
+            port: 7000,
+            credentialCandidates: [],
+            settings: ATVSettings()
+        )
+        let task = Task {
+            try await transport._testWaitForTypeResponse(
+                type: .cryptoPairingMessage,
+                timeout: 5
+            )
+        }
+        await waitForInstall()
+
+        transport._testHandleReceivedMessage(
+            protocolMessage(type: .cryptoPairingMessage, identifier: "unexpected-id")
+        )
+        await waitForInstall()
+        #expect(transport._testPendingWaiterCount == 1)
+
+        transport._testHandleReceivedMessage(
+            protocolMessage(type: .cryptoPairingMessage)
+        )
+        let response = try await task.value
+        #expect(response.type == .cryptoPairingMessage)
+        #expect(!response.hasIdentifier)
         #expect(transport._testPendingWaiterCount == 0)
     }
 
