@@ -531,18 +531,23 @@ public actor CompanionPower: PowerController {
 
     private func waitForPowerState(_ expected: PowerState, timeout: TimeInterval = 5) async throws(ATVError) {
         let deadline = Date().addingTimeInterval(timeout)
+        let context = TimeoutContext(
+            protocol: .companion,
+            operation: "waitForState",
+            requestID: "power:\(expected)",
+            duration: timeout
+        )
         while stateStore.powerState != expected {
             if Date() >= deadline {
-                throw ATVError.operationTimeout(
-                    TimeoutContext(
-                        protocol: .companion,
-                        operation: "waitForState",
-                        requestID: "power:\(expected)",
-                        duration: timeout
-                    )
-                )
+                throw ATVError.operationTimeout(context)
             }
-            try? await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
+            do {
+                try await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
+            } catch is CancellationError {
+                throw ATVError.operationCancelled(context)
+            } catch {
+                throw ATVError.wrap(error)
+            }
         }
     }
 }
@@ -625,18 +630,23 @@ public actor CompanionAudio: AudioController {
 
     private func waitForVolumeUpdate(after revision: Int, timeout: TimeInterval = 5) async throws(ATVError) {
         let deadline = Date().addingTimeInterval(timeout)
+        let context = TimeoutContext(
+            protocol: .companion,
+            operation: "waitForState",
+            requestID: "volume",
+            duration: timeout
+        )
         while stateStore.volumeRevision <= revision {
             if Date() >= deadline {
-                throw ATVError.operationTimeout(
-                    TimeoutContext(
-                        protocol: .companion,
-                        operation: "waitForState",
-                        requestID: "volume",
-                        duration: timeout
-                    )
-                )
+                throw ATVError.operationTimeout(context)
             }
-            try? await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
+            do {
+                try await Task.sleep(nanoseconds: companionStateWaitIntervalNanoseconds)
+            } catch is CancellationError {
+                throw ATVError.operationCancelled(context)
+            } catch {
+                throw ATVError.wrap(error)
+            }
         }
     }
 }

@@ -551,6 +551,8 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                         throw ATVError.connectionLost("AirPlay control connection is closed")
                     }
                     try await control.sendFeedback()
+                } catch is CancellationError {
+                    return
                 } catch {
                     self.handleConnectionClosed(error: error)
                     return

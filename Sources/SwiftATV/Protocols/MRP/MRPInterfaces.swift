@@ -157,51 +157,106 @@ public final class MRPPushUpdater: @unchecked Sendable, PushUpdater {
     private let playerState: MRPPlayerState
     private let lock = NSLock()
     private var _isActive = false
-    private var _stream: AsyncStream<Playing>?
+    private var continuations: [UUID: AsyncStream<Playing>.Continuation] = [:]
+    private var forwardTask: Task<Void, Never>?
 
     init(playerState: MRPPlayerState) {
         self.playerState = playerState
     }
 
+    deinit {
+        forwardTask?.cancel()
+    }
+
     public var isActive: Bool { lock.withLock { _isActive } }
 
     public var playingStream: AsyncStream<Playing> {
-        lock.lock()
-        if let stream = _stream {
-            lock.unlock()
-            return stream
-        }
-        lock.unlock()
-        let stream = AsyncStream<Playing> { continuation in
-            let task = Task {
-                for await state in await self.playerState.pushStream() {
-                    continuation.yield(state)
-                }
+        AsyncStream<Playing> { [weak self] continuation in
+            guard let self else {
                 continuation.finish()
+                return
+            }
+            let id = UUID()
+            let shouldReplay = lock.withLock {
+                continuations[id] = continuation
+                return _isActive
+            }
+            if shouldReplay {
+                Task { [weak self] in
+                    await self?.publishCurrentPlayingIfActive(to: id)
+                }
             }
             continuation.onTermination = { [weak self] _ in
-                task.cancel()
-                self?.lock.withLock {
-                    self?._stream = nil
+                _ = self?.lock.withLock {
+                    self?.continuations.removeValue(forKey: id)
                 }
             }
         }
-        lock.withLock {
-            _stream = stream
-        }
-        return stream
     }
 
     public func start(initialDelay: Int) async throws(ATVError) {
         if initialDelay > 0 {
-            let delay = try timeoutNanoseconds(from: TimeInterval(initialDelay), parameterName: "initialDelay")
-            try? await Task.sleep(nanoseconds: delay)
+            let duration = TimeInterval(initialDelay)
+            let delay = try timeoutNanoseconds(from: duration, parameterName: "initialDelay")
+            let context = TimeoutContext(
+                protocol: .mrp,
+                operation: "startPushUpdates",
+                requestID: "initialDelay",
+                duration: duration
+            )
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch is CancellationError {
+                throw ATVError.operationCancelled(context)
+            } catch {
+                throw ATVError.wrap(error)
+            }
         }
-        lock.withLock { _isActive = true }
+        let shouldPublishInitial = lock.withLock {
+            let wasActive = _isActive
+            _isActive = true
+            if forwardTask == nil {
+                forwardTask = Task { [weak self, playerState] in
+                    for await state in await playerState.pushStream() {
+                        self?.publishIfActive(state)
+                    }
+                }
+            }
+            return !wasActive
+        }
+        if shouldPublishInitial {
+            await publishCurrentPlayingIfActive()
+        }
     }
 
     public func stop() async {
-        lock.withLock { _isActive = false }
+        let task = lock.withLock {
+            _isActive = false
+            let task = forwardTask
+            forwardTask = nil
+            return task
+        }
+        task?.cancel()
+    }
+
+    private func publishCurrentPlayingIfActive() async {
+        let playing = await playerState.currentPlaying
+        publishIfActive(playing)
+    }
+
+    private func publishCurrentPlayingIfActive(to id: UUID) async {
+        let playing = await playerState.currentPlaying
+        let continuation = lock.withLock { _isActive ? continuations[id] : nil }
+        continuation?.yield(playing)
+    }
+
+    private func publishIfActive(_ playing: Playing) {
+        let targets = lock.withLock {
+            _isActive ? Array(continuations.values) : []
+        }
+        for continuation in targets {
+            continuation.yield(playing)
+        }
     }
 }
 
@@ -268,28 +323,40 @@ public final class MRPAudio: @unchecked Sendable, AudioController {
     public func addOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         let revision = stateStore.outputDevicesRevision
         try await `protocol`.send(MRPMessages.modifyOutputContext(adding: deviceIDs))
-        await waitForOutputDevicesUpdate(after: revision)
+        try await waitForOutputDevicesUpdate(after: revision)
     }
 
     public func removeOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         let revision = stateStore.outputDevicesRevision
         try await `protocol`.send(MRPMessages.modifyOutputContext(removing: deviceIDs))
-        await waitForOutputDevicesUpdate(after: revision)
+        try await waitForOutputDevicesUpdate(after: revision)
     }
 
     public func setOutputDevices(_ deviceIDs: [String]) async throws(ATVError) {
         let revision = stateStore.outputDevicesRevision
         try await `protocol`.send(MRPMessages.modifyOutputContext(setting: deviceIDs))
-        await waitForOutputDevicesUpdate(after: revision)
+        try await waitForOutputDevicesUpdate(after: revision)
     }
 
-    private func waitForOutputDevicesUpdate(after revision: Int, timeout: TimeInterval = 5) async {
+    private func waitForOutputDevicesUpdate(after revision: Int, timeout: TimeInterval = 5) async throws(ATVError) {
         let deadline = Date().addingTimeInterval(timeout)
+        let context = TimeoutContext(
+            protocol: .mrp,
+            operation: "waitForState",
+            requestID: "outputDevices",
+            duration: timeout
+        )
         while stateStore.outputDevicesRevision <= revision {
             if Date() >= deadline {
                 return
             }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            do {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            } catch is CancellationError {
+                throw ATVError.operationCancelled(context)
+            } catch {
+                throw ATVError.wrap(error)
+            }
         }
     }
 }

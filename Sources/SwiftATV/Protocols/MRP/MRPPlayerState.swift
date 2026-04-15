@@ -78,6 +78,10 @@ public actor MRPPlayerState {
         }
     }
 
+    internal func _testContinuationCount() -> Int {
+        continuations.count
+    }
+
     func process(_ message: ProtocolMessageMessage) {
         switch message.type {
         case .setStateMessage:

@@ -124,40 +124,43 @@ public final class FacadeAppleTV: @unchecked Sendable, AppleTVDevice {
     }
 
     public var deviceEvents: AsyncStream<DeviceEvent> {
-        lock.lock()
-        if let existing = _deviceEvents {
-            lock.unlock()
-            return existing
-        }
-        lock.unlock()
+        let created:
+            (
+                stream: AsyncStream<DeviceEvent>,
+                continuation: AsyncStream<DeviceEvent>.Continuation,
+                events: [DeviceEvent],
+                shouldFinish: Bool
+            )? = lock.withLock {
+                if _deviceEvents != nil {
+                    return nil
+                }
 
-        let stream = AsyncStream<DeviceEvent> { [weak self] continuation in
-            self?.installEventContinuation(continuation)
+                var capturedContinuation: AsyncStream<DeviceEvent>.Continuation?
+                let stream = AsyncStream<DeviceEvent> { continuation in
+                    capturedContinuation = continuation
+                }
+                guard let continuation = capturedContinuation else {
+                    return nil
+                }
+
+                self._deviceEvents = stream
+                self.eventContinuation = continuation
+                let events = self.pendingEvents
+                self.pendingEvents.removeAll()
+                return (stream, continuation, events, self.eventStreamFinished)
+            }
+
+        guard let created else {
+            return lock.withLock { _deviceEvents! }
         }
 
-        lock.lock()
-        if let existing = _deviceEvents {
-            lock.unlock()
-            return existing
+        for event in created.events {
+            created.continuation.yield(event)
         }
-        _deviceEvents = stream
-        lock.unlock()
-        return stream
-    }
-
-    private func installEventContinuation(_ continuation: AsyncStream<DeviceEvent>.Continuation) {
-        let (events, shouldFinish) = lock.withLock {
-            self.eventContinuation = continuation
-            let events = self.pendingEvents
-            self.pendingEvents.removeAll()
-            return (events, self.eventStreamFinished)
+        if created.shouldFinish {
+            created.continuation.finish()
         }
-        for event in events {
-            continuation.yield(event)
-        }
-        if shouldFinish {
-            continuation.finish()
-        }
+        return created.stream
     }
 
     private func finishWithTerminalEvent(_ event: DeviceEvent) async {

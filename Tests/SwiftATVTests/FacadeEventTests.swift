@@ -55,6 +55,27 @@ final class FacadeEventTests: XCTestCase {
         }
     }
 
+    func testLateDeviceEventsSubscriberReceivesTerminalEventAndFinish() async {
+        let facade = FacadeAppleTV(
+            configuration: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),
+            settings: ATVSettings()
+        )
+
+        await facade.close()
+
+        var iterator = facade.deviceEvents.makeAsyncIterator()
+        guard let event = await iterator.next() else {
+            XCTFail("Expected pending terminal event")
+            return
+        }
+        guard case .connectionClosed = event else {
+            XCTFail("Expected connectionClosed, got \(event)")
+            return
+        }
+        let next = await iterator.next()
+        XCTAssertNil(next)
+    }
+
     func testProtocolCloseEmitsConnectionLost() async {
         let facade = FacadeAppleTV(
             configuration: AppleTVConfiguration(address: "127.0.0.1", name: "Test"),

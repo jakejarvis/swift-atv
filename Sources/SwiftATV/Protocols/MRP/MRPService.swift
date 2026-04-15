@@ -756,6 +756,8 @@ actor MRPProtocolHandler: MRPConnectionDelegate, MRPProtocolHandling {
                 do {
                     try await Task.sleep(nanoseconds: 30_000_000_000)
                     _ = try await self?.exchange(MRPMessages.generic(), responseType: .genericMessage)
+                } catch is CancellationError {
+                    return
                 } catch {
                     await self?.connection.close()
                     return

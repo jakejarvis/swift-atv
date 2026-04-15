@@ -55,6 +55,7 @@ private final class FakeMRPProtocolHandler: MRPProtocolHandling, @unchecked Send
 private final class RecordingMRPTransport: MRPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _sentMessages: [ProtocolMessageMessage] = []
+    private var _closeCount = 0
 
     weak var delegate: MRPConnectionDelegate?
 
@@ -66,6 +67,10 @@ private final class RecordingMRPTransport: MRPTransport, @unchecked Sendable {
 
     var sentMessages: [ProtocolMessageMessage] {
         lock.withLock { _sentMessages }
+    }
+
+    var closeCount: Int {
+        lock.withLock { _closeCount }
     }
 
     func connect() async throws(ATVError) {}
@@ -95,7 +100,11 @@ private final class RecordingMRPTransport: MRPTransport, @unchecked Sendable {
         return response
     }
 
-    func close() async {}
+    func close() async {
+        lock.withLock {
+            _closeCount += 1
+        }
+    }
 }
 
 private final class ClientUpdatesErrorMRPTransport: MRPTransport, @unchecked Sendable {
@@ -199,6 +208,97 @@ final class MRPPlayerStateTests: XCTestCase {
                 return
             }
         }
+    }
+
+    func testPushUpdaterStartCancellationDuringInitialDelayDoesNotActivate() async throws {
+        let updater = MRPPushUpdater(playerState: MRPPlayerState())
+        let task = Task {
+            try await updater.start(initialDelay: 1)
+        }
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        task.cancel()
+
+        do {
+            try await task.value
+            XCTFail("Expected operationCancelled")
+        } catch let error as ATVError {
+            guard case .operationCancelled = error else {
+                XCTFail("Expected operationCancelled, got \(error)")
+                return
+            }
+        } catch {
+            XCTFail("Expected ATVError, got \(error)")
+        }
+        XCTAssertFalse(updater.isActive)
+    }
+
+    func testPushUpdaterOnlyForwardsWhileActive() async throws {
+        let state = MRPPlayerState()
+        let updater = MRPPushUpdater(playerState: state)
+        let received = Accumulator<Playing>()
+        let stream = updater.playingStream
+        let consumer = Task {
+            for await playing in stream {
+                received.append(playing)
+            }
+        }
+        defer { consumer.cancel() }
+
+        await state.process(
+            Self.setStateMessage(
+                title: "Before Start",
+                artist: "The Apples",
+                album: "Remote Songs",
+                commands: SupportedCommands()
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(received.count, 0)
+        let continuationCountBeforeStart = await state._testContinuationCount()
+        XCTAssertEqual(continuationCountBeforeStart, 0)
+
+        try await updater.start()
+        let sawInitial = await eventually(timeoutNanoseconds: 500_000_000) {
+            received.values.contains { $0.title == "Before Start" }
+        }
+        XCTAssertTrue(sawInitial)
+
+        let didInstallForwarder = await eventually(timeoutNanoseconds: 500_000_000) {
+            await state._testContinuationCount() == 1
+        }
+        XCTAssertTrue(didInstallForwarder)
+
+        await state.process(
+            Self.setStateMessage(
+                title: "While Active",
+                artist: "The Apples",
+                album: "Remote Songs",
+                commands: SupportedCommands()
+            )
+        )
+        let sawActiveUpdate = await eventually(timeoutNanoseconds: 500_000_000) {
+            received.values.contains { $0.title == "While Active" }
+        }
+        XCTAssertTrue(sawActiveUpdate)
+
+        await updater.stop()
+        let didRemoveForwarder = await eventually(timeoutNanoseconds: 500_000_000) {
+            await state._testContinuationCount() == 0
+        }
+        XCTAssertTrue(didRemoveForwarder)
+
+        let countAfterStop = received.count
+        await state.process(
+            Self.setStateMessage(
+                title: "After Stop",
+                artist: "The Apples",
+                album: "Remote Songs",
+                commands: SupportedCommands()
+            )
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(received.count, countAfterStop)
     }
 
     func testMRPMessageTimestampConvertsSecondsToMicros() {
@@ -1167,6 +1267,24 @@ final class MRPPlayerStateTests: XCTestCase {
         )
     }
 
+    func testMRPHeartbeatStopDoesNotCloseHealthyConnection() async throws {
+        let transport = RecordingMRPTransport()
+        let handler = MRPProtocolHandler(
+            connection: transport,
+            playerState: MRPPlayerState(),
+            stateStore: MRPStateStore(),
+            authenticationMode: .alreadySecure,
+            heartbeatMode: .genericMessage,
+            runtimeRequestTimeout: 0.1
+        )
+
+        try await handler.start(settings: ATVSettings(), credentials: nil, requestTimeout: 0.1)
+        await handler.stop()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(transport.closeCount, 0)
+    }
+
     func testMRPCapabilitiesExposeSupportedMediaCommands() {
         let stateStore = MRPStateStore()
         let capabilities = MRPCapabilities(stateStore: stateStore)
@@ -1249,6 +1367,20 @@ final class MRPPlayerStateTests: XCTestCase {
         message.type = .setStateMessage
         message.setStateMessage = inner
         return message
+    }
+
+    private func eventually(
+        timeoutNanoseconds: UInt64,
+        _ predicate: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        let deadline = ContinuousClock.now + .nanoseconds(Int64(timeoutNanoseconds))
+        while ContinuousClock.now < deadline {
+            if await predicate() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return await predicate()
     }
 
     private static func mrpProtocolHandler(transport: RecordingMRPTransport) -> MRPProtocolHandler {

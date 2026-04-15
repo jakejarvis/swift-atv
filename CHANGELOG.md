@@ -73,6 +73,17 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Fixed
 
+- `AppleTVDevice.deviceEvents` now creates its stream atomically and replays a
+  pending terminal event to late subscribers instead of risking a stranded
+  continuation under concurrent access.
+- MRP push updates now follow pyatv-style start/stop semantics: streams do not
+  subscribe before `start()`, `start()` publishes the current state, `stop()`
+  stops forwarding updates, and cancelled initial delays leave the updater
+  inactive.
+- MRP heartbeat and AirPlay feedback-task cancellation no longer masquerade as
+  transport failure on clean shutdown.
+- Companion and MRP state waits now surface caller cancellation as
+  `ATVError.operationCancelled` instead of spinning until their state timeout.
 - Connection preflight now requires reusable HAP credentials for direct MRP,
   Companion, and Apple TV AirPlay MRP tunnels, so null, transient, or legacy
   credential strings no longer appear connectable.
