@@ -137,6 +137,28 @@ final class DeviceInfoTests: XCTestCase {
         XCTAssertEqual(info.version, "715.2")
     }
 
+    func testFromPropertiesCompanionMacAddress() {
+        let info = DeviceInfo.fromProperties(["rpMac": "aabbccddeeff"])
+
+        XCTAssertEqual(info.macAddress, "aabbccddeeff")
+    }
+
+    func testFromPropertiesUsesCaseInsensitiveKeys() {
+        let props = [
+            "MODEL": "AppleTV6,2",
+            "systembuildversion": "21K69",
+            "macaddress": "AA:BB:CC:DD:EE:FF",
+            "osname": "tvOS",
+        ]
+
+        let info = DeviceInfo.fromProperties(props)
+
+        XCTAssertEqual(info.model, .gen4K)
+        XCTAssertEqual(info.buildNumber, "21K69")
+        XCTAssertEqual(info.macAddress, "AA:BB:CC:DD:EE:FF")
+        XCTAssertEqual(info.operatingSystem, .tvOS)
+    }
+
     func testFromPropertiesKeepsBetterVersionOverCompanionVersion() {
         let props = [
             "osvers": "17.0",

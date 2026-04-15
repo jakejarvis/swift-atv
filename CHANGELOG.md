@@ -73,6 +73,10 @@ Pre-1.0: minor version bumps may contain breaking changes.
 
 ### Fixed
 
+- Relayer takeover release closures no longer clear a newer overlapping
+  takeover, keeping temporary protocol routing stable under nested callers.
+- Device info TXT parsing now handles case-insensitive keys and Companion
+  `rpMac`, improving scan metadata and client-identity collision checks.
 - AirPlay HAP transport now accepts larger inbound encrypted blocks seen on
   Apple TV DataStream channels while still splitting outbound frames into
   1024-byte chunks.

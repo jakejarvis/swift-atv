@@ -85,6 +85,40 @@ final class RelayerTests: XCTestCase {
         XCTAssertEqual(relayer.main, "mrp-impl")
     }
 
+    func testRelayerOverlappingTakeoverReleaseDoesNotClearNewerTakeover() {
+        let relayer = Relayer<String>()
+
+        relayer.register("mrp-impl", for: .mrp)
+        relayer.register("airplay-impl", for: .airPlay)
+        relayer.register("companion-impl", for: .companion)
+
+        let releaseCompanion = relayer.takeover(.companion)
+        XCTAssertEqual(relayer.main, "companion-impl")
+
+        let releaseAirPlay = relayer.takeover(.airPlay)
+        XCTAssertEqual(relayer.main, "airplay-impl")
+
+        releaseCompanion()
+        XCTAssertEqual(relayer.main, "airplay-impl")
+
+        releaseAirPlay()
+        XCTAssertEqual(relayer.main, "mrp-impl")
+    }
+
+    func testRelayerUnregisterClearsMatchingTakeover() {
+        let relayer = Relayer<String>()
+
+        relayer.register("mrp-impl", for: .mrp)
+        relayer.register("companion-impl", for: .companion)
+
+        _ = relayer.takeover(.companion)
+        XCTAssertEqual(relayer.main, "companion-impl")
+
+        relayer.unregister(for: .companion)
+
+        XCTAssertEqual(relayer.main, "mrp-impl")
+    }
+
     // MARK: - All implementations
 
     func testRelayerAll() {

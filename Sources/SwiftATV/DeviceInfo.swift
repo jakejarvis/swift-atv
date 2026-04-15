@@ -97,21 +97,21 @@ extension DeviceInfo {
 
     /// Create DeviceInfo from mDNS TXT record properties.
     ///
-    /// Recognizes common AirPlay/MRP/device-info keys and Companion `rpMd` /
-    /// `rpVr` metadata.
+    /// Recognizes common AirPlay/MRP/device-info keys and Companion `rpMd`,
+    /// `rpVr`, and `rpMac` metadata. TXT key lookup is case-insensitive.
     public static func fromProperties(_ properties: [String: String]) -> DeviceInfo {
         var info = DeviceInfo()
 
-        if let modelStr = properties["model"] ?? properties["am"] {
+        if let modelStr = property(properties, keys: ["model", "am"]) {
             info.modelString = modelStr
             info.model = lookupModel(identifier: modelStr)
         }
 
-        if let internalName = properties["internalName"], info.model == .unknown {
+        if let internalName = property(properties, keys: ["internalName"]), info.model == .unknown {
             info.model = lookupModel(internalName: internalName)
         }
 
-        if let companionModel = properties["rpMd"], !companionModel.isEmpty {
+        if let companionModel = property(properties, keys: ["rpMd"]), !companionModel.isEmpty {
             let model = lookupModel(identifier: companionModel)
             if info.modelString == nil || (info.model == .unknown && model != .unknown) {
                 info.modelString = companionModel
@@ -121,24 +121,38 @@ extension DeviceInfo {
             }
         }
 
-        if let osStr = properties["osvers"] ?? properties["OSVersion"] {
+        if let osStr = property(properties, keys: ["osvers", "OSVersion"]) {
             info.version = osStr
-        } else if let companionVersion = properties["rpVr"], !companionVersion.isEmpty {
+        } else if let companionVersion = property(properties, keys: ["rpVr"]), !companionVersion.isEmpty {
             info.version = companionVersion
         }
 
-        if let buildStr = properties["srcvers"] ?? properties["SystemBuildVersion"] {
+        if let buildStr = property(properties, keys: ["srcvers", "SystemBuildVersion"]) {
             info.buildNumber = buildStr
         }
 
-        if let osName = properties["OSName"] ?? properties["os"] {
+        if let osName = property(properties, keys: ["OSName", "os"]) {
             info.operatingSystem = lookupOS(name: osName)
         }
 
-        if let mac = properties["macAddress"] ?? properties["deviceid"] {
+        if let mac = property(properties, keys: ["macAddress", "macaddress", "deviceid", "rpMac"]) {
             info.macAddress = mac
         }
 
         return info
+    }
+
+    private static func property(_ properties: [String: String], keys: [String]) -> String? {
+        for key in keys {
+            if let value = properties[key] {
+                return value
+            }
+        }
+        for (propertyKey, value) in properties {
+            if keys.contains(where: { $0.caseInsensitiveCompare(propertyKey) == .orderedSame }) {
+                return value
+            }
+        }
+        return nil
     }
 }

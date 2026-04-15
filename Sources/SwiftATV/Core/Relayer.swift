@@ -23,6 +23,7 @@ public final class Relayer<Interface>: @unchecked Sendable {
     private var registrations: [Registration] = []
     private let priorities: [ATVProtocol]
     private var takeoverProtocol: ATVProtocol?
+    private var takeoverToken: UUID?
 
     /// Initialize with custom priorities.
     public init(priorities: [ATVProtocol] = Relayer.defaultPriorities) {
@@ -44,6 +45,7 @@ public final class Relayer<Interface>: @unchecked Sendable {
         registrations.removeAll { $0.protocol == `protocol` }
         if takeoverProtocol == `protocol` {
             takeoverProtocol = nil
+            takeoverToken = nil
         }
     }
 
@@ -86,14 +88,21 @@ public final class Relayer<Interface>: @unchecked Sendable {
     }
 
     /// Temporarily override priority to use a specific protocol.
-    /// Returns a closure that releases the takeover when called.
+    ///
+    /// Returns a closure that releases this takeover when called. If a later
+    /// takeover supersedes it, calling the older release closure has no effect.
     public func takeover(_ protocol: ATVProtocol) -> @Sendable () -> Void {
+        let token = UUID()
         lock.lock()
         takeoverProtocol = `protocol`
+        takeoverToken = token
         lock.unlock()
         return { [weak self] in
             self?.lock.lock()
-            self?.takeoverProtocol = nil
+            if self?.takeoverToken == token {
+                self?.takeoverProtocol = nil
+                self?.takeoverToken = nil
+            }
             self?.lock.unlock()
         }
     }
