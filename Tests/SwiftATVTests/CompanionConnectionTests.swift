@@ -484,10 +484,8 @@ struct CompanionConnectionTests {
         do {
             _ = try await connection.waitForFrame(type: .psNext, timeout: 60)
             Issue.record("Expected waitForFrame to throw")
-        } catch let err as ATVError {
+        } catch let err {
             thrown = err
-        } catch {
-            Issue.record("Unexpected error type: \(error)")
         }
         guard case .connectionLost = thrown else {
             Issue.record("Expected .connectionLost, got \(String(describing: thrown))")
@@ -508,10 +506,8 @@ struct CompanionConnectionTests {
         do {
             try await connection.connect()
             Issue.record("Expected connect to throw")
-        } catch let err as ATVError {
+        } catch let err {
             thrown = err
-        } catch {
-            Issue.record("Unexpected error type: \(error)")
         }
         guard case .connectionLost = thrown else {
             Issue.record("Expected .connectionLost, got \(String(describing: thrown))")
@@ -541,10 +537,8 @@ struct CompanionConnectionTests {
         do {
             try await connection.send(type: .eOPACK, payload: Data([0x01]))
             Issue.record("Expected send to throw")
-        } catch let err as ATVError {
+        } catch let err {
             thrown = err
-        } catch {
-            Issue.record("Unexpected error type: \(error)")
         }
         guard case .connectionLost = thrown else {
             Issue.record("Expected .connectionLost, got \(String(describing: thrown))")
@@ -563,10 +557,8 @@ struct CompanionConnectionTests {
         do {
             try await connection.send(type: .eOPACK, payload: Data([0x01]))
             Issue.record("Expected send to throw")
-        } catch let err as ATVError {
+        } catch let err {
             thrown = err
-        } catch {
-            Issue.record("Unexpected error type: \(error)")
         }
         guard case .connectionLost = thrown else {
             Issue.record("Expected .connectionLost, got \(String(describing: thrown))")
@@ -611,6 +603,35 @@ struct CompanionConnectionTests {
         if let firstError = delegate.closeErrors.first {
             #expect(firstError is FakeError)
         }
+    }
+
+    /// Delayed NIO callbacks or test injections after the terminal
+    /// close boundary must be ignored. Otherwise a parser/decrypt
+    /// failure can mark the connection closed, then a later chunk can
+    /// still be delivered to the protocol handler through the delegate.
+    @Test("frames delivered after peer-close are ignored")
+    func framesAfterPeerCloseAreIgnored() async throws {
+        final class CountingDelegate: CompanionConnectionDelegate, @unchecked Sendable {
+            let lock = NSLock()
+            private var _receiveCount = 0
+            var receiveCount: Int { lock.withLock { _receiveCount } }
+
+            func connectionDidReceiveFrame(_ frame: CompanionFrame) async {
+                lock.withLock { _receiveCount += 1 }
+            }
+
+            func connectionDidClose(error: Error?) async {}
+        }
+
+        let delegate = CountingDelegate()
+        let connection = CompanionConnection(host: "127.0.0.1", port: 0)
+        connection.delegate = delegate
+
+        connection.handleConnectionClosed(error: nil)
+        connection.handleReceivedData(encodeFrame(type: .pvNext, payload: Data([0x01])))
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(delegate.receiveCount == 0)
     }
 
     /// `CompanionProtocolHandler.startReceiving()` consumes

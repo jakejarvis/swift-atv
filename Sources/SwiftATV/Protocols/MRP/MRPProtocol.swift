@@ -200,6 +200,9 @@ internal func prepareMRPRequestForResponse(
 ) -> MRPPreparedRequest {
     var outbound = message
     let responseType = responseType ?? outbound.type
+    if !outbound.hasUniqueIdentifier || outbound.uniqueIdentifier.isEmpty {
+        outbound.uniqueIdentifier = UUID().uuidString
+    }
 
     // Crypto-pairing responses do not include identifiers. pyatv matches these
     // exchanges by message type and only allows one outstanding request.
@@ -609,6 +612,10 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
 
     internal func handleReceivedData(_ data: Data) {
         lock.lock()
+        if isClosed {
+            lock.unlock()
+            return
+        }
         receiveBuffer.append(data)
 
         while !receiveBuffer.isEmpty {
@@ -639,6 +646,10 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
                     return
                 }
                 lock.lock()
+                if isClosed {
+                    lock.unlock()
+                    return
+                }
             }
 
             let message: ProtocolMessageMessage
@@ -672,34 +683,38 @@ public final class MRPConnection: @unchecked Sendable, MRPTransport {
             }
 
             lock.lock()
+            if isClosed {
+                lock.unlock()
+                return
+            }
         }
 
         lock.unlock()
     }
 
     internal func handleConnectionClosed(error: Error?) {
-        let drained: (AsyncStream<ProtocolMessageMessage>.Continuation?, [PendingMRPWaiter])? =
+        let drained: (Channel?, AsyncStream<ProtocolMessageMessage>.Continuation?, [PendingMRPWaiter])? =
             lock.withLock {
                 if isClosed { return nil }
+                let ch = channel
                 let cont = messageContinuation
                 let drained = Array(waiters.values)
                 channel = nil
                 waiters.removeAll()
                 isClosed = true
                 state = .disconnected
-                return (cont, drained)
+                return (ch, cont, drained)
             }
         guard let drained else { return }
 
         let closureError: ATVError =
             error.map { ATVError.connectionLost("Connection closed: \(String(describing: $0))") }
             ?? .connectionLost("Connection closed")
-        resume(drained.1, with: closureError)
-        drained.0?.finish()
+        resume(drained.2, with: closureError)
+        drained.1?.finish()
         Task { [weak self] in
+            try? await drained.0?.close()
             await self?.delegate?.connectionDidClose(error: error)
-        }
-        Task { [weak self] in
             await self?.shutdownOwnedGroupIfNeeded()
         }
     }

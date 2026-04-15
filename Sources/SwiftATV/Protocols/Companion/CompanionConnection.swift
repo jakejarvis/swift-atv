@@ -60,8 +60,8 @@ private final class PendingFrameWaiter: @unchecked Sendable {
     let continuation: CheckedContinuation<Data, Error>
     var timeoutTask: Task<Void, Never>?
 
-    init(_ continuation: CheckedContinuation<Data, Error>) {
-        self.id = UUID()
+    init(id: UUID = UUID(), _ continuation: CheckedContinuation<Data, Error>) {
+        self.id = id
         self.continuation = continuation
     }
 }
@@ -325,88 +325,107 @@ public final class CompanionConnection: @unchecked Sendable {
     ) async throws(ATVError) -> Data {
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
         let responseType = waitType ?? Self.defaultResponseType(for: type)
+        let waiterID = UUID()
+        let context = TimeoutContext(
+            protocol: .companion,
+            operation: "frame",
+            requestID: "\(responseType)",
+            duration: timeout
+        )
 
         do {
-            return try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<Data, Error>) in
-                let waiter = PendingFrameWaiter(continuation)
-                let waiterID = waiter.id  // Sendable capture for the Task below
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation {
+                    (continuation: CheckedContinuation<Data, Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: ATVError.operationCancelled(context))
+                        return
+                    }
 
-                // 1. Install the waiter synchronously before any async work.
-                //    The install path also enforces the closed-state check
-                //    so a `close()` racing with this call cannot strand us.
-                switch tryInstallWaiter(type: responseType, waiter: waiter) {
-                case .connectionClosed:
-                    continuation.resume(
-                        throwing: ATVError.connectionLost("Connection is closed")
-                    )
-                    return
-                case .alreadyRegistered:
-                    continuation.resume(
-                        throwing: ATVError.invalidState(
-                            "Frame waiter for type \(responseType) already registered"
-                        ))
-                    return
-                case .installed:
-                    break
-                }
+                    let waiter = PendingFrameWaiter(id: waiterID, continuation)
 
-                // 2. Kick off the send + timeout in a child Task so the
-                //    withCheckedThrowingContinuation body stays synchronous.
-                let task = Task { [weak self] in
-                    guard let self else { return }
+                    // 1. Install the waiter synchronously before any async work.
+                    //    The install path also enforces the closed-state check
+                    //    so a `close()` racing with this call cannot strand us.
+                    switch tryInstallWaiter(type: responseType, waiter: waiter) {
+                    case .connectionClosed:
+                        continuation.resume(
+                            throwing: ATVError.connectionLost("Connection is closed")
+                        )
+                        return
+                    case .alreadyRegistered:
+                        continuation.resume(
+                            throwing: ATVError.invalidState(
+                                "Frame waiter for type \(responseType) already registered"
+                            ))
+                        return
+                    case .installed:
+                        break
+                    }
 
-                    // 2a. Send. If the send throws, surface it on the
-                    //     waiter — but only if our specific waiter is
-                    //     still the one registered for this frame type.
-                    do {
-                        try await self.send(type: type, payload: payload)
-                    } catch {
+                    // 2. Kick off the send + timeout in a child Task so the
+                    //    withCheckedThrowingContinuation body stays synchronous.
+                    let task = Task { [weak self] in
+                        guard let self else { return }
+
+                        // 2a. Send. If the send throws, surface it on the
+                        //     waiter — but only if our specific waiter is
+                        //     still the one registered for this frame type.
+                        do {
+                            try await self.send(type: type, payload: payload)
+                        } catch {
+                            if let removed = self.removeFrameWaiterIfOwned(
+                                type: responseType,
+                                id: waiterID
+                            ) {
+                                removed.continuation.resume(throwing: error)
+                            }
+                            return
+                        }
+
+                        // 2b. Timeout sleep. `Task.sleep` throws
+                        //     `CancellationError` when `handleReceivedData`
+                        //     cancels us after delivery, at which point we
+                        //     exit without touching the dict.
+                        do {
+                            try await Task.sleep(nanoseconds: timeoutNs)
+                        } catch {
+                            return
+                        }
+
+                        // 2c. Identity-checked removal — only surface timeout
+                        //     if our specific waiter is still the one registered.
                         if let removed = self.removeFrameWaiterIfOwned(
                             type: responseType,
                             id: waiterID
                         ) {
-                            removed.continuation.resume(throwing: error)
+                            removed.continuation.resume(
+                                throwing: ATVError.operationTimeout(context)
+                            )
                         }
-                        return
                     }
-
-                    // 2b. Timeout sleep. `Task.sleep` throws
-                    //     `CancellationError` when `handleReceivedData`
-                    //     cancels us after delivery, at which point we
-                    //     exit without touching the dict.
-                    do {
-                        try await Task.sleep(nanoseconds: timeoutNs)
-                    } catch {
-                        return
+                    // Publish the task handle under the same lock every other
+                    // reader holds, so `handleReceivedData` sees a consistent
+                    // view when it cancels on frame delivery.
+                    lock.withLock {
+                        if frameWaiters[responseType.rawValue]?.id == waiterID {
+                            waiter.timeoutTask = task
+                        } else {
+                            task.cancel()
+                        }
                     }
-
-                    // 2c. Identity-checked removal — only surface timeout
-                    //     if our specific waiter is still the one registered.
-                    if let removed = self.removeFrameWaiterIfOwned(
+                }
+            } onCancel: { [weak self] in
+                guard
+                    let removed = self?.removeFrameWaiterIfOwned(
                         type: responseType,
                         id: waiterID
-                    ) {
-                        removed.continuation.resume(
-                            throwing: ATVError.operationTimeout(
-                                TimeoutContext(
-                                    protocol: .companion,
-                                    operation: "frame",
-                                    requestID: "\(responseType)",
-                                    duration: timeout
-                                )
-                            )
-                        )
-                    }
+                    )
+                else {
+                    return
                 }
-                // Publish the task handle under the same lock every other
-                // reader holds, so `handleReceivedData` sees a consistent
-                // view when it cancels on frame delivery.
-                lock.withLock {
-                    if frameWaiters[responseType.rawValue]?.id == waiterID {
-                        waiter.timeoutTask = task
-                    }
-                }
+                removed.timeoutTask?.cancel()
+                removed.continuation.resume(throwing: ATVError.operationCancelled(context))
             }
         } catch let err as ATVError {
             throw err
@@ -441,53 +460,68 @@ public final class CompanionConnection: @unchecked Sendable {
     /// stale timeout from a previous wait cannot steal this one.
     public func waitForFrame(type: CompanionFrameType, timeout: TimeInterval = 5.0) async throws(ATVError) -> Data {
         let timeoutNs = try timeoutNanoseconds(from: timeout, parameterName: "timeout")
+        let waiterID = UUID()
+        let context = TimeoutContext(
+            protocol: .companion,
+            operation: "frame",
+            requestID: "\(type)",
+            duration: timeout
+        )
+
         do {
-            return try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<Data, Error>) in
-                let waiter = PendingFrameWaiter(continuation)
-                let waiterID = waiter.id
-
-                switch tryInstallWaiter(type: type, waiter: waiter) {
-                case .connectionClosed:
-                    continuation.resume(
-                        throwing: ATVError.connectionLost("Connection is closed")
-                    )
-                    return
-                case .alreadyRegistered:
-                    continuation.resume(
-                        throwing: ATVError.invalidState(
-                            "Frame waiter for type \(type) already registered"
-                        ))
-                    return
-                case .installed:
-                    break
-                }
-
-                let task = Task { [weak self] in
-                    do {
-                        try await Task.sleep(nanoseconds: timeoutNs)
-                    } catch {
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation {
+                    (continuation: CheckedContinuation<Data, Error>) in
+                    if Task.isCancelled {
+                        continuation.resume(throwing: ATVError.operationCancelled(context))
                         return
                     }
-                    guard let self else { return }
-                    if let removed = self.removeFrameWaiterIfOwned(type: type, id: waiterID) {
-                        removed.continuation.resume(
-                            throwing: ATVError.operationTimeout(
-                                TimeoutContext(
-                                    protocol: .companion,
-                                    operation: "frame",
-                                    requestID: "\(type)",
-                                    duration: timeout
-                                )
-                            )
+
+                    let waiter = PendingFrameWaiter(id: waiterID, continuation)
+
+                    switch tryInstallWaiter(type: type, waiter: waiter) {
+                    case .connectionClosed:
+                        continuation.resume(
+                            throwing: ATVError.connectionLost("Connection is closed")
                         )
+                        return
+                    case .alreadyRegistered:
+                        continuation.resume(
+                            throwing: ATVError.invalidState(
+                                "Frame waiter for type \(type) already registered"
+                            ))
+                        return
+                    case .installed:
+                        break
+                    }
+
+                    let task = Task { [weak self] in
+                        do {
+                            try await Task.sleep(nanoseconds: timeoutNs)
+                        } catch {
+                            return
+                        }
+                        guard let self else { return }
+                        if let removed = self.removeFrameWaiterIfOwned(type: type, id: waiterID) {
+                            removed.continuation.resume(
+                                throwing: ATVError.operationTimeout(context)
+                            )
+                        }
+                    }
+                    lock.withLock {
+                        if frameWaiters[type.rawValue]?.id == waiterID {
+                            waiter.timeoutTask = task
+                        } else {
+                            task.cancel()
+                        }
                     }
                 }
-                lock.withLock {
-                    if frameWaiters[type.rawValue]?.id == waiterID {
-                        waiter.timeoutTask = task
-                    }
+            } onCancel: { [weak self] in
+                guard let removed = self?.removeFrameWaiterIfOwned(type: type, id: waiterID) else {
+                    return
                 }
+                removed.timeoutTask?.cancel()
+                removed.continuation.resume(throwing: ATVError.operationCancelled(context))
             }
         } catch let err as ATVError {
             throw err
@@ -626,6 +660,10 @@ public final class CompanionConnection: @unchecked Sendable {
         return (ch, cont)
     }
 
+    internal var _testPendingFrameWaiterCount: Int {
+        lock.withLock { frameWaiters.count }
+    }
+
     /// Resume every waiter with the same error and cancel their timeout
     /// tasks so they don't linger.
     private func resumeWaiters(_ waiters: [PendingFrameWaiter], with error: ATVError) {
@@ -642,6 +680,10 @@ public final class CompanionConnection: @unchecked Sendable {
     /// synthesized frames without a live TCP connection.
     internal func handleReceivedData(_ data: Data) {
         lock.lock()
+        if isClosed {
+            lock.unlock()
+            return
+        }
         receiveBuffer.append(data)
 
         while receiveBuffer.count >= Self.headerLength {
@@ -671,6 +713,10 @@ public final class CompanionConnection: @unchecked Sendable {
                     return
                 }
                 lock.lock()
+                if isClosed {
+                    lock.unlock()
+                    return
+                }
             }
 
             let frame = CompanionFrame(type: frameType, payload: payload)
@@ -692,6 +738,10 @@ public final class CompanionConnection: @unchecked Sendable {
             }
 
             lock.lock()
+            if isClosed {
+                lock.unlock()
+                return
+            }
         }
 
         lock.unlock()
@@ -724,16 +774,18 @@ public final class CompanionConnection: @unchecked Sendable {
         // idempotent against NIO's two-call disconnect sequence.
         let drained:
             (
+                ch: Channel?,
                 cont: AsyncStream<CompanionFrame>.Continuation?,
                 waiters: [PendingFrameWaiter]
             )? = lock.withLock {
                 if isClosed { return nil }
+                let ch = channel
                 let cont = frameContinuation
                 let waiters = Array(frameWaiters.values)
                 frameWaiters.removeAll()
                 channel = nil
                 isClosed = true
-                return (cont, waiters)
+                return (ch, cont, waiters)
             }
 
         // Already closed → nothing to do. The first caller already
@@ -744,12 +796,11 @@ public final class CompanionConnection: @unchecked Sendable {
             error.map { ATVError.connectionLost("Connection closed: \(String(describing: $0))") }
             ?? .connectionLost("Connection closed")
         resumeWaiters(drained.waiters, with: closureError)
+        drained.cont?.finish()
 
         Task { [weak self] in
+            try? await drained.ch?.close()
             await self?.delegate?.connectionDidClose(error: error)
-        }
-        drained.cont?.finish()
-        Task { [weak self] in
             await self?.shutdownOwnedGroupIfNeeded()
         }
     }

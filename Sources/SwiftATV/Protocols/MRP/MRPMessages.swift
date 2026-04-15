@@ -4,7 +4,8 @@ enum MRPMessages {
     static func base(_ type: ProtocolMessageMessage.TypeEnum) -> ProtocolMessageMessage {
         var message = ProtocolMessageMessage()
         message.type = type
-        message.identifier = UUID().uuidString
+        message.errorCode = .noError
+        message.uniqueIdentifier = UUID().uuidString
         message.timestamp = timestampMicros()
         return message
     }

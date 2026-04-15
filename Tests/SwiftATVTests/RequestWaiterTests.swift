@@ -3,6 +3,18 @@ import Testing
 
 @testable import SwiftATV
 
+private final class CountingMRPDelegate: MRPConnectionDelegate, @unchecked Sendable {
+    let lock = NSLock()
+    private var _receiveCount = 0
+    var receiveCount: Int { lock.withLock { _receiveCount } }
+
+    func connectionDidReceiveMessage(_ message: ProtocolMessageMessage) async {
+        lock.withLock { _receiveCount += 1 }
+    }
+
+    func connectionDidClose(error: Error?) async {}
+}
+
 @Suite("Request waiters")
 struct RequestWaiterTests {
     private func waitForInstall() async {
@@ -76,6 +88,7 @@ struct RequestWaiterTests {
 
         #expect(request.type == .cryptoPairingMessage)
         #expect(!request.hasIdentifier)
+        #expect(request.hasUniqueIdentifier)
         #expect(crypto.hasIsRetrying)
         #expect(!crypto.isRetrying)
         #expect(crypto.hasIsUsingSystemPairing)
@@ -85,6 +98,20 @@ struct RequestWaiterTests {
         #expect(prepared.responseIdentifier == nil)
         #expect(prepared.responseType == .cryptoPairingMessage)
         #expect(!prepared.message.hasIdentifier)
+        #expect(prepared.message.hasUniqueIdentifier)
+    }
+
+    @Test("MRP response preparation adds identifiers without dropping unique identifiers")
+    func mrpResponsePreparationAddsIdentifiersWithoutDroppingUniqueIdentifiers() {
+        let request = MRPMessages.generic()
+        let prepared = prepareMRPRequestForResponse(request, responseType: nil)
+
+        #expect(!request.hasIdentifier)
+        #expect(request.hasUniqueIdentifier)
+        #expect(prepared.message.hasIdentifier)
+        #expect(prepared.responseIdentifier == prepared.message.identifier)
+        #expect(prepared.message.uniqueIdentifier == request.uniqueIdentifier)
+        #expect(prepared.responseType == .genericMessage)
     }
 
     @Test("MRP pair-setup start request uses pairing state")
@@ -119,6 +146,19 @@ struct RequestWaiterTests {
         #expect(response.type == .cryptoPairingMessage)
         #expect(!response.hasIdentifier)
         #expect(connection._testPendingWaiterCount == 0)
+    }
+
+    @Test("direct MRP ignores messages delivered after close")
+    func directMRPIgnoresMessagesDeliveredAfterClose() async throws {
+        let delegate = CountingMRPDelegate()
+        let connection = MRPConnection(host: "127.0.0.1", port: 0)
+        connection.delegate = delegate
+
+        connection.handleConnectionClosed(error: nil)
+        connection.handleReceivedData(try frame(protocolMessage(type: .genericMessage)))
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(delegate.receiveCount == 0)
     }
 
     @Test("AirPlay MRP tunnel waiter requires matching identifier and response type")
@@ -181,6 +221,24 @@ struct RequestWaiterTests {
         #expect(response.type == .cryptoPairingMessage)
         #expect(!response.hasIdentifier)
         #expect(transport._testPendingWaiterCount == 0)
+    }
+
+    @Test("AirPlay MRP tunnel ignores messages delivered after close")
+    func airPlayMRPTunnelIgnoresMessagesDeliveredAfterClose() async throws {
+        let delegate = CountingMRPDelegate()
+        let transport = AirPlayMRPTunnelTransport(
+            host: "127.0.0.1",
+            port: 7000,
+            credentialCandidates: [],
+            settings: ATVSettings()
+        )
+        transport.delegate = delegate
+
+        await transport.close()
+        transport._testHandleReceivedMessage(protocolMessage(type: .genericMessage))
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(delegate.receiveCount == 0)
     }
 
     @Test("direct MRP waiter is cancellation-aware")
@@ -247,5 +305,17 @@ struct RequestWaiterTests {
         task.cancel()
         await expectOperationCancelled(task)
         #expect(await handler._testPendingRequestCount() == 0)
+    }
+
+    @Test("Companion frame waiter is cancellation-aware")
+    func companionFrameWaiterCancellationRemovesWaiter() async {
+        let connection = CompanionConnection(host: "127.0.0.1", port: 0)
+        let task = Task { try await connection.waitForFrame(type: .psNext, timeout: 60) }
+        await waitForInstall()
+        #expect(connection._testPendingFrameWaiterCount == 1)
+
+        task.cancel()
+        await expectOperationCancelled(task)
+        #expect(connection._testPendingFrameWaiterCount == 0)
     }
 }

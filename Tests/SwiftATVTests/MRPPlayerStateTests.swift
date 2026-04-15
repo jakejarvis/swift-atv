@@ -107,6 +107,17 @@ final class MRPPlayerStateTests: XCTestCase {
         XCTAssertEqual(MRPMessages.timestampMicros(from: Double.greatestFiniteMagnitude), UInt64.max)
     }
 
+    func testMRPBaseMessagesUsePyatvEnvelopeShape() {
+        let message = MRPMessages.generic()
+
+        XCTAssertEqual(message.type, .genericMessage)
+        XCTAssertFalse(message.hasIdentifier)
+        XCTAssertTrue(message.hasUniqueIdentifier)
+        XCTAssertFalse(message.uniqueIdentifier.isEmpty)
+        XCTAssertTrue(message.hasErrorCode)
+        XCTAssertEqual(message.errorCode, .noError)
+    }
+
     func testVarintRoundTrip() throws {
         let values = [0, 1, 127, 128, 300, 16_384, Int(UInt32.max)]
 

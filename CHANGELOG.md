@@ -76,9 +76,11 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - AirPlay HAP transport now accepts larger inbound encrypted blocks seen on
   Apple TV DataStream channels while still splitting outbound frames into
   1024-byte chunks.
-- Direct MRP crypto-pairing requests now use the pyatv-compatible protobuf
-  envelope, including identifierless request/response matching, retry/system
-  pairing flags, and the pair-setup start state.
+- MRP requests now use the pyatv-compatible protobuf envelope: every outbound
+  message carries `uniqueIdentifier` / `noError`, fire-and-forget messages no
+  longer carry stray response identifiers, and direct MRP crypto-pairing uses
+  identifierless request/response matching, retry/system pairing flags, and the
+  pair-setup start state.
 - Companion encryption now uses pyatv-compatible 12-byte nonce layout, so
   encrypted Companion sessions continue working after the first frame.
 - OPACK now accepts and emits the canonical `0x07` representation for `-1`.
@@ -138,9 +140,12 @@ Pre-1.0: minor version bumps may contain breaking changes.
 - Direct MRP and AirPlay-tunneled MRP response waiters now match on both
   request identifier and expected response type, preventing same-id wrong-type
   messages from resuming the wrong caller.
-- Direct MRP, AirPlay-tunneled MRP, AirPlay TCP, Companion request, and scanner
-  waiters now remove their owned waiter and cancel timeout work when the caller
-  task is cancelled.
+- Direct MRP, AirPlay-tunneled MRP, and Companion connections now close their
+  underlying channel on fatal receive/decrypt errors and ignore delayed input
+  after terminal close.
+- Direct MRP, AirPlay-tunneled MRP, AirPlay TCP, Companion frame/request, and
+  scanner waiters now remove their owned waiter and cancel timeout work when the
+  caller task is cancelled.
 - AirPlay `.notNeeded` pairing preflight now reflects MRP-tunnel credential
   requirements, so apps do not report "no pairing needed" while the tunnel is
   blocked by missing credentials.

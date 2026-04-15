@@ -39,6 +39,11 @@ private typealias AirPlayTunnelCloseDrain = (
     AirPlayDataStreamChannel?
 )
 
+private typealias AirPlayMRPDelivery = (
+    PendingAirPlayMRPWaiter?,
+    AsyncStream<ProtocolMessageMessage>.Continuation?
+)
+
 /// MRP transport carried over an AirPlay 2 remote-control data stream.
 internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTransport {
     private let host: String
@@ -469,7 +474,10 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
     private func handleReceivedMessage(_ message: ProtocolMessageMessage) {
         let idKey = AirPlayMRPWaiterKey(identifier: message.identifier, type: message.type)
         let typeKey = AirPlayMRPWaiterKey(identifier: nil, type: message.type)
-        let delivery = lock.withLock {
+        let delivery: AirPlayMRPDelivery? = lock.withLock {
+            if isClosed {
+                return nil
+            }
             let waiter =
                 if message.hasIdentifier, !message.identifier.isEmpty {
                     waiters.removeValue(forKey: idKey)
@@ -477,6 +485,9 @@ internal final class AirPlayMRPTunnelTransport: @unchecked Sendable, MRPTranspor
                     waiters.removeValue(forKey: typeKey)
                 }
             return (waiter, messageContinuation)
+        }
+        guard let delivery else {
+            return
         }
 
         delivery.0?.timeoutTask?.cancel()
